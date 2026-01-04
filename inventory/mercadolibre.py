@@ -5,6 +5,7 @@ from datetime import timedelta
 from decimal import Decimal
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 
 from django.conf import settings
 from django.utils import timezone
@@ -69,9 +70,19 @@ def _token_request(payload: dict) -> dict:
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         method="POST",
     )
-    with urlopen(req, timeout=30) as resp:
-        raw = resp.read()
-    return json.loads(raw.decode("utf-8") or "{}")
+    try:
+        with urlopen(req, timeout=30) as resp:
+            raw = resp.read()
+        return json.loads(raw.decode("utf-8") or "{}")
+    except HTTPError as exc:
+        raw = exc.read().decode("utf-8") if exc.fp else ""
+        try:
+            payload = json.loads(raw or "{}")
+        except json.JSONDecodeError:
+            payload = {"error_description": raw or str(exc)}
+        payload.setdefault("error", "http_error")
+        payload.setdefault("status", exc.code)
+        return payload
 
 
 def exchange_code_for_token(code: str) -> dict:

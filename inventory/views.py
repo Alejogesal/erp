@@ -1367,6 +1367,12 @@ def mercadolibre_callback(request):
         messages.error(request, "State inválido en el callback de MercadoLibre.")
         return redirect("inventory_mercadolibre_dashboard")
     token_data = ml.exchange_code_for_token(code)
+    if token_data.get("error"):
+        messages.error(
+            request,
+            f"No se pudo conectar con MercadoLibre. {token_data.get('error_description', token_data.get('error'))}",
+        )
+        return redirect("inventory_mercadolibre_dashboard")
     access_token = token_data.get("access_token")
     refresh_token = token_data.get("refresh_token", "")
     expires_in = int(token_data.get("expires_in", 0) or 0)
