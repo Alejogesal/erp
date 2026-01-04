@@ -6,6 +6,7 @@ from decimal import Decimal
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
+import os
 
 from django.conf import settings
 from django.utils import timezone
@@ -126,10 +127,11 @@ def get_valid_access_token(connection: MercadoLibreConnection) -> str:
     return connection.access_token
 
 
-def get_item_ids(user_id: str, access_token: str) -> list[str]:
+def get_item_ids(user_id: str, access_token: str, max_items: int | None = None) -> tuple[list[str], bool]:
     item_ids: list[str] = []
     offset = 0
     limit = 50
+    truncated = False
     while True:
         data = _request(
             "GET",
@@ -139,10 +141,14 @@ def get_item_ids(user_id: str, access_token: str) -> list[str]:
         )
         results = data.get("results") or []
         item_ids.extend(results)
+        if max_items is not None and len(item_ids) >= max_items:
+            item_ids = item_ids[:max_items]
+            truncated = True
+            break
         if len(results) < limit:
             break
         offset += limit
-    return item_ids
+    return item_ids, truncated
 
 
 def get_item(item_id: str, access_token: str) -> dict:
@@ -230,7 +236,9 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user) -> SyncResult
         connection.nickname = profile.get("nickname", "") or ""
         connection.save(update_fields=["ml_user_id", "nickname"])
 
-    item_ids = get_item_ids(connection.ml_user_id, access_token)
+    max_items_env = os.environ.get("ML_SYNC_MAX_ITEMS", "")
+    max_items = int(max_items_env) if max_items_env.isdigit() else None
+    item_ids, truncated = get_item_ids(connection.ml_user_id, access_token, max_items=max_items)
     products = list(Product.objects.all())
     product_index = _build_product_index(products)
     ml_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.MERCADOLIBRE).first()
@@ -281,6 +289,8 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user) -> SyncResult
     connection.last_metrics_at = timezone.now()
     connection.save(update_fields=["last_sync_at", "last_metrics", "last_metrics_at"])
 
+    if truncated:
+        metrics = {**metrics, "truncated": True, "max_items": max_items}
     return SyncResult(total, matched, unmatched, updated_stock, metrics)
 
 

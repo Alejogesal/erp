@@ -1419,11 +1419,13 @@ def mercadolibre_dashboard(request):
             else:
                 result = ml.sync_items_and_stock(connection, request.user)
                 metrics = result.metrics
-                messages.success(
-                    request,
+                notice = (
                     f"Sync OK. Items: {result.total_items}, Matcheados: {result.matched}, "
-                    f"Sin match: {result.unmatched}, Stock actualizado: {result.updated_stock}.",
+                    f"Sin match: {result.unmatched}, Stock actualizado: {result.updated_stock}."
                 )
+                if metrics.get("truncated"):
+                    notice += " (Sync limitado por configuración)"
+                messages.success(request, notice)
 
     return render(
         request,
