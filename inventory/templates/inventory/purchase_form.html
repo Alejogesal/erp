@@ -1,0 +1,77 @@
+{% extends "inventory/base.html" %}
+{% block title %}Registrar compra{% endblock %}
+{% block content %}
+<h1>Registrar compra</h1>
+<p class="subtitle">Ingresá stock y actualizá el costo promedio.</p>
+<div class="card">
+    <form method="post">
+        {% csrf_token %}
+        <h3>Depósito</h3>
+        {{ form.as_p }}
+        {{ formset.non_form_errors }}
+        <h3>Productos</h3>
+        {{ formset.management_form }}
+        <table>
+            <thead>
+                <tr>
+                    <th>Producto</th>
+                    <th>Proveedor</th>
+                    <th>Cantidad</th>
+                    <th>Costo unitario</th>
+                    <th>IVA %</th>
+                    <th>Eliminar</th>
+                </tr>
+            </thead>
+            <tbody id="items-body">
+                {% for item_form in formset.forms %}
+                <tr>
+                    <td>{{ item_form.product }}</td>
+                    <td>{{ item_form.supplier }}</td>
+                    <td>{{ item_form.quantity }}</td>
+                    <td>{{ item_form.unit_cost }}</td>
+                    <td>{{ item_form.vat_percent }}</td>
+                    <td>{% if formset.can_delete %}{{ item_form.DELETE }}{% endif %}</td>
+                </tr>
+                {% if item_form.errors %}
+                <tr>
+                    <td colspan="6">{{ item_form.errors }}</td>
+                </tr>
+                {% endif %}
+                {% endfor %}
+            </tbody>
+        </table>
+        <button type="button" id="add-item">Agregar producto</button>
+        <button type="submit">Registrar compra</button>
+    </form>
+</div>
+<script>
+    (function() {
+        const addBtn = document.getElementById("add-item");
+        const body = document.getElementById("items-body");
+        const totalForms = document.getElementById("id_form-TOTAL_FORMS");
+        addBtn.addEventListener("click", () => {
+            const idx = parseInt(totalForms.value, 10);
+            const emptyHtml = `{{ formset.empty_form.as_p|escapejs }}`.replace(/__prefix__/g, `form-${idx}`);
+            const container = document.createElement("div");
+            container.innerHTML = emptyHtml;
+
+            const tr = document.createElement("tr");
+            const product = container.querySelector("[name$='-product']");
+            const supplier = container.querySelector("[name$='-supplier']");
+            const qty = container.querySelector("[name$='-quantity']");
+            const cost = container.querySelector("[name$='-unit_cost']");
+            const vat = container.querySelector("[name$='-vat_percent']");
+            const deleteField = container.querySelector("[name$='-DELETE']");
+
+            [product, supplier, qty, cost, vat, deleteField].forEach(field => {
+                const td = document.createElement("td");
+                if (field) td.appendChild(field);
+                tr.appendChild(td);
+            });
+
+            totalForms.value = idx + 1;
+            body.appendChild(tr);
+        });
+    })();
+</script>
+{% endblock %}

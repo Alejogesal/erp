@@ -1,0 +1,17 @@
+{% extends "inventory/base.html" %}
+{% block title %}MercadoLibre Callback{% endblock %}
+{% block content %}
+<h1>Conexión MercadoLibre</h1>
+<p class="subtitle">Callback recibido. Guardá estos datos para terminar la configuración.</p>
+<div class="card">
+    {% if error %}
+        <p><strong>Error:</strong> {{ error }}</p>
+        {% if error_description %}
+        <p>{{ error_description }}</p>
+        {% endif %}
+    {% else %}
+        <p><strong>Code:</strong> {{ code|default:"(no recibido)" }}</p>
+        <p><strong>State:</strong> {{ state|default:"(sin state)" }}</p>
+    {% endif %}
+</div>
+{% endblock %}

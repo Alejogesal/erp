@@ -1,0 +1,181 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Inventory{% endblock %}</title>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --panel: #161b22;
+            --accent: #2f81f7;
+            --text: #e6edf3;
+            --muted: #8b949e;
+            --positive: #2ea043;
+            --negative: #f85149;
+        }
+    body {
+        margin: 0;
+        font-family: "Inter", system-ui, -apple-system, sans-serif;
+        background: radial-gradient(circle at 10% 20%, rgba(47, 129, 247, 0.15), transparent 25%),
+                    radial-gradient(circle at 90% 10%, rgba(46, 160, 67, 0.12), transparent 20%),
+                    var(--bg);
+        color: var(--text);
+        min-height: 100vh;
+    }
+    .page {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 32px 20px 80px;
+        display: grid;
+        grid-template-columns: 220px 1fr;
+        gap: 24px;
+        align-items: start;
+    }
+        h1 {
+            margin: 0 0 12px;
+            font-size: 28px;
+            letter-spacing: -0.5px;
+        }
+        .subtitle {
+            color: var(--muted);
+            margin-bottom: 20px;
+        }
+        .card {
+            background: linear-gradient(145deg, var(--panel), #111721);
+            border: 1px solid #1f2630;
+            border-radius: 14px;
+            padding: 18px;
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+        }
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 16px;
+        }
+        .card-title {
+            color: var(--muted);
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            margin-bottom: 8px;
+        }
+        .value {
+            font-size: 28px;
+            font-weight: 700;
+            margin: 0;
+        }
+        .delta {
+            margin-top: 6px;
+            font-size: 14px;
+            color: var(--positive);
+        }
+        .delta.negative { color: var(--negative); }
+        .table-card { margin-top: 24px; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 8px;
+        }
+        th, td { text-align: left; padding: 12px 10px; }
+        th {
+            font-size: 13px;
+            color: var(--muted);
+            border-bottom: 1px solid #242c37;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        tr + tr td { border-top: 1px solid #1f2630; }
+        tr:hover td { background: rgba(47, 129, 247, 0.05); }
+        form p { margin: 0 0 12px; }
+        form label {
+            display: block;
+            font-size: 13px;
+            color: var(--muted);
+            margin-bottom: 4px;
+        }
+        form input, form select {
+            width: 100%;
+            padding: 10px;
+            border-radius: 10px;
+            border: 1px solid #2a313c;
+            background: #0f1622;
+            color: var(--text);
+        }
+        button {
+            background: var(--accent);
+            border: none;
+            padding: 10px 14px;
+            border-radius: 10px;
+            color: white;
+            cursor: pointer;
+            font-weight: 700;
+        }
+        button:hover { opacity: 0.95; }
+    .actions {
+        margin: 12px 0 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        align-items: stretch;
+        position: sticky;
+        top: 20px;
+        height: fit-content;
+    }
+        .pill {
+            padding: 10px 14px;
+            border-radius: 10px;
+            border: 1px solid #2a313c;
+            background: #0f1622;
+            color: var(--text);
+            text-decoration: none;
+            font-weight: 600;
+        }
+        .pill:hover { border-color: var(--accent); color: var(--accent); }
+        .messages { margin-bottom: 12px; padding: 0; }
+        .messages li {
+            list-style: none;
+            padding: 10px 12px;
+            border-radius: 10px;
+            margin-bottom: 8px;
+            background: rgba(46, 160, 67, 0.1);
+            border: 1px solid rgba(46, 160, 67, 0.3);
+        }
+        .main {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="actions">
+            <a class="pill" href="{% url 'inventory_dashboard' %}">Dashboard</a>
+            <a class="pill" href="{% url 'inventory_product_costs' %}">Productos</a>
+            <a class="pill" href="{% url 'inventory_product_prices' %}">Lista de precios</a>
+            <a class="pill" href="{% url 'inventory_purchases_list' %}">Compras</a>
+            <a class="pill" href="{% url 'inventory_sales_list' %}">Ventas</a>
+            <a class="pill" href="{% url 'inventory_taxes' %}">Impuestos</a>
+            <a class="pill" href="{% url 'inventory_stock_list' %}">Stock</a>
+            <a class="pill" href="{% url 'inventory_mercadolibre_dashboard' %}">MercadoLibre</a>
+            <a class="pill" href="{% url 'inventory_customers' %}">Clientes</a>
+            <a class="pill" href="{% url 'inventory_suppliers' %}">Proveedores</a>
+            {% if user.is_authenticated %}
+            <a class="pill" href="{% url 'password_change' %}">Cambiar contraseña</a>
+            {% endif %}
+        </div>
+        <div class="main">
+            {% if messages %}
+            <ul class="messages">
+                {% for message in messages %}
+                <li>{{ message }}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+            {% block content %}{% endblock %}
+        </div>
+    </div>
+</body>
+</html>

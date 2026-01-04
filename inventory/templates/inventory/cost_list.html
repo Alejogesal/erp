@@ -1,0 +1,247 @@
+{% extends "inventory/base.html" %}
+{% block title %}Productos{% endblock %}
+{% block content %}
+<style>
+    .page { max-width: 1400px; }
+    .product-filter {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        border-radius: 12px;
+        background: #0f1622;
+        border: 1px solid #2a313c;
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+    }
+    .product-filter input {
+        background: transparent;
+        border: none;
+        color: var(--text);
+        width: 100%;
+        padding: 4px 2px;
+        font-size: 14px;
+    }
+    .product-filter input:focus { outline: none; }
+    .product-filter .hint {
+        font-size: 12px;
+        color: var(--muted);
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
+        white-space: nowrap;
+    }
+    .danger {
+        background: var(--negative);
+    }
+</style>
+<h1>Productos</h1>
+<p class="subtitle">Cargá productos y editá costos, SKU, nombre y proveedor.</p>
+
+<div class="card" style="margin-bottom:16px;">
+    <div class="card-title">Nuevo producto</div>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="create_product">
+        {{ product_form.as_p }}
+        <button type="submit">Guardar producto</button>
+    </form>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+    <div class="card-title">Importar costos</div>
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="import_costs">
+        <p>
+            <label for="file">Archivo XLSX</label>
+            <input id="file" name="file" type="file" accept=".xlsx">
+        </p>
+        <button type="submit">Importar</button>
+    </form>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+    <div class="card-title">Eliminar productos importados</div>
+    <form method="post" enctype="multipart/form-data" onsubmit="return confirm('¿Eliminar productos del archivo? Solo se borran los que no tienen movimientos.');">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="delete_import">
+        <p>
+            <label for="delete_file">Archivo XLSX</label>
+            <input id="delete_file" name="file" type="file" accept=".xlsx">
+        </p>
+        <button type="submit">Eliminar importación</button>
+    </form>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+    <div class="card-title">Buscar productos</div>
+    <form method="get">
+        <p>
+            <label for="q">Coincidencia</label>
+            <input id="q" name="q" type="text" value="{{ query }}" placeholder="Nombre, marca o proveedor" list="product-options">
+            <datalist id="product-options">
+                {% for form in formset %}
+                <option value="{{ form.initial.name }}"></option>
+                {% if form.initial.group %}
+                <option value="{{ form.initial.group }}"></option>
+                {% endif %}
+                {% endfor %}
+            </datalist>
+        </p>
+        <button type="submit">Buscar</button>
+    </form>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+    <div class="card-title">Edición masiva (sobre los resultados filtrados)</div>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="bulk_update">
+        <div class="cards" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
+            <div>
+                {{ bulk_form.group.label_tag }}
+                <input name="{{ bulk_form.group.name }}" id="{{ bulk_form.group.id_for_label }}" type="text" list="group-options">
+                <datalist id="group-options">
+                    {% for group in group_options %}
+                    <option value="{{ group }}"></option>
+                    {% endfor %}
+                </datalist>
+            </div>
+            <div>
+                {{ bulk_form.supplier.label_tag }}
+                {{ bulk_form.supplier }}
+            </div>
+            <div>
+                {{ bulk_form.cost_percent.label_tag }}
+                {{ bulk_form.cost_percent }}
+                {% if bulk_form.cost_percent.help_text %}
+                <p style="color: var(--muted); font-size: 12px; margin: 4px 0 0;">
+                    {{ bulk_form.cost_percent.help_text }}
+                </p>
+                {% endif %}
+            </div>
+        </div>
+        <div style="margin-top:12px;">
+            <button type="submit">Aplicar cambios</button>
+        </div>
+    </form>
+</div>
+
+<div class="card table-card" id="productos">
+    <div class="card-title">Productos</div>
+    <div style="margin: 8px 0 12px;">
+        <div class="product-filter">
+            <span class="hint">Buscar</span>
+            <input id="product-filter" type="text" placeholder="Producto, marca o proveedor">
+        </div>
+    </div>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="update_costs">
+        {{ formset.management_form }}
+        <table>
+            <thead>
+                <tr>
+                <th>Producto</th>
+                <th>Marca / Grupo</th>
+                <th>Proveedor</th>
+                <th>IVA %</th>
+                <th>Costo unitario</th>
+                <th>Acciones</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for form in formset %}
+            <tr>
+                    <td>
+                        {{ form.product_id }}
+                        {{ form.name }}
+                        {{ form.name.errors }}
+                    </td>
+                    <td>
+                        {{ form.group }}
+                        {{ form.group.errors }}
+                    </td>
+                    <td>{{ form.supplier }}</td>
+                    <td>{{ form.vat_percent }}</td>
+                    <td>{{ form.avg_cost }}</td>
+                    <td>
+                        <button type="button" class="danger" data-product-id="{{ form.product_id.value }}">Eliminar</button>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="6">Aún no hay productos cargados.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <div style="margin-top:16px;">
+            <button type="submit">Guardar costos</button>
+        </div>
+    </form>
+</div>
+<form id="delete-product-form" method="post" style="display:none;">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="delete_product">
+    <input type="hidden" name="product_id" id="delete-product-id">
+</form>
+<script>
+    (function() {
+        const key = "productos_scroll";
+        const saved = sessionStorage.getItem(key);
+        if (saved) {
+            const y = parseInt(saved, 10);
+            requestAnimationFrame(() => {
+                setTimeout(() => window.scrollTo(0, y), 50);
+            });
+            sessionStorage.removeItem(key);
+        }
+        document.querySelectorAll("form").forEach(form => {
+            form.addEventListener("submit", () => {
+                sessionStorage.setItem(key, String(window.scrollY));
+                if (!location.hash || location.hash !== "#productos") {
+                    history.replaceState(null, "", "#productos");
+                }
+            });
+        });
+
+        const filterInput = document.getElementById("product-filter");
+        if (filterInput) {
+            const rows = Array.from(document.querySelectorAll("#productos tbody tr"));
+            const getRowText = (row) => {
+                const name = row.querySelector("input[name$='-name']")?.value || "";
+                const group = row.querySelector("input[name$='-group']")?.value || "";
+                const supplierSelect = row.querySelector("select");
+                const supplier =
+                    supplierSelect?.options[supplierSelect.selectedIndex]?.textContent || "";
+                return `${name} ${group} ${supplier}`.toLowerCase();
+            };
+            const applyFilter = () => {
+                const query = filterInput.value.trim().toLowerCase();
+                rows.forEach((row) => {
+                    if (!row.querySelector("input, select")) {
+                        return;
+                    }
+                    const visible = !query || getRowText(row).includes(query);
+                    row.style.display = visible ? "" : "none";
+                });
+            };
+            filterInput.addEventListener("input", applyFilter);
+        }
+
+        const deleteForm = document.getElementById("delete-product-form");
+        const deleteInput = document.getElementById("delete-product-id");
+        document.querySelectorAll("#productos button.danger").forEach((button) => {
+            button.addEventListener("click", () => {
+                const productId = button.getAttribute("data-product-id");
+                if (!productId) {
+                    return;
+                }
+                if (!confirm("¿Eliminar este producto?")) {
+                    return;
+                }
+                deleteInput.value = productId;
+                deleteForm.submit();
+            });
+        });
+    })();
+</script>
+{% endblock %}

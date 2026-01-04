@@ -1,0 +1,76 @@
+{% extends "inventory/base.html" %}
+{% load latam_numbers %}
+{% block title %}Proveedores{% endblock %}
+{% block content %}
+<h1>Proveedores</h1>
+<p class="subtitle">Administrá proveedores y asignalos a productos con sus costos.</p>
+
+<div class="cards">
+    <div class="card">
+        <div class="card-title">Nuevo proveedor</div>
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="create_supplier">
+            {{ supplier_form.as_p }}
+            <button type="submit">Guardar proveedor</button>
+        </form>
+    </div>
+    <div class="card">
+        <div class="card-title">Vincular a producto</div>
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="link_supplier">
+            {{ link_form.as_p }}
+            <button type="submit">Asignar</button>
+        </form>
+    </div>
+</div>
+
+<div class="card table-card">
+    <div class="card-title">Listado de proveedores</div>
+    <table>
+        <thead>
+            <tr>
+                <th>Nombre</th>
+                <th>Teléfono</th>
+                <th>Productos</th>
+                <th>Acciones</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for supplier in suppliers %}
+            <tr>
+                <td>{{ supplier.name }}</td>
+                <td>{{ supplier.phone }}</td>
+                <td>
+                    <ul>
+                    {% for sp in supplier.supplier_products.all %}
+                        <li>{{ sp.product.sku }} - {{ sp.product.name }} (último costo: {{ sp.last_cost|latam_number:2 }}) 
+                            <form method="post" style="display:inline;">
+                                {% csrf_token %}
+                                <input type="hidden" name="action" value="remove_link">
+                                <input type="hidden" name="link_id" value="{{ sp.id }}">
+                                <button type="submit">Desvincular</button>
+                            </form>
+                        </li>
+                    {% empty %}
+                        <li>Sin productos vinculados</li>
+                    {% endfor %}
+                    </ul>
+                </td>
+                <td>
+                    <form method="post" onsubmit="return confirm('¿Eliminar proveedor?');">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="delete_supplier">
+                        <input type="hidden" name="supplier_id" value="{{ supplier.id }}">
+                        <button type="submit">Eliminar</button>
+                    </form>
+                </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="4">Aún no hay proveedores.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

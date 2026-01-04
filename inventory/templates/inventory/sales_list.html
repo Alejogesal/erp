@@ -1,0 +1,155 @@
+{% extends "inventory/base.html" %}
+{% load latam_numbers %}
+{% block title %}Ventas{% endblock %}
+{% block content %}
+<h1>Ventas</h1>
+<p class="subtitle">Registrá ventas y consultá comprobantes emitidos.</p>
+
+<div class="card" style="margin-bottom:16px;">
+    <div class="card-title">Filtrar por cliente</div>
+    <form method="get">
+        <div class="cards" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
+            <div>
+                <label for="customer">Cliente</label>
+                <input id="customer" name="customer" type="text" value="{{ customer_query }}" placeholder="Buscar por coincidencias" list="customer-options">
+                <datalist id="customer-options">
+                    {% for customer in customers %}
+                    <option value="{{ customer.name }}"></option>
+                    {% endfor %}
+                </datalist>
+            </div>
+        </div>
+        <div style="margin-top:12px;">
+            <button type="submit">Aplicar filtro</button>
+        </div>
+    </form>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+    <div class="card-title">Registrar venta</div>
+    <form method="post" action="{% url 'inventory_sales_list' %}">
+        {% csrf_token %}
+        <h3>Datos de la venta</h3>
+        {{ form.as_p }}
+        {{ formset.non_form_errors }}
+        <h3>Productos</h3>
+        {{ formset.management_form }}
+        <table>
+            <thead>
+                <tr>
+                    <th>Producto</th>
+                    <th>Cantidad</th>
+                    <th>IVA %</th>
+                    <th>Eliminar</th>
+                </tr>
+            </thead>
+            <tbody id="items-body">
+                {% for item_form in formset.forms %}
+                <tr>
+                    <td>{{ item_form.product }}</td>
+                    <td>{{ item_form.quantity }}</td>
+                    <td>{{ item_form.vat_percent }}</td>
+                    <td>{% if formset.can_delete %}{{ item_form.DELETE }}{% endif %}</td>
+                </tr>
+                {% if item_form.errors %}
+                <tr>
+                    <td colspan="4">{{ item_form.errors }}</td>
+                </tr>
+                {% endif %}
+                {% endfor %}
+            </tbody>
+        </table>
+        <button type="button" id="add-item">Agregar producto</button>
+        <button type="submit">Registrar venta</button>
+    </form>
+</div>
+
+<div class="card table-card">
+    <div class="card-title">Historial de ventas</div>
+    <table>
+        <thead>
+            <tr>
+                <th>Comprobante</th>
+                <th>Fecha</th>
+                <th>Cliente</th>
+                <th>Depósito</th>
+                <th>Total</th>
+                <th>Ganancia</th>
+                <th>Acciones</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for sale in sales %}
+            <tr>
+                <td>{{ sale.invoice_number }}</td>
+                <td>{{ sale.created_at|date:"d/m/Y H:i" }}</td>
+                <td>{{ sale.customer|default:"Consumidor final" }}</td>
+                <td>{{ sale.warehouse.name }}</td>
+                <td>${{ sale.total|latam_number:2 }}</td>
+                <td>${{ sale.profit_total|latam_number:2 }}</td>
+                <td>
+                    <a class="pill" href="{% url 'inventory_sale_receipt' sale.id %}">Ver</a>
+                    <a class="pill" href="{% url 'inventory_sale_receipt_pdf' sale.id %}">PDF</a>
+                    <form method="post" action="{% url 'inventory_sale_delete' sale.id %}" style="display:inline;" onsubmit="return confirm('¿Eliminar esta venta? Se revertirá el stock.');">
+                        {% csrf_token %}
+                        <button type="submit">Eliminar</button>
+                    </form>
+                </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="7">Aún no hay ventas registradas.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{{ customer_audiences|json_script:"customer-audiences" }}
+<script>
+    (function() {
+        const addBtn = document.getElementById("add-item");
+        const body = document.getElementById("items-body");
+        const totalForms = document.getElementById("id_form-TOTAL_FORMS");
+        const customerSelect = document.getElementById("id_cliente");
+        const audienceSelect = document.getElementById("id_audiencia");
+        const audiences = JSON.parse(document.getElementById("customer-audiences").textContent || "{}");
+
+        function syncAudience() {
+            if (!customerSelect || !audienceSelect) return;
+            const customerId = customerSelect.value;
+            if (customerId && audiences[customerId]) {
+                audienceSelect.value = audiences[customerId];
+                audienceSelect.disabled = true;
+            } else {
+                audienceSelect.disabled = false;
+            }
+        }
+
+        if (customerSelect) {
+            customerSelect.addEventListener("change", syncAudience);
+            syncAudience();
+        }
+
+        if (!addBtn || !body || !totalForms) return;
+        addBtn.addEventListener("click", () => {
+            const idx = parseInt(totalForms.value, 10);
+            const emptyHtml = `{{ formset.empty_form.as_p|escapejs }}`.replace(/__prefix__/g, `form-${idx}`);
+            const container = document.createElement("div");
+            container.innerHTML = emptyHtml;
+
+            const tr = document.createElement("tr");
+            const product = container.querySelector("[name$='-product']");
+            const qty = container.querySelector("[name$='-quantity']");
+            const vat = container.querySelector("[name$='-vat_percent']");
+            const deleteField = container.querySelector("[name$='-DELETE']");
+
+            [product, qty, vat, deleteField].forEach(field => {
+                const td = document.createElement("td");
+                if (field) td.appendChild(field);
+                tr.appendChild(td);
+            });
+
+            totalForms.value = idx + 1;
+            body.appendChild(tr);
+        });
+    })();
+</script>
+{% endblock %}

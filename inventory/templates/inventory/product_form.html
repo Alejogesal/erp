@@ -1,0 +1,14 @@
+{% extends "inventory/base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<h1>{{ title }}</h1>
+<p class="subtitle">Cargá un producto con SKU opcional, costo y márgenes por canal.</p>
+<div class="card">
+    <form method="post">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <button type="submit">Guardar producto</button>
+    </form>
+    <p>¿Tenés muchos productos? <a href="{% url 'inventory_import_products' %}">Importalos desde CSV</a>.</p>
+</div>
+{% endblock %}

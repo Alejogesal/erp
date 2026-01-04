@@ -1,0 +1,129 @@
+{% extends "inventory/base.html" %}
+{% load latam_numbers %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+    <h1>Dashboard</h1>
+    <p class="subtitle">Compará rápido el monto de compra vs. venta y los productos más vendidos.</p>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <style>
+        .flatpickr-calendar {
+            background: #0f1622;
+            border: 1px solid #2a313c;
+            color: var(--text);
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+        }
+        .flatpickr-day {
+            color: #fff;
+        }
+        .flatpickr-day:hover {
+            background: rgba(47, 129, 247, 0.15);
+        }
+        .flatpickr-day.today {
+            border-color: var(--accent);
+        }
+        .flatpickr-months,
+        .flatpickr-weekdays,
+        .flatpickr-weekday,
+        .flatpickr-current-month,
+        .flatpickr-current-month .cur-month,
+        .flatpickr-current-month .numInputWrapper,
+        .flatpickr-monthDropdown-months,
+        .flatpickr-monthDropdown-months .flatpickr-monthDropdown-month,
+        .flatpickr-prev-month,
+        .flatpickr-next-month {
+            color: #fff !important;
+        }
+        .flatpickr-day.prevMonthDay,
+        .flatpickr-day.nextMonthDay,
+        .flatpickr-day.flatpickr-disabled {
+            color: rgba(255, 255, 255, 0.35);
+        }
+        .flatpickr-day.selected,
+        .flatpickr-day.startRange,
+        .flatpickr-day.endRange {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #fff;
+        }
+    </style>
+
+    <div class="card" style="margin-bottom:16px;">
+        <div class="card-title">Filtrar por fechas</div>
+        <form method="get">
+            <div class="cards" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
+                <div>
+                    <label for="start_date">Desde</label>
+                    <input id="start_date" name="start_date" type="date" value="{{ start_date }}">
+                </div>
+                <div>
+                    <label for="end_date">Hasta</label>
+                    <input id="end_date" name="end_date" type="date" value="{{ end_date }}">
+                </div>
+            </div>
+            <div style="margin-top:12px;">
+                <button type="submit">Aplicar filtro</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="cards">
+        <div class="card">
+            <div class="card-title">Monto de compra</div>
+            <p class="value">${{ purchase_total|latam_number:2 }}</p>
+        </div>
+        <div class="card">
+            <div class="card-title">Monto de venta (estimado)</div>
+            <p class="value">${{ sale_total|latam_number:2 }}</p>
+        </div>
+        <div class="card">
+        <div class="card-title">Impuestos</div>
+        <p class="value">${{ tax_total|latam_number:2 }}</p>
+    </div>
+    <div class="card">
+        <div class="card-title">Margen neto</div>
+        <p class="value">${{ gross_margin|latam_number:2 }}</p>
+        <div class="delta {% if gross_margin < 0 %}negative{% endif %}">
+            {% if gross_margin_pct %}{% if gross_margin >= 0 %}▲{% else %}▼{% endif %} {{ gross_margin_pct|latam_number:2 }}%{% else %}-{% endif %}
+        </div>
+    </div>
+    </div>
+
+    <div class="card table-card">
+        <div class="card-title">Ranking de más vendidos</div>
+    {% if ranking %}
+        <table>
+            <thead>
+                <tr>
+                    <th>SKU</th>
+                    <th>Producto</th>
+                    <th>Cantidad vendida</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in ranking %}
+                <tr>
+                    <td>{{ item.sku }}</td>
+                    <td>{{ item.name }}</td>
+                    <td>{{ item.quantity|latam_number:2 }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+            <p class="subtitle">Aún no hay movimientos de venta.</p>
+        {% endif %}
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script>
+        (function() {
+            if (!window.flatpickr) return;
+            const shared = {
+                dateFormat: "Y-m-d",
+                allowInput: true,
+            };
+            flatpickr("#start_date", shared);
+            flatpickr("#end_date", shared);
+        })();
+    </script>
+{% endblock %}

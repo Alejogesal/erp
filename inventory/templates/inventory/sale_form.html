@@ -1,0 +1,92 @@
+{% extends "inventory/base.html" %}
+{% block title %}Registrar venta{% endblock %}
+{% block content %}
+<h1>Registrar venta</h1>
+<p class="subtitle">Dá de baja stock según el depósito elegido.</p>
+<div class="card">
+    <form method="post">
+        {% csrf_token %}
+        <h3>Datos de la venta</h3>
+        {{ form.as_p }}
+        {{ formset.non_form_errors }}
+        <h3>Productos</h3>
+        {{ formset.management_form }}
+        <table>
+            <thead>
+                <tr>
+                    <th>Producto</th>
+                    <th>Cantidad</th>
+                    <th>IVA %</th>
+                    <th>Eliminar</th>
+                </tr>
+            </thead>
+            <tbody id="items-body">
+                {% for item_form in formset.forms %}
+                <tr>
+                    <td>{{ item_form.product }}</td>
+                    <td>{{ item_form.quantity }}</td>
+                    <td>{{ item_form.vat_percent }}</td>
+                    <td>{% if formset.can_delete %}{{ item_form.DELETE }}{% endif %}</td>
+                </tr>
+                {% if item_form.errors %}
+                <tr>
+                    <td colspan="4">{{ item_form.errors }}</td>
+                </tr>
+                {% endif %}
+                {% endfor %}
+            </tbody>
+        </table>
+        <button type="button" id="add-item">Agregar producto</button>
+        <button type="submit">Registrar venta</button>
+    </form>
+</div>
+{{ customer_audiences|json_script:"customer-audiences" }}
+<script>
+    (function() {
+        const addBtn = document.getElementById("add-item");
+        const body = document.getElementById("items-body");
+        const totalForms = document.getElementById("id_form-TOTAL_FORMS");
+        const customerSelect = document.getElementById("id_cliente");
+        const audienceSelect = document.getElementById("id_audiencia");
+        const audiences = JSON.parse(document.getElementById("customer-audiences").textContent || "{}");
+
+        function syncAudience() {
+            if (!customerSelect || !audienceSelect) return;
+            const customerId = customerSelect.value;
+            if (customerId && audiences[customerId]) {
+                audienceSelect.value = audiences[customerId];
+                audienceSelect.disabled = true;
+            } else {
+                audienceSelect.disabled = false;
+            }
+        }
+
+        if (customerSelect) {
+            customerSelect.addEventListener("change", syncAudience);
+            syncAudience();
+        }
+
+        addBtn.addEventListener("click", () => {
+            const idx = parseInt(totalForms.value, 10);
+            const emptyHtml = `{{ formset.empty_form.as_p|escapejs }}`.replace(/__prefix__/g, `form-${idx}`);
+            const container = document.createElement("div");
+            container.innerHTML = emptyHtml;
+
+            const tr = document.createElement("tr");
+            const product = container.querySelector("[name$='-product']");
+            const qty = container.querySelector("[name$='-quantity']");
+            const vat = container.querySelector("[name$='-vat_percent']");
+            const deleteField = container.querySelector("[name$='-DELETE']");
+
+            [product, qty, vat, deleteField].forEach(field => {
+                const td = document.createElement("td");
+                if (field) td.appendChild(field);
+                tr.appendChild(td);
+            });
+
+            totalForms.value = idx + 1;
+            body.appendChild(tr);
+        });
+    })();
+</script>
+{% endblock %}

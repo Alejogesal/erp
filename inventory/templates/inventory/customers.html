@@ -1,0 +1,73 @@
+{% extends "inventory/base.html" %}
+{% block title %}Clientes{% endblock %}
+{% block content %}
+<h1>Clientes</h1>
+<p class="subtitle">Registrá clientes y descuentos específicos por producto.</p>
+
+<div class="cards">
+    <div class="card">
+        <div class="card-title">Nuevo cliente</div>
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="create_customer">
+            {{ customer_form.as_p }}
+            <button type="submit">Guardar cliente</button>
+        </form>
+    </div>
+    <div class="card">
+        <div class="card-title">Descuento por producto</div>
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="create_discount">
+            {{ discount_form.as_p }}
+            <button type="submit">Asignar descuento</button>
+        </form>
+    </div>
+    <div class="card">
+        <div class="card-title">Descuento por marca / grupo</div>
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="create_group_discount">
+            {{ group_discount_form.as_p }}
+            <button type="submit">Asignar descuento</button>
+        </form>
+    </div>
+</div>
+
+<div class="card table-card">
+    <div class="card-title">Clientes y descuentos</div>
+    <table>
+        <thead>
+            <tr>
+                <th>Nombre</th>
+                <th>Email</th>
+                <th>Tipo</th>
+                <th>Descuentos</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for customer in customers %}
+            <tr>
+                <td>{{ customer.name }}</td>
+                <td>{{ customer.email }}</td>
+                <td>{{ customer.get_audience_display }}</td>
+                <td>
+                    {% if customer.discounts.all or customer.group_discounts.all %}
+                        {% for d in customer.discounts.all %}
+                            <div>{{ d.product.sku }} - {{ d.discount_percent }}%</div>
+                        {% endfor %}
+                        {% for g in customer.group_discounts.all %}
+                            <div>{{ g.group }} - {{ g.discount_percent }}%</div>
+                        {% endfor %}
+                    {% else %}
+                        Sin descuentos
+                    {% endif %}
+                </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="4">Aún no hay clientes cargados.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

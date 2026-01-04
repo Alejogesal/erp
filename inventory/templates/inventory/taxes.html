@@ -1,0 +1,90 @@
+{% extends "inventory/base.html" %}
+{% load latam_numbers %}
+{% block title %}Impuestos{% endblock %}
+{% block content %}
+<h1>Impuestos</h1>
+<p class="subtitle">Registrá los impuestos pagados para descontarlos del margen.</p>
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<style>
+    .flatpickr-calendar {
+        background: #0f1622;
+        border: 1px solid #2a313c;
+        color: var(--text);
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+    }
+    .flatpickr-day {
+        color: #fff;
+    }
+    .flatpickr-day:hover {
+        background: rgba(47, 129, 247, 0.15);
+    }
+    .flatpickr-day.today {
+        border-color: var(--accent);
+    }
+    .flatpickr-day.selected,
+    .flatpickr-day.startRange,
+    .flatpickr-day.endRange {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+    }
+    .flatpickr-months,
+    .flatpickr-weekdays,
+    .flatpickr-weekday,
+    .flatpickr-current-month,
+    .flatpickr-current-month .cur-month,
+    .flatpickr-current-month .numInputWrapper,
+    .flatpickr-monthDropdown-months,
+    .flatpickr-monthDropdown-months .flatpickr-monthDropdown-month,
+    .flatpickr-prev-month,
+    .flatpickr-next-month {
+        color: #fff !important;
+    }
+    .flatpickr-day.prevMonthDay,
+    .flatpickr-day.nextMonthDay,
+    .flatpickr-day.flatpickr-disabled {
+        color: rgba(255, 255, 255, 0.35);
+    }
+</style>
+
+<div class="card" style="margin-bottom:16px;">
+    <div class="card-title">Agregar impuesto</div>
+    <form method="post">
+        {% csrf_token %}
+        {{ tax_form.as_p }}
+        <button type="submit">Guardar</button>
+    </form>
+</div>
+
+<div class="card table-card">
+    <div class="card-title">Historial de impuestos</div>
+    <table>
+        <thead>
+            <tr>
+                <th>Fecha</th>
+                <th>Descripción</th>
+                <th>Monto</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for tax in taxes %}
+            <tr>
+                <td>{{ tax.paid_at|date:"d/m/Y" }}</td>
+                <td>{{ tax.description }}</td>
+                <td>${{ tax.amount|latam_number:2 }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="3">Aún no hay impuestos cargados.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script>
+    (function() {
+        if (!window.flatpickr) return;
+        flatpickr("#id_paid_at", { dateFormat: "Y-m-d", allowInput: true });
+    })();
+</script>
+{% endblock %}

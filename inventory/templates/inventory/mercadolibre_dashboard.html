@@ -1,0 +1,89 @@
+{% extends "inventory/base.html" %}
+{% block title %}MercadoLibre{% endblock %}
+{% block content %}
+<h1>MercadoLibre</h1>
+<p class="subtitle">Conexión, stock y ventas sincronizadas con el depósito MERCADOLIBRE.</p>
+
+<div class="cards">
+    <div class="card">
+        <div class="card-title">Estado de conexión</div>
+        {% if missing_credentials %}
+            <p style="color: var(--negative);">Faltan credenciales ML en el servidor.</p>
+        {% endif %}
+        {% if connection and connection.access_token %}
+            <p><strong>Conectado:</strong> {{ connection.nickname|default:"Cuenta ML" }}</p>
+            {% if connection.ml_user_id %}
+            <p><strong>User ID:</strong> {{ connection.ml_user_id }}</p>
+            {% endif %}
+            {% if connection.last_sync_at %}
+            <p><strong>Último sync:</strong> {{ connection.last_sync_at }}</p>
+            {% endif %}
+        {% else %}
+            <p>Cuenta no conectada.</p>
+        {% endif %}
+        <div style="margin-top:10px;">
+            {% if connection and connection.access_token %}
+                <form method="post" style="display:inline;">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="sync">
+                    <button type="submit">Sincronizar ahora</button>
+                </form>
+            {% else %}
+                {% if missing_credentials %}
+                    <button type="button" disabled style="opacity:0.6;">Conectar MercadoLibre</button>
+                {% else %}
+                    <a class="pill" href="{% url 'inventory_mercadolibre_connect' %}">Conectar MercadoLibre</a>
+                {% endif %}
+            {% endif %}
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-title">Métricas (últimos {{ metrics.window_days|default:"30" }} días)</div>
+        {% if metrics.orders %}
+            <p><strong>Órdenes:</strong> {{ metrics.orders }}</p>
+            <p><strong>Unidades vendidas:</strong> {{ metrics.items_sold }}</p>
+            <p><strong>Monto total:</strong> ${{ metrics.total_amount }}</p>
+        {% else %}
+            <p>Sin métricas disponibles. Ejecutá un sync.</p>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card table-card">
+    <div class="card-title">Publicaciones</div>
+    <table>
+        <thead>
+            <tr>
+                <th>Item</th>
+                <th>Producto (match)</th>
+                <th>Stock ML</th>
+                <th>Estado</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in items %}
+            <tr>
+                <td>
+                    {% if item.permalink %}
+                    <a href="{{ item.permalink }}" target="_blank" rel="noreferrer">{{ item.title }}</a>
+                    {% else %}
+                    {{ item.title }}
+                    {% endif %}
+                </td>
+                <td>
+                    {% if item.product %}
+                        {{ item.product.name }}{% if item.product.group %} ({{ item.product.group }}){% endif %}
+                    {% else %}
+                        <span style="color: var(--muted);">Sin match</span>
+                    {% endif %}
+                </td>
+                <td>{{ item.available_quantity }}</td>
+                <td>{{ item.status }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="4">Aún no hay publicaciones sincronizadas.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

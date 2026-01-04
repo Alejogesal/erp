@@ -1,0 +1,14 @@
+{% extends "inventory/base.html" %}
+{% block title %}Importar costos{% endblock %}
+{% block content %}
+<h1>Importar costos</h1>
+<p class="subtitle">Subí un Excel (.xlsx) con las columnas: Grupo, Descripción, Precio Venta.</p>
+<div class="card">
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <label for="xlsx-file">Archivo XLSX</label>
+        <input id="xlsx-file" name="file" type="file" accept=".xlsx" required />
+        <button type="submit">Importar</button>
+    </form>
+</div>
+{% endblock %}

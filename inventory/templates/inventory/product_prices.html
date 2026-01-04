@@ -1,0 +1,49 @@
+{% extends "inventory/base.html" %}
+{% load latam_numbers %}
+{% block title %}Lista de precios{% endblock %}
+{% block content %}
+<h1>Lista de precios</h1>
+<p class="subtitle">Precios diferenciados por canal.</p>
+
+<div class="actions" style="margin-bottom:16px;">
+    <a class="pill" href="{% url 'inventory_product_prices_download' 'consumer' %}">Descargar consumidor final</a>
+    <a class="pill" href="{% url 'inventory_product_prices_download' 'barber' %}">Descargar peluquerías/barberías</a>
+    <a class="pill" href="{% url 'inventory_product_prices_download' 'distributor' %}">Descargar distribuidores</a>
+</div>
+
+<div class="card table-card">
+    <div class="card-title">Precios por producto</div>
+    <table>
+        <thead>
+            <tr>
+                <th>SKU</th>
+                <th>Producto</th>
+                <th>Consumidor final</th>
+                <th>Peluquerías / Barberías</th>
+                <th>Distribuidores</th>
+                <th>Acciones</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for product in products %}
+            <tr>
+                <td>{{ product.sku }}</td>
+                <td>{{ product.name }}</td>
+                <td>{{ product.consumer_price|latam_number:2 }}</td>
+                <td>{{ product.barber_price|latam_number:2 }}</td>
+                <td>{{ product.distributor_price|latam_number:2 }}</td>
+                <td>
+                    <a class="pill" href="{% url 'inventory_edit_product' product.pk %}">Editar</a>
+                    <form method="post" action="{% url 'inventory_product_delete' product.pk %}" style="display:inline;">
+                        {% csrf_token %}
+                        <button type="submit" onclick="return confirm('¿Eliminar este producto?');">Eliminar</button>
+                    </form>
+                </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="6">Aún no hay productos cargados.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

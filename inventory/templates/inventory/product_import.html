@@ -1,0 +1,14 @@
+{% extends "inventory/base.html" %}
+{% block title %}Importar productos{% endblock %}
+{% block content %}
+<h1>Importar productos</h1>
+<p class="subtitle">Subí un CSV exportado de Google Sheets con las columnas: SKU, Grupo, Nombre, Costo unitario, IVA, Margen consumidor, Margen barber, Margen distribuidor.</p>
+<div class="card">
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <label for="csv-file">Archivo CSV</label>
+        <input id="csv-file" name="file" type="file" accept=".csv" required />
+        <button type="submit">Importar</button>
+    </form>
+</div>
+{% endblock %}
