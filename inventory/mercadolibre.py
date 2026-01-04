@@ -10,7 +10,16 @@ from django.conf import settings
 from django.utils import timezone
 
 from . import services
-from .models import MercadoLibreConnection, MercadoLibreItem, Product, Stock, Warehouse
+from .models import (
+    Customer,
+    MercadoLibreConnection,
+    MercadoLibreItem,
+    Product,
+    Sale,
+    SaleItem,
+    Stock,
+    Warehouse,
+)
 
 ML_BASE_URL = "https://api.mercadolibre.com"
 ML_AUTH_URL = "https://auth.mercadolibre.com.ar/authorization"
@@ -127,6 +136,10 @@ def get_item_ids(user_id: str, access_token: str) -> list[str]:
 
 def get_item(item_id: str, access_token: str) -> dict:
     return _request("GET", f"/items/{item_id}", access_token=access_token)
+
+
+def get_order(order_id: str, access_token: str) -> dict:
+    return _request("GET", f"/orders/{order_id}", access_token=access_token)
 
 
 def get_orders_summary(user_id: str, access_token: str, days: int = 30) -> dict:
@@ -258,3 +271,100 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user) -> SyncResult
     connection.save(update_fields=["last_sync_at", "last_metrics", "last_metrics_at"])
 
     return SyncResult(total, matched, unmatched, updated_stock, metrics)
+
+
+def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple[bool, str]:
+    access_token = get_valid_access_token(connection)
+    if not access_token:
+        return False, "missing_access_token"
+
+    order = get_order(order_id, access_token)
+    order_status = order.get("status", "") or ""
+    if order_status in {"cancelled", "expired"}:
+        return False, "ignored_status"
+
+    reference = f"ML ORDER {order_id}"
+    if Sale.objects.filter(reference=reference).exists():
+        return False, "already_processed"
+
+    ml_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.MERCADOLIBRE).first()
+    if not ml_wh:
+        return False, "missing_warehouse"
+
+    products = list(Product.objects.all())
+    product_index = _build_product_index(products)
+    matched_items = []
+    for order_item in order.get("order_items") or []:
+        item = order_item.get("item") or {}
+        item_id = str(item.get("id") or "")
+        quantity = Decimal(str(order_item.get("quantity", 0) or 0))
+        unit_price = Decimal(str(order_item.get("unit_price", 0) or 0))
+        if quantity <= 0:
+            continue
+        product = None
+        matched_name = ""
+        if item_id:
+            ml_item = MercadoLibreItem.objects.select_related("product").filter(item_id=item_id).first()
+            if ml_item and ml_item.product:
+                product = ml_item.product
+            elif ml_item and ml_item.title:
+                product, matched_name = _match_product(ml_item.title, product_index)
+        if not product and item_id:
+            item_detail = get_item(item_id, access_token)
+            title = item_detail.get("title", "") or ""
+            status = item_detail.get("status", "") or ""
+            permalink = item_detail.get("permalink", "") or ""
+            available = int(item_detail.get("available_quantity", 0) or 0)
+            product, matched_name = _match_product(title, product_index)
+            MercadoLibreItem.objects.update_or_create(
+                item_id=item_id,
+                defaults={
+                    "title": title,
+                    "available_quantity": available,
+                    "status": status,
+                    "permalink": permalink,
+                    "product": product,
+                    "matched_name": matched_name,
+                },
+            )
+        if not product:
+            continue
+        vat_percent = product.vat_percent or Decimal("0.00")
+        matched_items.append((product, quantity, unit_price, vat_percent))
+
+    if not matched_items:
+        return False, "no_matches"
+
+    total_amount = Decimal(str(order.get("total_amount", 0) or 0))
+    sale = Sale.objects.create(
+        warehouse=ml_wh,
+        audience=Customer.Audience.CONSUMER,
+        total=total_amount,
+        reference=reference,
+        user=user,
+    )
+    for product, quantity, unit_price, vat_percent in matched_items:
+        line_total = (unit_price * quantity).quantize(Decimal("0.01"))
+        SaleItem.objects.create(
+            sale=sale,
+            product=product,
+            quantity=quantity,
+            unit_price=unit_price,
+            discount_percent=Decimal("0.00"),
+            final_unit_price=unit_price,
+            line_total=line_total,
+            vat_percent=vat_percent,
+        )
+        services.register_exit(
+            product=product,
+            warehouse=ml_wh,
+            quantity=quantity,
+            user=user,
+            reference=reference,
+            sale=sale,
+            sale_price=unit_price,
+            vat_percent=vat_percent,
+            allow_negative=True,
+        )
+
+    return True, "ok"

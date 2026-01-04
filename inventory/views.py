@@ -4,6 +4,7 @@ from django import forms
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.utils import OperationalError
 from django.db.models import Case, DecimalField, Sum, Value, When, Q
@@ -1446,6 +1447,27 @@ def mercadolibre_webhook(request):
         application_id=str(payload.get("application_id", "") or ""),
         raw_payload=request.body.decode("utf-8"),
     )
+    try:
+        if notification.topic == "orders":
+            resource = notification.resource or ""
+            parts = resource.strip("/").split("/")
+            order_id = ""
+            if "orders" in parts:
+                idx = parts.index("orders")
+                if idx + 1 < len(parts):
+                    order_id = parts[idx + 1]
+            if order_id:
+                connection = MercadoLibreConnection.objects.filter(ml_user_id=notification.ml_user_id).first()
+                if connection:
+                    User = get_user_model()
+                    sync_user = (
+                        User.objects.filter(is_superuser=True).order_by("id").first()
+                        or User.objects.order_by("id").first()
+                    )
+                    if sync_user:
+                        ml.sync_order(connection, order_id, sync_user)
+    except Exception:
+        pass
     return HttpResponse(f"OK:{notification.id}")
 
 
