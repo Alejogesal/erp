@@ -1442,7 +1442,7 @@ def mercadolibre_webhook(request):
     notification = MercadoLibreNotification.objects.create(
         topic=payload.get("topic", "") or "",
         resource=payload.get("resource", "") or "",
-        user_id=str(payload.get("user_id", "") or ""),
+        ml_user_id=str(payload.get("user_id", "") or ""),
         application_id=str(payload.get("application_id", "") or ""),
         raw_payload=request.body.decode("utf-8"),
     )
