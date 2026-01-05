@@ -1443,7 +1443,9 @@ def mercadolibre_dashboard(request):
                 reason_text = f" ({', '.join(reason_parts)})" if reason_parts else ""
                 messages.success(
                     request,
-                    f"Sync ventas OK. Revisadas: {result['total']}, nuevas: {result['created']}.{reason_text}",
+                    "Sync ventas OK. Revisadas: "
+                    f"{result['total']}, nuevas: {result['created']}, "
+                    f"actualizadas: {result.get('updated', 0)}.{reason_text}",
                 )
         elif action == "link_item":
             item_id = request.POST.get("item_id")

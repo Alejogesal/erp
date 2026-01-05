@@ -163,6 +163,30 @@ def get_order_payments(order_id: str, access_token: str):
     return _request("GET", f"/orders/{order_id}/payments", access_token=access_token)
 
 
+def _sum_payment_details(payments: list[dict]) -> tuple[Decimal, Decimal]:
+    fee_total = Decimal("0.00")
+    tax_total = Decimal("0.00")
+    charges_fee = Decimal("0.00")
+    charges_tax = Decimal("0.00")
+    fee_types = {"fee", "commission", "marketplace_fee"}
+    tax_types = {"tax"}
+    for payment in payments:
+        fee_total += Decimal(str(payment.get("fee_amount", 0) or 0)).copy_abs()
+        tax_total += Decimal(str(payment.get("taxes_amount", 0) or 0)).copy_abs()
+        for charge in payment.get("charges_details") or []:
+            ctype = str(charge.get("type", "") or "").lower()
+            amount = Decimal(str(charge.get("amount", 0) or 0)).copy_abs()
+            if ctype in fee_types:
+                charges_fee += amount
+            if ctype in tax_types:
+                charges_tax += amount
+    if fee_total == 0 and charges_fee > 0:
+        fee_total = charges_fee
+    if tax_total == 0 and charges_tax > 0:
+        tax_total = charges_tax
+    return fee_total, tax_total
+
+
 def _parse_ml_datetime(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -266,17 +290,20 @@ def get_recent_order_ids(user_id: str, access_token: str, days: int = 30) -> lis
 def sync_recent_orders(connection: MercadoLibreConnection, user, days: int = 30) -> dict:
     access_token = get_valid_access_token(connection)
     if not access_token:
-        return {"total": 0, "created": 0, "reasons": {"missing_access_token": 1}}
+        return {"total": 0, "created": 0, "updated": 0, "reasons": {"missing_access_token": 1}}
     order_ids = get_recent_order_ids(connection.ml_user_id, access_token, days=days)
     created = 0
+    updated = 0
     reasons: dict[str, int] = {}
     for order_id in order_ids:
         ok, reason = sync_order(connection, order_id, user)
-        if ok:
+        if ok and reason == "ok":
             created += 1
+        elif ok and reason == "updated":
+            updated += 1
         else:
             reasons[reason] = reasons.get(reason, 0) + 1
-    return {"total": len(order_ids), "created": created, "reasons": reasons}
+    return {"total": len(order_ids), "created": created, "updated": updated, "reasons": reasons}
 
 
 def _normalize(text: str) -> str:
@@ -414,8 +441,7 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
         return False, "ignored_status"
 
     reference = f"ML ORDER {order_id}"
-    if Sale.objects.filter(reference=reference).exists():
-        return False, "already_processed"
+    existing_sale = Sale.objects.filter(reference=reference).first()
 
     ml_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.MERCADOLIBRE).first()
     if not ml_wh:
@@ -458,8 +484,6 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
         return False, "no_matches"
 
     total_amount = Decimal(str(order.get("total_amount", 0) or 0))
-    fee_total = Decimal("0.00")
-    tax_total = Decimal("0.00")
     payments = order.get("payments") or []
     if not payments:
         try:
@@ -470,9 +494,15 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
                 payments = payments_data
         except Exception:
             payments = []
-    for payment in payments:
-        fee_total += Decimal(str(payment.get("fee_amount", 0) or 0)).copy_abs()
-        tax_total += Decimal(str(payment.get("taxes_amount", 0) or 0)).copy_abs()
+    fee_total, tax_total = _sum_payment_details(payments)
+
+    if existing_sale:
+        existing_sale.ml_commission_total = fee_total.quantize(Decimal("0.01"))
+        existing_sale.ml_tax_total = tax_total.quantize(Decimal("0.01"))
+        existing_sale.ml_order_id = str(order_id)
+        existing_sale.save(update_fields=["ml_commission_total", "ml_tax_total", "ml_order_id"])
+        return True, "updated"
+
     sale = Sale.objects.create(
         warehouse=ml_wh,
         audience=Customer.Audience.CONSUMER,
