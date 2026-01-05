@@ -65,7 +65,9 @@
             <tr>
                 <td>
                     {% if item.permalink %}
-                    <a href="{{ item.permalink }}" target="_blank" rel="noreferrer">{{ item.title }}</a>
+                    <a href="{{ item.permalink }}" target="_blank" rel="noreferrer" style="color: var(--text);">
+                        {{ item.title }}
+                    </a>
                     {% else %}
                     {{ item.title }}
                     {% endif %}
