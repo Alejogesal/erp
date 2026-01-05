@@ -176,19 +176,24 @@
                         <input type="hidden" name="action" value="link_item">
                         <input type="hidden" name="item_id" value="{{ item.id }}">
                         <div class="ml-match-field">
-                            <div class="ml-match-search is-hidden">
-                                <input type="text" class="ml-product-search" placeholder="Buscar producto...">
-                            </div>
-                            <div class="ml-match-select">
-                                <select name="product_id">
-                                    <option value="">-- Sin match --</option>
+                            <div class="ml-match-search">
+                                <input
+                                    type="text"
+                                    class="ml-product-typeahead"
+                                    placeholder="Buscar producto..."
+                                    list="ml-products-{{ item.id }}"
+                                    value="{% if item.product %}{{ item.product.name }}{% if item.product.group %} ({{ item.product.group }}){% endif %}{% endif %}"
+                                >
+                                <datalist id="ml-products-{{ item.id }}">
                                     {% for product in products %}
-                                    <option value="{{ product.id }}"{% if item.product and product.id == item.product.id %} selected{% endif %}>
-                                        {{ product.name }}{% if product.group %} ({{ product.group }}){% endif %}
-                                    </option>
+                                    <option
+                                        value="{{ product.name }}{% if product.group %} ({{ product.group }}){% endif %}"
+                                        data-id="{{ product.id }}"
+                                    ></option>
                                     {% endfor %}
-                                </select>
+                                </datalist>
                             </div>
+                            <input type="hidden" name="product_id" class="ml-product-id" value="{% if item.product %}{{ item.product.id }}{% endif %}">
                         </div>
                         <button type="submit" style="margin-top:6px;">Guardar</button>
                     </form>
@@ -227,42 +232,23 @@
 </script>
 <script>
     (function() {
-        document.querySelectorAll(".ml-product-search").forEach((input) => {
+        document.querySelectorAll(".ml-product-typeahead").forEach((input) => {
             const field = input.closest(".ml-match-field");
-            const select = field ? field.querySelector("select") : null;
-            const searchWrap = field ? field.querySelector(".ml-match-search") : null;
-            if (!select) {
+            const hidden = field ? field.querySelector(".ml-product-id") : null;
+            const listId = input.getAttribute("list");
+            const datalist = listId ? document.getElementById(listId) : null;
+            const options = datalist ? Array.from(datalist.options) : [];
+            if (!hidden || !datalist) {
                 return;
             }
-            const options = Array.from(select.options);
-            input.addEventListener("input", () => {
-                const query = input.value.trim().toLowerCase();
-                options.forEach((opt) => {
-                    if (!opt.value) {
-                        opt.hidden = false;
-                        return;
-                    }
-                    const text = opt.textContent.toLowerCase();
-                    opt.hidden = query && !text.includes(query);
-                });
-                if (query) {
-                    const visibleOption = options.find((opt) => !opt.hidden && opt.value);
-                    if (visibleOption) {
-                        select.value = visibleOption.value;
-                    }
-                }
-            });
-            select.addEventListener("focus", () => {
-                if (searchWrap) {
-                    searchWrap.classList.remove("is-hidden");
-                }
-                input.focus();
-            });
-            select.addEventListener("blur", () => {
-                if (!input.value.trim() && searchWrap) {
-                    searchWrap.classList.add("is-hidden");
-                }
-            });
+            const syncHidden = () => {
+                const value = input.value.trim();
+                const match = options.find((opt) => opt.value === value);
+                hidden.value = match ? match.dataset.id : "";
+            };
+            input.addEventListener("input", syncHidden);
+            input.addEventListener("blur", syncHidden);
+            syncHidden();
         });
     })();
 </script>
