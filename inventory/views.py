@@ -903,9 +903,6 @@ def stock_list(request):
             if not ml_wh:
                 messages.error(request, "Falta el depósito MercadoLibre.")
                 return redirect("inventory_stock_list")
-            if not aris_supplier or not aurill_supplier:
-                messages.error(request, "Faltan proveedores Aris Norma o Aurill- Dario.")
-                return redirect("inventory_stock_list")
 
             products = (
                 Product.objects.order_by("sku")
