@@ -97,6 +97,7 @@ class DashboardViewTests(TestCase):
 
     def test_product_price_list(self):
         self.product.avg_cost = Decimal("50.00")
+        self.product.vat_percent = Decimal("21.00")
         self.product.margin_consumer = Decimal("20.00")
         self.product.margin_barber = Decimal("10.00")
         self.product.margin_distributor = Decimal("5.00")
@@ -104,9 +105,9 @@ class DashboardViewTests(TestCase):
         response = self.client.get(reverse("inventory_product_prices"))
         self.assertEqual(response.status_code, 200)
         products = list(response.context["products"])
-        self.assertEqual(products[0].consumer_price, Decimal("60.00"))
-        self.assertEqual(products[0].barber_price, Decimal("55.00"))
-        self.assertEqual(products[0].distributor_price, Decimal("52.50"))
+        self.assertEqual(products[0].consumer_price, Decimal("72.60"))
+        self.assertEqual(products[0].barber_price, Decimal("66.55"))
+        self.assertEqual(products[0].distributor_price, Decimal("63.525"))
 
     def test_product_price_download(self):
         self.product.avg_cost = Decimal("100.00")

@@ -78,10 +78,15 @@ class Product(models.Model):
     @property
     def suggested_price(self) -> Decimal:
         multiplier = Decimal("1.00") + (self.target_margin or Decimal("0.00")) / Decimal("100.00")
-        return (self.avg_cost or Decimal("0.00")) * multiplier
+        return self.cost_with_vat() * multiplier
 
     def _price_with_margin(self, margin: Decimal) -> Decimal:
         multiplier = Decimal("1.00") + (margin or Decimal("0.00")) / Decimal("100.00")
+        return self.cost_with_vat() * multiplier
+
+    def cost_with_vat(self) -> Decimal:
+        vat = self.vat_percent or Decimal("0.00")
+        multiplier = Decimal("1.00") + vat / Decimal("100.00")
         return (self.avg_cost or Decimal("0.00")) * multiplier
 
     @property
