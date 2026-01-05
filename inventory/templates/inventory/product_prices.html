@@ -4,6 +4,35 @@
 {% block content %}
 <h1>Lista de precios</h1>
 <p class="subtitle">Precios diferenciados por canal.</p>
+<style>
+    .price-filter {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        border-radius: 12px;
+        background: #0f1622;
+        border: 1px solid #2a313c;
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+        margin: 8px 0 12px;
+    }
+    .price-filter input {
+        background: transparent;
+        border: none;
+        color: var(--text);
+        width: 100%;
+        padding: 4px 2px;
+        font-size: 14px;
+    }
+    .price-filter input:focus { outline: none; }
+    .price-filter .hint {
+        font-size: 12px;
+        color: var(--muted);
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
+        white-space: nowrap;
+    }
+</style>
 
 <div class="actions" style="margin-bottom:16px;">
     <a class="pill" href="{% url 'inventory_product_prices_download' 'consumer' %}">Descargar consumidor final</a>
@@ -13,6 +42,10 @@
 
 <div class="card table-card">
     <div class="card-title">Precios por producto</div>
+    <div class="price-filter">
+        <span class="hint">Buscar</span>
+        <input id="price-filter" type="text" placeholder="SKU o producto">
+    </div>
     <table>
         <thead>
             <tr>
@@ -46,4 +79,24 @@
         </tbody>
     </table>
 </div>
+<script>
+    (function() {
+        const filterInput = document.getElementById("price-filter");
+        if (!filterInput) return;
+        const rows = Array.from(document.querySelectorAll("table tbody tr"));
+        const getRowText = (row) => {
+            const sku = row.children[0]?.textContent || "";
+            const name = row.children[1]?.textContent || "";
+            return `${sku} ${name}`.toLowerCase();
+        };
+        const applyFilter = () => {
+            const query = filterInput.value.trim().toLowerCase();
+            rows.forEach((row) => {
+                if (!row.querySelector("td")) return;
+                row.style.display = !query || getRowText(row).includes(query) ? "" : "none";
+            });
+        };
+        filterInput.addEventListener("input", applyFilter);
+    })();
+</script>
 {% endblock %}
