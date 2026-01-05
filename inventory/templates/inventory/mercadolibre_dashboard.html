@@ -252,4 +252,27 @@
         });
     })();
 </script>
+<script>
+    (function() {
+        const key = "ml_scroll";
+        const saved = sessionStorage.getItem(key);
+        if (saved) {
+            const y = parseInt(saved, 10);
+            if (!Number.isNaN(y)) {
+                requestAnimationFrame(() => {
+                    setTimeout(() => window.scrollTo(0, y), 50);
+                });
+            }
+            sessionStorage.removeItem(key);
+        }
+        document.querySelectorAll("form").forEach((form) => {
+            form.addEventListener("submit", () => {
+                sessionStorage.setItem(key, String(window.scrollY));
+                if (!location.hash || location.hash !== "#publicaciones") {
+                    history.replaceState(null, "", "#publicaciones");
+                }
+            });
+        });
+    })();
+</script>
 {% endblock %}
