@@ -235,7 +235,15 @@
             if (!value) {
                 return 0;
             }
-            const normalized = value.replace(/\s/g, "").replace(/\./g, "").replace(",", ".");
+            const raw = value.replace(/\s/g, "");
+            let normalized = raw;
+            const hasComma = raw.includes(",");
+            const hasDot = raw.includes(".");
+            if (hasComma && hasDot) {
+                normalized = raw.replace(/\./g, "").replace(",", ".");
+            } else if (hasComma) {
+                normalized = raw.replace(",", ".");
+            }
             const parsed = parseFloat(normalized);
             return Number.isNaN(parsed) ? 0 : parsed;
         };
