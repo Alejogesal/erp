@@ -112,6 +112,7 @@
                         {% csrf_token %}
                         <input type="hidden" name="action" value="link_item">
                         <input type="hidden" name="item_id" value="{{ item.id }}">
+                        <input type="text" class="ml-product-search" placeholder="Buscar producto..." style="margin:6px 0;">
                         <select name="product_id">
                             <option value="">-- Sin match --</option>
                             {% for product in products %}
@@ -153,6 +154,34 @@
         };
         statusFilter?.addEventListener("change", applyFilters);
         salesFilter?.addEventListener("change", applyFilters);
+    })();
+</script>
+<script>
+    (function() {
+        document.querySelectorAll(".ml-product-search").forEach((input) => {
+            const select = input.nextElementSibling;
+            if (!select) {
+                return;
+            }
+            const options = Array.from(select.options);
+            input.addEventListener("input", () => {
+                const query = input.value.trim().toLowerCase();
+                options.forEach((opt) => {
+                    if (!opt.value) {
+                        opt.hidden = false;
+                        return;
+                    }
+                    const text = opt.textContent.toLowerCase();
+                    opt.hidden = query && !text.includes(query);
+                });
+                if (query) {
+                    const visibleOption = options.find((opt) => !opt.hidden && opt.value);
+                    if (visibleOption) {
+                        select.value = visibleOption.value;
+                    }
+                }
+            });
+        });
     })();
 </script>
 {% endblock %}
