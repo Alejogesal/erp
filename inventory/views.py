@@ -1428,6 +1428,21 @@ def mercadolibre_dashboard(request):
                 if metrics.get("truncated"):
                     notice += " (Sync limitado por configuración)"
                 messages.success(request, notice)
+        elif action == "sync_orders":
+            if not connection or not connection.access_token:
+                messages.error(request, "Primero conectá la cuenta de MercadoLibre.")
+            else:
+                days_env = os.environ.get("ML_ORDERS_DAYS", "")
+                days = int(days_env) if days_env.isdigit() else 30
+                result = ml.sync_recent_orders(connection, request.user, days=days)
+                reason_parts = []
+                for key, count in result.get("reasons", {}).items():
+                    reason_parts.append(f"{key}: {count}")
+                reason_text = f" ({', '.join(reason_parts)})" if reason_parts else ""
+                messages.success(
+                    request,
+                    f"Sync ventas OK. Revisadas: {result['total']}, nuevas: {result['created']}.{reason_text}",
+                )
         elif action == "link_item":
             item_id = request.POST.get("item_id")
             product_id = request.POST.get("product_id")

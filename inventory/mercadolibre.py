@@ -228,6 +228,53 @@ def get_orders_summary(user_id: str, access_token: str, days: int = 30) -> dict:
     }
 
 
+def get_recent_order_ids(user_id: str, access_token: str, days: int = 30) -> list[str]:
+    date_from = (timezone.now() - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S.000-00:00")
+    limit = 50
+    offset = 0
+    max_orders_env = os.environ.get("ML_ORDERS_MAX", "")
+    max_orders = int(max_orders_env) if max_orders_env.isdigit() else 200
+    order_ids: list[str] = []
+    while True:
+        data = _request(
+            "GET",
+            "/orders/search",
+            access_token=access_token,
+            params={
+                "seller": user_id,
+                "order.date_created.from": date_from,
+                "sort": "date_desc",
+                "limit": limit,
+                "offset": offset,
+            },
+        )
+        batch = data.get("results") or []
+        for order in batch:
+            order_id = str(order.get("id") or "")
+            if order_id:
+                order_ids.append(order_id)
+        if len(batch) < limit or len(order_ids) >= max_orders:
+            break
+        offset += limit
+    return order_ids[:max_orders]
+
+
+def sync_recent_orders(connection: MercadoLibreConnection, user, days: int = 30) -> dict:
+    access_token = get_valid_access_token(connection)
+    if not access_token:
+        return {"total": 0, "created": 0, "reasons": {"missing_access_token": 1}}
+    order_ids = get_recent_order_ids(connection.ml_user_id, access_token, days=days)
+    created = 0
+    reasons: dict[str, int] = {}
+    for order_id in order_ids:
+        ok, reason = sync_order(connection, order_id, user)
+        if ok:
+            created += 1
+        else:
+            reasons[reason] = reasons.get(reason, 0) + 1
+    return {"total": len(order_ids), "created": created, "reasons": reasons}
+
+
 def _normalize(text: str) -> str:
     if not text:
         return ""

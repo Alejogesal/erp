@@ -28,6 +28,11 @@
                     <input type="hidden" name="action" value="sync">
                     <button type="submit">Sincronizar ahora</button>
                 </form>
+                <form method="post" style="display:inline; margin-left:8px;">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="sync_orders">
+                    <button type="submit">Sincronizar ventas</button>
+                </form>
             {% else %}
                 {% if missing_credentials %}
                     <button type="button" disabled style="opacity:0.6;">Conectar MercadoLibre</button>
