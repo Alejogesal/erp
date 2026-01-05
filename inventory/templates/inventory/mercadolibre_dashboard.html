@@ -55,7 +55,7 @@
 </div>
 </div>
 
-<div class="card table-card">
+<div class="card table-card" id="publicaciones">
     <div class="card-title">Publicaciones</div>
     <style>
         .ml-item-link {
@@ -260,10 +260,14 @@
             const y = parseInt(saved, 10);
             if (!Number.isNaN(y)) {
                 requestAnimationFrame(() => {
-                    setTimeout(() => window.scrollTo(0, y), 50);
+                    setTimeout(() => {
+                        window.scrollTo(0, y);
+                        sessionStorage.removeItem(key);
+                    }, 150);
                 });
+            } else {
+                sessionStorage.removeItem(key);
             }
-            sessionStorage.removeItem(key);
         }
         document.querySelectorAll("form").forEach((form) => {
             form.addEventListener("submit", () => {
