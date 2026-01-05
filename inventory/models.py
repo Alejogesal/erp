@@ -274,6 +274,7 @@ class MercadoLibreItem(models.Model):
     title = models.CharField(max_length=255, blank=True, default="")
     status = models.CharField(max_length=50, blank=True, default="")
     permalink = models.URLField(max_length=500, blank=True, default="")
+    logistic_type = models.CharField(max_length=50, blank=True, default="")
     available_quantity = models.IntegerField(default=0)
     product = models.ForeignKey(Product, null=True, blank=True, on_delete=models.SET_NULL, related_name="ml_items")
     matched_name = models.CharField(max_length=255, blank=True, default="")

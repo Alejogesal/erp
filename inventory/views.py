@@ -1029,7 +1029,7 @@ def stock_list(request):
     )
     ml_qty_map = {
         row["product_id"]: Decimal(str(row["total_qty"]))
-        for row in MercadoLibreItem.objects.filter(product__isnull=False)
+        for row in MercadoLibreItem.objects.filter(product__isnull=False, logistic_type="fulfillment")
         .values("product_id")
         .annotate(total_qty=Coalesce(Sum("available_quantity"), 0))
     }

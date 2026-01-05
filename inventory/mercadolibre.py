@@ -377,6 +377,7 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user) -> SyncResult
         title = item.get("title", "") or ""
         available = int(item.get("available_quantity", 0) or 0)
         status = item.get("status", "") or ""
+        logistic_type = item.get("logistic_type", "") or ""
         permalink = item.get("permalink", "") or ""
         existing = MercadoLibreItem.objects.filter(item_id=item_id).first()
         product = existing.product if existing else None
@@ -387,6 +388,7 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user) -> SyncResult
                 "title": title,
                 "available_quantity": available,
                 "status": status,
+                "logistic_type": logistic_type,
                 "permalink": permalink,
                 "product": product,
                 "matched_name": matched_name,
@@ -464,6 +466,7 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
             item_detail = get_item(item_id, access_token)
             title = item_detail.get("title", "") or ""
             status = item_detail.get("status", "") or ""
+            logistic_type = item_detail.get("logistic_type", "") or ""
             permalink = item_detail.get("permalink", "") or ""
             available = int(item_detail.get("available_quantity", 0) or 0)
             MercadoLibreItem.objects.update_or_create(
@@ -472,6 +475,7 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
                     "title": title,
                     "available_quantity": available,
                     "status": status,
+                    "logistic_type": logistic_type,
                     "permalink": permalink,
                 },
             )
