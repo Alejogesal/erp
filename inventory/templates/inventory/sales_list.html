@@ -26,6 +26,18 @@
 </div>
 
 <div class="card" style="margin-bottom:16px;">
+    <div class="card-title">Importar ventas Google Sheets</div>
+    <form method="post" action="{% url 'inventory_sales_list' %}">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="sync_google_sales">
+        <p style="color: var(--muted); margin: 0 0 10px;">
+            Importa ventas desde la hoja pública configurada en el servidor.
+        </p>
+        <button type="submit">Sincronizar ventas</button>
+    </form>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
     <div class="card-title">Registrar venta</div>
     <form method="post" action="{% url 'inventory_sales_list' %}">
         {% csrf_token %}

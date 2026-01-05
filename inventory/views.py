@@ -13,6 +13,8 @@ from django.db.models.deletion import ProtectedError
 from django.db.models.functions import Coalesce
 from django.forms import formset_factory
 from django.http import HttpResponse
+from urllib.request import urlopen
+import csv
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
@@ -353,6 +355,206 @@ def sales_list(request):
     }
     customer_query = (request.GET.get("customer") or "").strip()
     customers = Customer.objects.order_by("name")
+    if request.method == "POST" and request.POST.get("action") == "sync_google_sales":
+        sheet_url = os.environ.get("GOOGLE_SHEETS_SALES_URL", "")
+        if not sheet_url:
+            messages.error(request, "Falta GOOGLE_SHEETS_SALES_URL en el entorno.")
+            return redirect("inventory_sales_list")
+
+        def normalize_header(value: str) -> str:
+            value = (value or "").strip().lower()
+            value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
+            return re.sub(r"\s+", "", value)
+
+        def parse_decimal(value: str) -> Decimal:
+            raw = (value or "").strip()
+            raw = raw.replace("$", "").replace(" ", "")
+            if not raw:
+                return Decimal("0.00")
+            if "," in raw and "." in raw:
+                raw = raw.replace(".", "").replace(",", ".")
+            elif "," in raw:
+                raw = raw.replace(",", ".")
+            try:
+                return Decimal(raw)
+            except Exception:
+                return Decimal("0.00")
+
+        def parse_datetime(value: str | None) -> datetime | None:
+            if not value:
+                return None
+            raw = value.strip()
+            match = re.match(r"^(.*)([+-]\d{2})(\d{2})$", raw)
+            if match:
+                raw = f"{match.group(1)}{match.group(2)}:{match.group(3)}"
+            raw = raw.replace("Z", "+00:00")
+            try:
+                parsed = datetime.fromisoformat(raw)
+            except ValueError:
+                return None
+            if timezone.is_naive(parsed):
+                return timezone.make_aware(parsed)
+            return parsed
+
+        match = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", sheet_url)
+        gid_match = re.search(r"[?&]gid=(\d+)", sheet_url)
+        if not match or not gid_match:
+            messages.error(request, "URL de Google Sheets inválida (falta ID o gid).")
+            return redirect("inventory_sales_list")
+
+        sheet_id = match.group(1)
+        gid = gid_match.group(1)
+        csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
+
+        try:
+            with urlopen(csv_url, timeout=30) as resp:
+                content = resp.read().decode("utf-8", errors="ignore")
+        except Exception as exc:
+            messages.error(request, f"No se pudo leer la hoja: {exc}")
+            return redirect("inventory_sales_list")
+
+        reader = csv.reader(io.StringIO(content))
+        rows = list(reader)
+        if not rows:
+            messages.error(request, "La hoja no tiene datos.")
+            return redirect("inventory_sales_list")
+
+        headers = [normalize_header(h) for h in rows[0]]
+
+        def idx(*names: str) -> int | None:
+            for name in names:
+                key = normalize_header(name)
+                if key in headers:
+                    return headers.index(key)
+            return None
+
+        fecha_idx = idx("Fecha")
+        idventa_idx = idx("IDVenta", "ID Vent", "IDVenta")
+        idorder_idx = idx("IDOrder", "ID Order", "IDOrden", "ID Or", "IDor")
+        producto_idx = idx("Producto")
+        cantidad_idx = idx("Cantidad")
+        precio_idx = idx("Precio Bruto Venta", "Precio Bruto", "Precio")
+        comision_idx = idx("Comision", "Comisión")
+        iibb_idx = idx("IIBB")
+
+        required = [fecha_idx, idventa_idx, producto_idx, cantidad_idx, precio_idx, comision_idx, iibb_idx]
+        if any(i is None for i in required):
+            messages.error(
+                request,
+                "Faltan columnas requeridas en la hoja (Fecha, IDVenta, Producto, Cantidad, Precio, Comision, IIBB).",
+            )
+            return redirect("inventory_sales_list")
+
+        products = list(Product.objects.all())
+        product_index = ml._build_product_index(products)
+        orders: dict[str, dict[str, object]] = {}
+        unmatched = 0
+
+        for row in rows[1:]:
+            if not row:
+                continue
+            if len(row) < len(headers):
+                row = row + [""] * (len(headers) - len(row))
+            order_id = (row[idorder_idx] if idorder_idx is not None else "") or row[idventa_idx]
+            order_id = str(order_id).strip()
+            if not order_id:
+                continue
+            title = str(row[producto_idx]).strip()
+            qty = parse_decimal(row[cantidad_idx])
+            if qty <= 0:
+                continue
+            price_total = parse_decimal(row[precio_idx])
+            commission = parse_decimal(row[comision_idx])
+            iibb = parse_decimal(row[iibb_idx])
+            created_at = parse_datetime(row[fecha_idx])
+
+            product, _ = ml._match_product(title, product_index)
+            if not product:
+                unmatched += 1
+                continue
+
+            entry = orders.setdefault(
+                order_id,
+                {
+                    "created_at": created_at,
+                    "total": Decimal("0.00"),
+                    "commission": Decimal("0.00"),
+                    "iibb": Decimal("0.00"),
+                    "items": [],
+                },
+            )
+            entry["total"] += price_total
+            entry["commission"] += commission
+            entry["iibb"] += iibb
+            unit_price = (price_total / qty).quantize(Decimal("0.01"))
+            entry["items"].append(
+                {
+                    "product": product,
+                    "quantity": qty,
+                    "unit_price": unit_price,
+                }
+            )
+            if created_at and (entry["created_at"] is None or created_at < entry["created_at"]):
+                entry["created_at"] = created_at
+
+        created_sales = 0
+        skipped = 0
+        ml_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.MERCADOLIBRE).first()
+        for order_id, data in orders.items():
+            reference = f"GS ORDER {order_id}"
+            if Sale.objects.filter(reference=reference).exists():
+                skipped += 1
+                continue
+            if not data["items"]:
+                continue
+            if not ml_wh:
+                messages.error(request, "Falta el depósito MercadoLibre.")
+                return redirect("inventory_sales_list")
+            with transaction.atomic():
+                sale = Sale.objects.create(
+                    warehouse=ml_wh,
+                    audience=Customer.Audience.CONSUMER,
+                    total=data["total"].quantize(Decimal("0.01")),
+                    reference=reference,
+                    ml_order_id=str(order_id),
+                    ml_commission_total=data["commission"].quantize(Decimal("0.01")),
+                    ml_tax_total=data["iibb"].quantize(Decimal("0.01")),
+                    user=request.user,
+                )
+                if data["created_at"]:
+                    Sale.objects.filter(pk=sale.pk).update(created_at=data["created_at"])
+                for item in data["items"]:
+                    qty = item["quantity"]
+                    unit_price = item["unit_price"]
+                    line_total = (unit_price * qty).quantize(Decimal("0.01"))
+                    SaleItem.objects.create(
+                        sale=sale,
+                        product=item["product"],
+                        quantity=qty,
+                        unit_price=unit_price,
+                        discount_percent=Decimal("0.00"),
+                        final_unit_price=unit_price,
+                        line_total=line_total,
+                        vat_percent=item["product"].vat_percent or Decimal("0.00"),
+                    )
+                    services.register_exit(
+                        product=item["product"],
+                        warehouse=ml_wh,
+                        quantity=qty,
+                        user=request.user,
+                        reference=reference,
+                        sale=sale,
+                        sale_price=unit_price,
+                        vat_percent=item["product"].vat_percent or Decimal("0.00"),
+                        allow_negative=True,
+                    )
+                created_sales += 1
+
+        messages.success(
+            request,
+            f"Ventas importadas: {created_sales}, omitidas: {skipped}, sin match: {unmatched}.",
+        )
+        return redirect("inventory_sales_list")
     if request.method == "POST":
         header_form = SaleHeaderForm(request.POST)
         formset = SaleItemFormSet(request.POST)
