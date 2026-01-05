@@ -37,20 +37,48 @@
             {% endif %}
         </div>
     </div>
-    <div class="card">
-        <div class="card-title">Métricas (últimos {{ metrics.window_days|default:"30" }} días)</div>
-        {% if metrics.orders %}
-            <p><strong>Órdenes:</strong> {{ metrics.orders }}</p>
+<div class="card">
+    <div class="card-title">Métricas (últimos {{ metrics.window_days|default:"30" }} días)</div>
+    {% if metrics.orders %}
+            <p><strong>Órdenes (muestra):</strong> {{ metrics.orders_sampled|default:metrics.orders }}</p>
+            {% if metrics.orders_total and metrics.orders_total != metrics.orders_sampled %}
+            <p><strong>Órdenes totales ML:</strong> {{ metrics.orders_total }}</p>
+            {% endif %}
             <p><strong>Unidades vendidas:</strong> {{ metrics.items_sold }}</p>
             <p><strong>Monto total:</strong> ${{ metrics.total_amount }}</p>
-        {% else %}
+            <p style="color: var(--muted); font-size: 12px; margin-top: 8px;">
+                Las métricas se calculan sobre la muestra sincronizada del período.
+            </p>
+    {% else %}
             <p>Sin métricas disponibles. Ejecutá un sync.</p>
-        {% endif %}
-    </div>
+    {% endif %}
+</div>
 </div>
 
 <div class="card table-card">
     <div class="card-title">Publicaciones</div>
+    <div style="display:flex; gap:12px; flex-wrap:wrap; margin: 8px 0 12px;">
+        <div>
+            <label for="ml-status-filter" style="font-size: 12px; color: var(--muted); display:block; margin-bottom:4px;">
+                Estado
+            </label>
+            <select id="ml-status-filter">
+                <option value="all">Todas</option>
+                <option value="active">Activas</option>
+                <option value="paused">Pausadas</option>
+            </select>
+        </div>
+        <div>
+            <label for="ml-sales-filter" style="font-size: 12px; color: var(--muted); display:block; margin-bottom:4px;">
+                Ventas
+            </label>
+            <select id="ml-sales-filter">
+                <option value="all">Todas</option>
+                <option value="recent">Con ventas recientes</option>
+                <option value="none">Sin ventas recientes</option>
+            </select>
+        </div>
+    </div>
     <table>
         <thead>
             <tr>
@@ -62,10 +90,10 @@
         </thead>
         <tbody>
             {% for item in items %}
-            <tr>
+            <tr data-status="{{ item.status }}" data-recent="{% if item.last_sold_at and item.last_sold_at >= recent_cutoff %}1{% else %}0{% endif %}">
                 <td>
                     {% if item.permalink %}
-                    <a href="{{ item.permalink }}" target="_blank" rel="noreferrer" style="color: var(--text);">
+                    <a href="{{ item.permalink }}" target="_blank" rel="noreferrer" style="color: var(--text); text-decoration: none;">
                         {{ item.title }}
                     </a>
                     {% else %}
@@ -88,4 +116,27 @@
         </tbody>
     </table>
 </div>
+<script>
+    (function() {
+        const statusFilter = document.getElementById("ml-status-filter");
+        const salesFilter = document.getElementById("ml-sales-filter");
+        const rows = Array.from(document.querySelectorAll("table tbody tr"));
+        const applyFilters = () => {
+            const status = statusFilter?.value || "all";
+            const sales = salesFilter?.value || "all";
+            rows.forEach((row) => {
+                const rowStatus = row.getAttribute("data-status") || "";
+                const recent = row.getAttribute("data-recent") || "0";
+                const statusOk = status === "all" || rowStatus === status;
+                const salesOk =
+                    sales === "all" ||
+                    (sales === "recent" && recent === "1") ||
+                    (sales === "none" && recent === "0");
+                row.style.display = statusOk && salesOk ? "" : "none";
+            });
+        };
+        statusFilter?.addEventListener("change", applyFilters);
+        salesFilter?.addEventListener("change", applyFilters);
+    })();
+</script>
 {% endblock %}

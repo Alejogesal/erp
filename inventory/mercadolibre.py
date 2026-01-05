@@ -1,7 +1,7 @@
 import json
 import unicodedata
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import timedelta, datetime
 from decimal import Decimal
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -159,26 +159,72 @@ def get_order(order_id: str, access_token: str) -> dict:
     return _request("GET", f"/orders/{order_id}", access_token=access_token)
 
 
+def _parse_ml_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if timezone.is_naive(parsed):
+        return timezone.make_aware(parsed)
+    return parsed
+
+
 def get_orders_summary(user_id: str, access_token: str, days: int = 30) -> dict:
     date_from = (timezone.now() - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S.000-00:00")
-    data = _request(
-        "GET",
-        "/orders/search",
-        access_token=access_token,
-        params={"seller": user_id, "order.date_created.from": date_from, "sort": "date_desc"},
-    )
-    results = data.get("results") or []
+    limit = 50
+    offset = 0
+    max_orders_env = os.environ.get("ML_ORDERS_MAX", "")
+    max_orders = int(max_orders_env) if max_orders_env.isdigit() else 200
+    results = []
+    paging_total = 0
+    while True:
+        data = _request(
+            "GET",
+            "/orders/search",
+            access_token=access_token,
+            params={
+                "seller": user_id,
+                "order.date_created.from": date_from,
+                "sort": "date_desc",
+                "limit": limit,
+                "offset": offset,
+            },
+        )
+        batch = data.get("results") or []
+        paging_total = int(data.get("paging", {}).get("total", 0) or 0)
+        results.extend(batch)
+        if len(batch) < limit or len(results) >= max_orders:
+            break
+        offset += limit
+
     total_amount = Decimal("0.00")
     total_items = 0
+    item_sales: dict[str, dict[str, object]] = {}
     for order in results:
         total_amount += Decimal(str(order.get("total_amount", 0) or 0))
+        order_created = _parse_ml_datetime(order.get("date_created"))
         for item in order.get("order_items") or []:
             total_items += int(item.get("quantity", 0) or 0)
+            item_data = item.get("item") or {}
+            item_id = str(item_data.get("id") or "")
+            if not item_id:
+                continue
+            entry = item_sales.setdefault(item_id, {"units": 0, "last_sold_at": None})
+            entry["units"] = int(entry["units"]) + int(item.get("quantity", 0) or 0)
+            if order_created and (entry["last_sold_at"] is None or order_created > entry["last_sold_at"]):
+                entry["last_sold_at"] = order_created
+
     return {
-        "orders": int(data.get("paging", {}).get("total", len(results))),
+        "orders": len(results),
+        "orders_total": paging_total,
+        "orders_sampled": len(results),
         "total_amount": f"{total_amount:.2f}",
         "items_sold": total_items,
         "window_days": days,
+        "item_sales": item_sales,
+        "max_orders": max_orders,
     }
 
 
@@ -284,6 +330,12 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user) -> SyncResult
             unmatched += 1
 
     metrics = get_orders_summary(connection.ml_user_id, access_token, days=30)
+    item_sales = metrics.pop("item_sales", {})
+    for item_id, data in item_sales.items():
+        MercadoLibreItem.objects.filter(item_id=item_id).update(
+            last_sold_at=data.get("last_sold_at"),
+            units_sold_30d=data.get("units", 0),
+        )
     connection.last_sync_at = timezone.now()
     connection.last_metrics = json.dumps(metrics)
     connection.last_metrics_at = timezone.now()

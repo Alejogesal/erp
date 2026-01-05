@@ -272,6 +272,8 @@ class MercadoLibreItem(models.Model):
     available_quantity = models.IntegerField(default=0)
     product = models.ForeignKey(Product, null=True, blank=True, on_delete=models.SET_NULL, related_name="ml_items")
     matched_name = models.CharField(max_length=255, blank=True, default="")
+    last_sold_at = models.DateTimeField(null=True, blank=True)
+    units_sold_30d = models.IntegerField(default=0)
     last_synced = models.DateTimeField(auto_now=True)
 
     class Meta:

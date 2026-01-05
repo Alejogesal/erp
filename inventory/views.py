@@ -1399,7 +1399,7 @@ def mercadolibre_dashboard(request):
     missing_credentials = not settings.ML_CLIENT_ID or not settings.ML_CLIENT_SECRET or not settings.ML_REDIRECT_URI
     try:
         connection = MercadoLibreConnection.objects.filter(user=request.user).first()
-        items = MercadoLibreItem.objects.select_related("product").order_by("-last_synced")[:200]
+        items = MercadoLibreItem.objects.select_related("product").order_by("-available_quantity", "title")[:200]
     except OperationalError:
         messages.error(request, "Faltan tablas de MercadoLibre. Ejecutá migrate y recargá.")
         connection = None
@@ -1427,6 +1427,7 @@ def mercadolibre_dashboard(request):
                     notice += " (Sync limitado por configuración)"
                 messages.success(request, notice)
 
+    recent_cutoff = timezone.now() - timedelta(days=30)
     return render(
         request,
         "inventory/mercadolibre_dashboard.html",
@@ -1435,6 +1436,7 @@ def mercadolibre_dashboard(request):
             "items": items,
             "metrics": metrics,
             "missing_credentials": missing_credentials,
+            "recent_cutoff": recent_cutoff,
         },
     )
 
