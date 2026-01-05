@@ -4,6 +4,43 @@
 {% block content %}
 <h1>Stock</h1>
 <p class="subtitle">Listado de productos por depósito.</p>
+<style>
+    .stock-filter {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        border-radius: 12px;
+        background: #0f1622;
+        border: 1px solid #2a313c;
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+        margin-bottom: 12px;
+    }
+    .stock-filter input {
+        background: transparent;
+        border: none;
+        color: var(--text);
+        width: 100%;
+        padding: 4px 2px;
+        font-size: 14px;
+    }
+    .stock-filter input:focus { outline: none; }
+    .stock-filter .hint {
+        font-size: 12px;
+        color: var(--muted);
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
+        white-space: nowrap;
+    }
+    .stock-adjust {
+        display: grid;
+        gap: 6px;
+        min-width: 160px;
+    }
+    .stock-adjust input {
+        width: 100%;
+    }
+</style>
 
 <div class="card" style="margin-bottom:16px;">
     <div class="card-title">Transferir a MercadoLibre</div>
@@ -31,6 +68,10 @@
 
 <div class="card table-card">
     <div class="card-title">Stock por depósito</div>
+    <div class="stock-filter">
+        <span class="hint">Buscar</span>
+        <input id="stock-filter" type="text" placeholder="SKU, producto o marca" value="{{ query }}">
+    </div>
     <table>
         <thead>
             <tr>
@@ -46,7 +87,20 @@
             <tr>
                 <td>{{ product.sku }}</td>
                 <td>{{ product.name }}</td>
-                <td>{{ product.comun_qty|latam_number:2 }}</td>
+                <td>
+                    <form method="post">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="set_comun_stock">
+                        <input type="hidden" name="product_id" value="{{ product.id }}">
+                        <div class="stock-adjust">
+                            <div style="color: var(--muted); font-size: 12px;">
+                                Actual: {{ product.comun_qty|latam_number:2 }}
+                            </div>
+                            <input name="quantity" type="text" value="{{ product.comun_qty|latam_number:2 }}">
+                            <button type="submit">Actualizar</button>
+                        </div>
+                    </form>
+                </td>
                 <td>{{ product.ml_qty|latam_number:2 }}</td>
                 <td>{{ product.comun_qty|add:product.ml_qty|latam_number:2 }}</td>
             </tr>
@@ -56,4 +110,24 @@
         </tbody>
     </table>
 </div>
+<script>
+    (function() {
+        const filterInput = document.getElementById("stock-filter");
+        if (!filterInput) return;
+        const rows = Array.from(document.querySelectorAll("table tbody tr"));
+        const getRowText = (row) => {
+            const sku = row.children[0]?.textContent || "";
+            const name = row.children[1]?.textContent || "";
+            return `${sku} ${name}`.toLowerCase();
+        };
+        const applyFilter = () => {
+            const query = filterInput.value.trim().toLowerCase();
+            rows.forEach((row) => {
+                if (!row.querySelector("td")) return;
+                row.style.display = !query || getRowText(row).includes(query) ? "" : "none";
+            });
+        };
+        filterInput.addEventListener("input", applyFilter);
+    })();
+</script>
 {% endblock %}

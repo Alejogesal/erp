@@ -848,30 +848,74 @@ def stock_list(request):
     comun_wh = Warehouse.objects.filter(type=comun_code).first()
     ml_wh = Warehouse.objects.filter(type=ml_code).first()
     transfer_form = StockTransferForm()
+    query = (request.GET.get("q") or "").strip()
+
+    def parse_decimal(value: str) -> Decimal:
+        raw = (value or "").strip().replace(" ", "")
+        if not raw:
+            return Decimal("0.00")
+        if "," in raw and "." in raw:
+            raw = raw.replace(".", "").replace(",", ".")
+        elif "," in raw:
+            raw = raw.replace(",", ".")
+        try:
+            return Decimal(raw)
+        except Exception:
+            return Decimal("0.00")
 
     if request.method == "POST":
-        transfer_form = StockTransferForm(request.POST)
-        if not comun_wh or not ml_wh:
-            messages.error(request, "Faltan depósitos configurados para transferir stock.")
-            return redirect("inventory_stock_list")
-        if transfer_form.is_valid():
-            try:
-                services.register_transfer(
-                    product=transfer_form.cleaned_data["product"],
-                    from_warehouse=comun_wh,
-                    to_warehouse=ml_wh,
-                    quantity=transfer_form.cleaned_data["quantity"],
-                    user=request.user,
-                    reference="Transferencia Comun -> MercadoLibre",
-                )
-                messages.success(request, "Transferencia registrada.")
+        action = request.POST.get("action") or ""
+        if action == "set_comun_stock":
+            if not comun_wh:
+                messages.error(request, "Falta el depósito común.")
                 return redirect("inventory_stock_list")
-            except services.NegativeStockError:
-                messages.error(request, "No hay stock suficiente en depósito común.")
+            product_id = request.POST.get("product_id")
+            desired_raw = request.POST.get("quantity")
+            product = Product.objects.filter(pk=product_id).first()
+            if not product:
+                messages.error(request, "Producto no encontrado.")
+                return redirect("inventory_stock_list")
+            desired = parse_decimal(desired_raw)
+            stock = Stock.objects.filter(product=product, warehouse=comun_wh).first()
+            current = stock.quantity if stock else Decimal("0.00")
+            diff = (desired - current).quantize(Decimal("0.01"))
+            try:
+                if diff != 0:
+                    services.register_adjustment(
+                        product=product,
+                        warehouse=comun_wh,
+                        quantity=diff,
+                        user=request.user,
+                        reference="Ajuste manual depósito común",
+                        allow_negative=True,
+                    )
+                messages.success(request, "Stock actualizado.")
+                return redirect("inventory_stock_list")
             except services.InvalidMovementError as exc:
                 messages.error(request, str(exc))
         else:
-            messages.error(request, "Revisá los datos de la transferencia.")
+            transfer_form = StockTransferForm(request.POST)
+            if not comun_wh or not ml_wh:
+                messages.error(request, "Faltan depósitos configurados para transferir stock.")
+                return redirect("inventory_stock_list")
+            if transfer_form.is_valid():
+                try:
+                    services.register_transfer(
+                        product=transfer_form.cleaned_data["product"],
+                        from_warehouse=comun_wh,
+                        to_warehouse=ml_wh,
+                        quantity=transfer_form.cleaned_data["quantity"],
+                        user=request.user,
+                        reference="Transferencia Comun -> MercadoLibre",
+                    )
+                    messages.success(request, "Transferencia registrada.")
+                    return redirect("inventory_stock_list")
+                except services.NegativeStockError:
+                    messages.error(request, "No hay stock suficiente en depósito común.")
+                except services.InvalidMovementError as exc:
+                    messages.error(request, str(exc))
+            else:
+                messages.error(request, "Revisá los datos de la transferencia.")
 
     products = (
         Product.objects.order_by("sku")
@@ -898,6 +942,10 @@ def stock_list(request):
             ),
         )
     )
+    if query:
+        products = products.filter(
+            Q(sku__icontains=query) | Q(name__icontains=query) | Q(group__icontains=query)
+        )
     return render(
         request,
         "inventory/stock_list.html",
@@ -905,6 +953,7 @@ def stock_list(request):
             "products": products,
             "transfer_form": transfer_form,
             "can_transfer": comun_wh is not None and ml_wh is not None,
+            "query": query,
         },
     )
 
