@@ -298,13 +298,14 @@ def sale_receipt(request, sale_id: int):
         Sale.objects.select_related("customer", "warehouse").prefetch_related("items__product"), pk=sale_id
     )
     subtotal = sum((item.line_total for item in sale.items.all()), Decimal("0.00"))
+    invoice_number = sale.ml_order_id or sale.invoice_number
     context = {
         "sale": sale,
         "items": sale.items.all(),
         "subtotal": subtotal,
         "discount_total": sale.discount_total,
         "total": sale.total,
-        "invoice_number": sale.invoice_number,
+        "invoice_number": invoice_number,
     }
     return render(request, "inventory/sale_receipt.html", context)
 
@@ -325,7 +326,7 @@ def sale_receipt_pdf(request, sale_id: int):
             "discount_total": sale.discount_total,
             "total": sale.total,
             "is_pdf": True,
-            "invoice_number": sale.invoice_number,
+            "invoice_number": sale.ml_order_id or sale.invoice_number,
         },
         request=request,
     )

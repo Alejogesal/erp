@@ -83,7 +83,7 @@
         <tbody>
             {% for sale in sales %}
             <tr>
-                <td>{{ sale.invoice_number }}</td>
+                <td>{{ sale.ml_order_id|default:sale.invoice_number }}</td>
                 <td>{{ sale.created_at|date:"d/m/Y H:i" }}</td>
                 <td>{{ sale.customer|default:"Consumidor final" }}</td>
                 <td>{{ sale.warehouse.name }}</td>

@@ -159,6 +159,10 @@ def get_order(order_id: str, access_token: str) -> dict:
     return _request("GET", f"/orders/{order_id}", access_token=access_token)
 
 
+def get_order_payments(order_id: str, access_token: str):
+    return _request("GET", f"/orders/{order_id}/payments", access_token=access_token)
+
+
 def _parse_ml_datetime(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -456,9 +460,19 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
     total_amount = Decimal(str(order.get("total_amount", 0) or 0))
     fee_total = Decimal("0.00")
     tax_total = Decimal("0.00")
-    for payment in order.get("payments") or []:
-        fee_total += Decimal(str(payment.get("fee_amount", 0) or 0))
-        tax_total += Decimal(str(payment.get("taxes_amount", 0) or 0))
+    payments = order.get("payments") or []
+    if not payments:
+        try:
+            payments_data = get_order_payments(order_id, access_token)
+            if isinstance(payments_data, dict):
+                payments = payments_data.get("payments") or payments_data.get("results") or []
+            elif isinstance(payments_data, list):
+                payments = payments_data
+        except Exception:
+            payments = []
+    for payment in payments:
+        fee_total += Decimal(str(payment.get("fee_amount", 0) or 0)).copy_abs()
+        tax_total += Decimal(str(payment.get("taxes_amount", 0) or 0)).copy_abs()
     sale = Sale.objects.create(
         warehouse=ml_wh,
         audience=Customer.Audience.CONSUMER,
