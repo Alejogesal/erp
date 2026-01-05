@@ -57,6 +57,62 @@
 
 <div class="card table-card">
     <div class="card-title">Publicaciones</div>
+    <style>
+        .ml-item-link {
+            color: var(--text);
+            text-decoration: none;
+        }
+        .ml-match-field {
+            display: grid;
+            gap: 6px;
+            padding: 6px;
+            border-radius: 12px;
+            background: linear-gradient(180deg, rgba(16, 22, 32, 0.9), rgba(12, 18, 27, 0.95));
+            border: 1px solid #2a313c;
+        }
+        .ml-match-search,
+        .ml-match-select {
+            position: relative;
+            border-radius: 8px;
+            background: #0b111a;
+            border: 1px solid #1e2733;
+        }
+        .ml-match-search input,
+        .ml-match-select select {
+            width: 100%;
+            border: none;
+            background: transparent;
+            color: var(--text);
+            font-size: 13px;
+            padding: 8px 10px 8px 28px;
+        }
+        .ml-match-search::before {
+            content: "⌕";
+            position: absolute;
+            left: 9px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--muted);
+            font-size: 12px;
+            pointer-events: none;
+        }
+        .ml-match-search input:focus,
+        .ml-match-select select:focus { outline: none; }
+        .ml-match-select select {
+            appearance: none;
+            padding-left: 10px;
+            padding-right: 28px;
+        }
+        .ml-match-select::after {
+            content: "▾";
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--muted);
+            pointer-events: none;
+        }
+    </style>
     <div style="display:flex; gap:12px; flex-wrap:wrap; margin: 8px 0 12px;">
         <div>
             <label for="ml-status-filter" style="font-size: 12px; color: var(--muted); display:block; margin-bottom:4px;">
@@ -93,7 +149,7 @@
             <tr data-status="{{ item.status }}" data-recent="{% if item.last_sold_at and item.last_sold_at >= recent_cutoff %}1{% else %}0{% endif %}">
                 <td>
                     {% if item.permalink %}
-                    <a href="{{ item.permalink }}" target="_blank" rel="noreferrer" style="color: var(--text); text-decoration: none;">
+                    <a class="ml-item-link" href="{{ item.permalink }}" target="_blank" rel="noreferrer">
                         {{ item.title }}
                     </a>
                     {% else %}
@@ -112,15 +168,21 @@
                         {% csrf_token %}
                         <input type="hidden" name="action" value="link_item">
                         <input type="hidden" name="item_id" value="{{ item.id }}">
-                        <input type="text" class="ml-product-search" placeholder="Buscar producto..." style="margin:6px 0;">
-                        <select name="product_id">
-                            <option value="">-- Sin match --</option>
-                            {% for product in products %}
-                            <option value="{{ product.id }}"{% if item.product and product.id == item.product.id %} selected{% endif %}>
-                                {{ product.name }}{% if product.group %} ({{ product.group }}){% endif %}
-                            </option>
-                            {% endfor %}
-                        </select>
+                        <div class="ml-match-field">
+                            <div class="ml-match-search">
+                                <input type="text" class="ml-product-search" placeholder="Buscar producto...">
+                            </div>
+                            <div class="ml-match-select">
+                                <select name="product_id">
+                                    <option value="">-- Sin match --</option>
+                                    {% for product in products %}
+                                    <option value="{{ product.id }}"{% if item.product and product.id == item.product.id %} selected{% endif %}>
+                                        {{ product.name }}{% if product.group %} ({{ product.group }}){% endif %}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
                         <button type="submit" style="margin-top:6px;">Guardar</button>
                     </form>
                 </td>
@@ -159,7 +221,8 @@
 <script>
     (function() {
         document.querySelectorAll(".ml-product-search").forEach((input) => {
-            const select = input.nextElementSibling;
+            const field = input.closest(".ml-match-field");
+            const select = field ? field.querySelector("select") : null;
             if (!select) {
                 return;
             }
