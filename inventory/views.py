@@ -347,6 +347,22 @@ def sale_receipt_pdf(request, sale_id: int):
 
 
 @login_required
+def purchase_receipt(request, purchase_id: int):
+    purchase = get_object_or_404(
+        Purchase.objects.select_related("supplier", "warehouse").prefetch_related("items__product"), pk=purchase_id
+    )
+    subtotal = sum((item.quantity * item.unit_cost for item in purchase.items.all()), Decimal("0.00"))
+    context = {
+        "purchase": purchase,
+        "items": purchase.items.all(),
+        "subtotal": subtotal,
+        "total": purchase.total,
+        "invoice_number": purchase.invoice_number,
+    }
+    return render(request, "inventory/purchase_receipt.html", context)
+
+
+@login_required
 def sales_list(request):
     SaleItemFormSet = formset_factory(SaleItemForm, extra=1, can_delete=True)
     customer_audiences = {
@@ -1009,22 +1025,20 @@ def stock_list(request):
                 Value(0, output_field=decimal_field),
                 output_field=decimal_field,
             ),
-            ml_qty=Coalesce(
-                Sum(
-                    Case(
-                        When(stocks__warehouse__type=ml_code, then="stocks__quantity"),
-                        output_field=decimal_field,
-                    )
-                ),
-                Value(0, output_field=decimal_field),
-                output_field=decimal_field,
-            ),
         )
     )
+    ml_qty_map = {
+        row["product_id"]: Decimal(str(row["total_qty"]))
+        for row in MercadoLibreItem.objects.filter(product__isnull=False)
+        .values("product_id")
+        .annotate(total_qty=Coalesce(Sum("available_quantity"), 0))
+    }
     if query:
         products = products.filter(
             Q(sku__icontains=query) | Q(name__icontains=query) | Q(group__icontains=query)
         )
+    for product in products:
+        product.ml_qty = ml_qty_map.get(product.id, Decimal("0.00"))
     return render(
         request,
         "inventory/stock_list.html",
