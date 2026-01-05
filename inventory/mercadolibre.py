@@ -246,8 +246,9 @@ def _tokenize(text: str) -> list[str]:
 def _build_product_index(products: list[Product]):
     index = []
     for product in products:
-        tokens = _tokenize(f"{product.name} {product.group or ''}")
-        index.append((product, tokens, _normalize(product.name)))
+        name_tokens = _tokenize(product.name)
+        group_tokens = _tokenize(product.group or "")
+        index.append((product, name_tokens, group_tokens, _normalize(product.name)))
     return index
 
 
@@ -256,13 +257,18 @@ def _match_product(title: str, product_index) -> tuple[Product | None, str]:
     title_tokens = set(_tokenize(title))
     best_score = 0.0
     best = None
-    for product, tokens, name_norm in product_index:
-        if not tokens:
+    for product, name_tokens, group_tokens, name_norm in product_index:
+        if not name_tokens:
+            continue
+        if group_tokens and not title_tokens.intersection(group_tokens):
             continue
         if name_norm and name_norm in title_norm:
             return product, product.name
-        overlap = title_tokens.intersection(tokens)
-        score = len(overlap) / max(len(tokens), 1)
+        overlap_name = title_tokens.intersection(name_tokens)
+        score = len(overlap_name) / max(len(name_tokens), 1)
+        if group_tokens:
+            overlap_group = title_tokens.intersection(group_tokens)
+            score += 0.25 if overlap_group else 0
         if score > best_score:
             best_score = score
             best = product
