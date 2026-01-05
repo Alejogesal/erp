@@ -291,8 +291,6 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user) -> SyncResult
     max_items_env = os.environ.get("ML_SYNC_MAX_ITEMS", "")
     max_items = int(max_items_env) if max_items_env.isdigit() else None
     item_ids, truncated = get_item_ids(connection.ml_user_id, access_token, max_items=max_items)
-    products = list(Product.objects.all())
-    product_index = _build_product_index(products)
     ml_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.MERCADOLIBRE).first()
     total = matched = unmatched = updated_stock = 0
 
@@ -302,7 +300,9 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user) -> SyncResult
         available = int(item.get("available_quantity", 0) or 0)
         status = item.get("status", "") or ""
         permalink = item.get("permalink", "") or ""
-        product, matched_name = _match_product(title, product_index)
+        existing = MercadoLibreItem.objects.filter(item_id=item_id).first()
+        product = existing.product if existing else None
+        matched_name = existing.matched_name if existing else ""
         MercadoLibreItem.objects.update_or_create(
             item_id=item_id,
             defaults={
@@ -370,8 +370,6 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
     if not ml_wh:
         return False, "missing_warehouse"
 
-    products = list(Product.objects.all())
-    product_index = _build_product_index(products)
     matched_items = []
     for order_item in order.get("order_items") or []:
         item = order_item.get("item") or {}
@@ -381,20 +379,16 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
         if quantity <= 0:
             continue
         product = None
-        matched_name = ""
         if item_id:
             ml_item = MercadoLibreItem.objects.select_related("product").filter(item_id=item_id).first()
             if ml_item and ml_item.product:
                 product = ml_item.product
-            elif ml_item and ml_item.title:
-                product, matched_name = _match_product(ml_item.title, product_index)
         if not product and item_id:
             item_detail = get_item(item_id, access_token)
             title = item_detail.get("title", "") or ""
             status = item_detail.get("status", "") or ""
             permalink = item_detail.get("permalink", "") or ""
             available = int(item_detail.get("available_quantity", 0) or 0)
-            product, matched_name = _match_product(title, product_index)
             MercadoLibreItem.objects.update_or_create(
                 item_id=item_id,
                 defaults={
@@ -402,8 +396,6 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
                     "available_quantity": available,
                     "status": status,
                     "permalink": permalink,
-                    "product": product,
-                    "matched_name": matched_name,
                 },
             )
         if not product:
