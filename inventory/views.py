@@ -355,7 +355,18 @@ def sales_list(request):
     }
     customer_query = (request.GET.get("customer") or "").strip()
     customers = Customer.objects.order_by("name")
-    if request.method == "POST" and request.POST.get("action") == "sync_google_sales":
+    action = request.POST.get("action") if request.method == "POST" else ""
+    if action in {"sync_google_sales", "reset_google_sales"}:
+        if action == "reset_google_sales":
+            ml_sales = Sale.objects.filter(
+                Q(reference__startswith="ML ORDER ")
+                | Q(reference__startswith="GS ORDER ")
+                | Q(ml_order_id__gt="")
+            )
+            StockMovement.objects.filter(sale__in=ml_sales).delete()
+            deleted_count = ml_sales.count()
+            ml_sales.delete()
+            messages.info(request, f"Ventas ML eliminadas: {deleted_count}.")
         sheet_url = os.environ.get("GOOGLE_SHEETS_SALES_URL", "")
         if not sheet_url:
             messages.error(request, "Falta GOOGLE_SHEETS_SALES_URL en el entorno.")
@@ -537,17 +548,6 @@ def sales_list(request):
                         line_total=line_total,
                         vat_percent=item["product"].vat_percent or Decimal("0.00"),
                     )
-                    services.register_exit(
-                        product=item["product"],
-                        warehouse=ml_wh,
-                        quantity=qty,
-                        user=request.user,
-                        reference=reference,
-                        sale=sale,
-                        sale_price=unit_price,
-                        vat_percent=item["product"].vat_percent or Decimal("0.00"),
-                        allow_negative=True,
-                    )
                 created_sales += 1
 
         messages.success(
@@ -673,9 +673,10 @@ def sale_delete(request, sale_id: int):
     sale = get_object_or_404(Sale.objects.prefetch_related("items", "movements"), pk=sale_id)
     try:
         with transaction.atomic():
-            # Revert stock for each movement linked to this sale
+            is_ml_sale = sale.ml_order_id or sale.reference.startswith("ML ORDER") or sale.reference.startswith("GS ORDER")
+            # Revert stock only for non-ML sales
             for movement in sale.movements.select_for_update():
-                if movement.movement_type == StockMovement.MovementType.EXIT and movement.from_warehouse:
+                if not is_ml_sale and movement.movement_type == StockMovement.MovementType.EXIT and movement.from_warehouse:
                     stock, _ = Stock.objects.select_for_update().get_or_create(
                         product=movement.product,
                         warehouse=movement.from_warehouse,
@@ -685,7 +686,10 @@ def sale_delete(request, sale_id: int):
                     stock.save(update_fields=["quantity"])
                 movement.delete()
             sale.delete()
-        messages.success(request, "Venta eliminada y stock ajustado.")
+        if is_ml_sale:
+            messages.success(request, "Venta eliminada.")
+        else:
+            messages.success(request, "Venta eliminada y stock ajustado.")
     except Exception as exc:
         messages.error(request, f"No se pudo eliminar la venta: {exc}")
     return redirect("inventory_sales_list")

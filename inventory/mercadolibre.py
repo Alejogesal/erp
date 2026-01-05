@@ -525,16 +525,5 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
             line_total=line_total,
             vat_percent=vat_percent,
         )
-        services.register_exit(
-            product=product,
-            warehouse=ml_wh,
-            quantity=quantity,
-            user=user,
-            reference=reference,
-            sale=sale,
-            sale_price=unit_price,
-            vat_percent=vat_percent,
-            allow_negative=True,
-        )
 
     return True, "ok"

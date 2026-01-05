@@ -35,6 +35,13 @@
         </p>
         <button type="submit">Sincronizar ventas</button>
     </form>
+    <form method="post" action="{% url 'inventory_sales_list' %}" style="margin-top:10px;">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="reset_google_sales">
+        <button type="submit" onclick="return confirm('¿Eliminar ventas de MercadoLibre y reimportar desde Sheets?');">
+            Borrar ventas ML y reimportar
+        </button>
+    </form>
 </div>
 
 <div class="card" style="margin-bottom:16px;">
