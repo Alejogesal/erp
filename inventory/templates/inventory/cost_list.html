@@ -145,7 +145,8 @@
                 <th>Marca / Grupo</th>
                 <th>Proveedor</th>
                 <th>IVA %</th>
-                <th>Costo unitario</th>
+                <th>Costo unitario sin IVA</th>
+                <th>Costo unitario con IVA</th>
                 <th>Acciones</th>
             </tr>
         </thead>
@@ -165,11 +166,14 @@
                     <td>{{ form.vat_percent }}</td>
                     <td>{{ form.avg_cost }}</td>
                     <td>
+                        <input type="text" class="cost-with-vat" readonly>
+                    </td>
+                    <td>
                         <button type="button" class="danger" data-product-id="{{ form.product_id.value }}">Eliminar</button>
                     </td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="6">Aún no hay productos cargados.</td></tr>
+                <tr><td colspan="7">Aún no hay productos cargados.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -226,6 +230,40 @@
             };
             filterInput.addEventListener("input", applyFilter);
         }
+
+        const parseNumber = (value) => {
+            if (!value) {
+                return 0;
+            }
+            const normalized = value.replace(/\s/g, "").replace(/\./g, "").replace(",", ".");
+            const parsed = parseFloat(normalized);
+            return Number.isNaN(parsed) ? 0 : parsed;
+        };
+
+        const formatNumber = (value) => value.toFixed(2).replace(".", ",");
+
+        const updateVatCosts = (row) => {
+            const baseInput = row.querySelector("input[name$='-avg_cost']");
+            const vatInput = row.querySelector("input[name$='-vat_percent']");
+            const withVatInput = row.querySelector(".cost-with-vat");
+            if (!baseInput || !vatInput || !withVatInput) {
+                return;
+            }
+            const base = parseNumber(baseInput.value);
+            const vat = parseNumber(vatInput.value);
+            const total = base * (1 + vat / 100);
+            withVatInput.value = formatNumber(total);
+        };
+
+        document.querySelectorAll("#productos tbody tr").forEach((row) => {
+            const baseInput = row.querySelector("input[name$='-avg_cost']");
+            const vatInput = row.querySelector("input[name$='-vat_percent']");
+            if (baseInput && vatInput) {
+                baseInput.addEventListener("input", () => updateVatCosts(row));
+                vatInput.addEventListener("input", () => updateVatCosts(row));
+                updateVatCosts(row);
+            }
+        });
 
         const deleteForm = document.getElementById("delete-product-form");
         const deleteInput = document.getElementById("delete-product-id");
