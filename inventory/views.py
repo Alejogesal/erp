@@ -1426,7 +1426,29 @@ def mercadolibre_dashboard(request):
                 if metrics.get("truncated"):
                     notice += " (Sync limitado por configuración)"
                 messages.success(request, notice)
+        elif action == "link_item":
+            item_id = request.POST.get("item_id")
+            product_id = request.POST.get("product_id")
+            ml_item = MercadoLibreItem.objects.filter(id=item_id).first()
+            if not ml_item:
+                messages.error(request, "No se encontró la publicación.")
+            else:
+                if product_id:
+                    product = Product.objects.filter(id=product_id).first()
+                    if not product:
+                        messages.error(request, "Producto no encontrado.")
+                    else:
+                        ml_item.product = product
+                        ml_item.matched_name = product.name
+                        ml_item.save(update_fields=["product", "matched_name"])
+                        messages.success(request, "Match actualizado.")
+                else:
+                    ml_item.product = None
+                    ml_item.matched_name = ""
+                    ml_item.save(update_fields=["product", "matched_name"])
+                    messages.success(request, "Match eliminado.")
 
+    products = Product.objects.order_by("name")
     recent_cutoff = timezone.now() - timedelta(days=30)
     return render(
         request,
@@ -1437,6 +1459,7 @@ def mercadolibre_dashboard(request):
             "metrics": metrics,
             "missing_credentials": missing_credentials,
             "recent_cutoff": recent_cutoff,
+            "products": products,
         },
     )
 

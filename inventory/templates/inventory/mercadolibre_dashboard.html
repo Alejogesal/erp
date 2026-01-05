@@ -102,10 +102,26 @@
                 </td>
                 <td>
                     {% if item.product %}
-                        {{ item.product.name }}{% if item.product.group %} ({{ item.product.group }}){% endif %}
+                        <div style="font-weight: 600;">
+                            {{ item.product.name }}{% if item.product.group %} ({{ item.product.group }}){% endif %}
+                        </div>
                     {% else %}
-                        <span style="color: var(--muted);">Sin match</span>
+                        <div style="color: var(--muted);">Sin match</div>
                     {% endif %}
+                    <form method="post" style="margin-top:6px;">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="link_item">
+                        <input type="hidden" name="item_id" value="{{ item.id }}">
+                        <select name="product_id">
+                            <option value="">-- Sin match --</option>
+                            {% for product in products %}
+                            <option value="{{ product.id }}"{% if item.product and product.id == item.product.id %} selected{% endif %}>
+                                {{ product.name }}{% if product.group %} ({{ product.group }}){% endif %}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <button type="submit" style="margin-top:6px;">Guardar</button>
+                    </form>
                 </td>
                 <td>{{ item.available_quantity }}</td>
                 <td>{{ item.status }}</td>
