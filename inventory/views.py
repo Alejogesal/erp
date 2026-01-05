@@ -446,7 +446,9 @@ def sales_list(request):
             (item.quantity * (item.product.avg_cost or Decimal("0.00")) for item in sale.items.all()),
             Decimal("0.00"),
         )
-        sale.profit_total = (sale.total or Decimal("0.00")) - cost_total
+        commission_total = sale.ml_commission_total or Decimal("0.00")
+        tax_total = sale.ml_tax_total or Decimal("0.00")
+        sale.margin_total = (sale.total or Decimal("0.00")) - commission_total - tax_total - cost_total
     return render(
         request,
         "inventory/sales_list.html",

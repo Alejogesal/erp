@@ -74,7 +74,9 @@
                 <th>Cliente</th>
                 <th>Depósito</th>
                 <th>Total</th>
-                <th>Ganancia</th>
+                <th>Comisión ML</th>
+                <th>Impuestos ML</th>
+                <th>Margen</th>
                 <th>Acciones</th>
             </tr>
         </thead>
@@ -86,7 +88,9 @@
                 <td>{{ sale.customer|default:"Consumidor final" }}</td>
                 <td>{{ sale.warehouse.name }}</td>
                 <td>${{ sale.total|latam_number:2 }}</td>
-                <td>${{ sale.profit_total|latam_number:2 }}</td>
+                <td>${{ sale.ml_commission_total|latam_number:2 }}</td>
+                <td>${{ sale.ml_tax_total|latam_number:2 }}</td>
+                <td>${{ sale.margin_total|latam_number:2 }}</td>
                 <td>
                     <a class="pill" href="{% url 'inventory_sale_receipt' sale.id %}">Ver</a>
                     <a class="pill" href="{% url 'inventory_sale_receipt_pdf' sale.id %}">PDF</a>

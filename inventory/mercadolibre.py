@@ -415,11 +415,19 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
         return False, "no_matches"
 
     total_amount = Decimal(str(order.get("total_amount", 0) or 0))
+    fee_total = Decimal("0.00")
+    tax_total = Decimal("0.00")
+    for payment in order.get("payments") or []:
+        fee_total += Decimal(str(payment.get("fee_amount", 0) or 0))
+        tax_total += Decimal(str(payment.get("taxes_amount", 0) or 0))
     sale = Sale.objects.create(
         warehouse=ml_wh,
         audience=Customer.Audience.CONSUMER,
         total=total_amount,
         reference=reference,
+        ml_order_id=str(order_id),
+        ml_commission_total=fee_total.quantize(Decimal("0.01")),
+        ml_tax_total=tax_total.quantize(Decimal("0.01")),
         user=user,
     )
     for product, quantity, unit_price, vat_percent in matched_items:

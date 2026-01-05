@@ -323,6 +323,9 @@ class Sale(models.Model):
     total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     discount_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     reference = models.CharField(max_length=255, blank=True, default="")
+    ml_order_id = models.CharField(max_length=50, blank=True, default="")
+    ml_commission_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    ml_tax_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     created_at = models.DateTimeField(auto_now_add=True)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="sales")
 
