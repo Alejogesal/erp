@@ -61,6 +61,11 @@
             <button type="submit">Transferir</button>
         </div>
     </form>
+    <form method="post" style="margin-top:12px;" onsubmit="return confirm('¿Crear compras a partir del stock actual de MercadoLibre?');">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="create_ml_purchase">
+        <button type="submit">Crear compras desde stock ML</button>
+    </form>
     {% else %}
     <div>Configurá los depósitos Común y MercadoLibre para habilitar transferencias.</div>
     {% endif %}

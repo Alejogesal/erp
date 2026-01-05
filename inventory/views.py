@@ -853,6 +853,8 @@ def stock_list(request):
     ml_wh = Warehouse.objects.filter(type=ml_code).first()
     transfer_form = StockTransferForm()
     query = (request.GET.get("q") or "").strip()
+    aris_supplier = Supplier.objects.filter(name__iexact="Aris Norma").first()
+    aurill_supplier = Supplier.objects.filter(name__iexact="Aurill- Dario").first()
 
     def parse_decimal(value: str) -> Decimal:
         raw = (value or "").strip().replace(" ", "")
@@ -897,6 +899,82 @@ def stock_list(request):
                 return redirect("inventory_stock_list")
             except services.InvalidMovementError as exc:
                 messages.error(request, str(exc))
+        elif action == "create_ml_purchase":
+            if not ml_wh:
+                messages.error(request, "Falta el depósito MercadoLibre.")
+                return redirect("inventory_stock_list")
+            if not aris_supplier or not aurill_supplier:
+                messages.error(request, "Faltan proveedores Aris Norma o Aurill- Dario.")
+                return redirect("inventory_stock_list")
+
+            products = (
+                Product.objects.order_by("sku")
+                .annotate(
+                    ml_qty=Coalesce(
+                        Sum(
+                            Case(
+                                When(stocks__warehouse__type=ml_code, then="stocks__quantity"),
+                                output_field=decimal_field,
+                            )
+                        ),
+                        Value(0, output_field=decimal_field),
+                        output_field=decimal_field,
+                    ),
+                )
+                .filter(ml_qty__gt=0)
+            )
+            if not products.exists():
+                messages.error(request, "No hay stock en MercadoLibre para importar.")
+                return redirect("inventory_stock_list")
+
+            purchases = {
+                "aurill": {"supplier": aurill_supplier, "items": []},
+                "aris": {"supplier": aris_supplier, "items": []},
+            }
+            for product in products:
+                qty = product.ml_qty or Decimal("0.00")
+                if qty <= 0:
+                    continue
+                vat = product.vat_percent or Decimal("0.00")
+                unit_cost = (product.avg_cost or Decimal("0.00")) * (Decimal("1.00") + vat / Decimal("100.00"))
+                target = "aurill" if "aurill" in (product.group or "").lower() else "aris"
+                purchases[target]["items"].append(
+                    {
+                        "product": product,
+                        "quantity": qty,
+                        "unit_cost": unit_cost.quantize(Decimal("0.01")),
+                        "vat_percent": vat,
+                    }
+                )
+
+            created = 0
+            with transaction.atomic():
+                for data in purchases.values():
+                    if not data["items"]:
+                        continue
+                    purchase = Purchase.objects.create(
+                        supplier=data["supplier"],
+                        warehouse=ml_wh,
+                        reference="Compra ML stock inicial",
+                        user=request.user,
+                    )
+                    total = Decimal("0.00")
+                    for item in data["items"]:
+                        qty = item["quantity"]
+                        unit_cost = item["unit_cost"]
+                        total += qty * unit_cost
+                        PurchaseItem.objects.create(
+                            purchase=purchase,
+                            product=item["product"],
+                            quantity=qty,
+                            unit_cost=unit_cost,
+                            vat_percent=item["vat_percent"],
+                        )
+                    purchase.total = total.quantize(Decimal("0.01"))
+                    purchase.save(update_fields=["total"])
+                    created += 1
+            messages.success(request, f"Compras creadas: {created}.")
+            return redirect("inventory_stock_list")
         else:
             transfer_form = StockTransferForm(request.POST)
             if not comun_wh or not ml_wh:
