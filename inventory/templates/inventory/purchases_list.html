@@ -33,7 +33,12 @@
                     <td>{{ item_form.quantity }}</td>
                     <td>{{ item_form.unit_cost }}</td>
                     <td class="vat-col">{{ item_form.vat_percent }}</td>
-                    <td>{% if formset.can_delete %}{{ item_form.DELETE }}{% endif %}</td>
+                    <td>
+                        {% if formset.can_delete %}
+                        {{ item_form.DELETE }}
+                        <button type="button" class="pill delete-row" style="font-size:12px; padding:4px 8px;">Eliminar</button>
+                        {% endif %}
+                    </td>
                 </tr>
                 {% if item_form.errors %}
                 <tr>
@@ -141,6 +146,29 @@
                 selectEl.size = 0;
                 selectEl.style.display = "none";
             });
+            search.addEventListener("keydown", (event) => {
+                if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                    event.preventDefault();
+                    const visible = Array.from(selectEl.options).filter((opt) => opt.style.display !== "none");
+                    if (!visible.length) return;
+                    let idx = visible.findIndex((opt) => opt.selected);
+                    if (idx === -1) idx = 0;
+                    idx += event.key === "ArrowDown" ? 1 : -1;
+                    if (idx < 0) idx = 0;
+                    if (idx >= visible.length) idx = visible.length - 1;
+                    visible.forEach((opt) => (opt.selected = false));
+                    visible[idx].selected = true;
+                    selectEl.size = Math.min(8, visible.length);
+                    selectEl.style.display = "";
+                } else if (event.key === "Enter") {
+                    const selected = selectEl.options[selectEl.selectedIndex];
+                    if (selected) {
+                        search.value = selected.textContent || "";
+                        selectEl.style.display = "none";
+                        selectEl.size = 0;
+                    }
+                }
+            });
         };
 
         document.querySelectorAll("select[name$='-product']").forEach(setupProductSearch);
@@ -159,12 +187,24 @@
             const vat = container.querySelector("[name$='-vat_percent']");
             const deleteField = container.querySelector("[name$='-DELETE']");
 
-            [product, supplier, qty, cost, vat, deleteField].forEach(field => {
+            [product, supplier, qty, cost, vat].forEach(field => {
                 const td = document.createElement("td");
                 if (field) td.appendChild(field);
                 if (field && field.name?.includes("vat_percent")) td.classList.add("vat-col");
                 tr.appendChild(td);
             });
+            const deleteTd = document.createElement("td");
+            if (deleteField) {
+                deleteTd.appendChild(deleteField);
+                const deleteBtn = document.createElement("button");
+                deleteBtn.type = "button";
+                deleteBtn.className = "pill delete-row";
+                deleteBtn.style.fontSize = "12px";
+                deleteBtn.style.padding = "4px 8px";
+                deleteBtn.textContent = "Eliminar";
+                deleteTd.appendChild(deleteBtn);
+            }
+            tr.appendChild(deleteTd);
 
             totalForms.value = idx + 1;
             body.appendChild(tr);
@@ -180,6 +220,17 @@
             });
             document.querySelectorAll(".vat-col").forEach((col) => (col.style.display = "none"));
         }
+
+        document.addEventListener("click", (event) => {
+            const btn = event.target.closest(".delete-row");
+            if (!btn) return;
+            const row = btn.closest("tr");
+            const checkbox = row?.querySelector("input[type='checkbox'][name$='-DELETE']");
+            if (checkbox) {
+                checkbox.checked = true;
+                row.style.opacity = "0.45";
+            }
+        });
     })();
 </script>
 {% endblock %}

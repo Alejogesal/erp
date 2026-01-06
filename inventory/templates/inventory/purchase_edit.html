@@ -36,7 +36,12 @@
                     <td>{{ item_form.quantity }}</td>
                     <td>{{ item_form.unit_cost }}</td>
                     <td class="vat-col">{{ item_form.vat_percent }}</td>
-                    <td>{% if formset.can_delete %}{{ item_form.DELETE }}{% endif %}</td>
+                    <td>
+                        {% if formset.can_delete %}
+                        {{ item_form.DELETE }}
+                        <button type="button" class="pill delete-row" style="font-size:12px; padding:4px 8px;">Eliminar</button>
+                        {% endif %}
+                    </td>
                 </tr>
                 {% if item_form.errors %}
                 <tr>
@@ -62,6 +67,79 @@
         const totalForms = document.getElementById("id_form-TOTAL_FORMS");
         if (!addBtn || !body || !totalForms) return;
 
+        const setupProductSearch = (selectEl) => {
+            if (!selectEl) return;
+            if (selectEl.dataset.searchReady === "1") return;
+            selectEl.dataset.searchReady = "1";
+            selectEl.style.display = "none";
+            const wrapper = document.createElement("div");
+            wrapper.style.display = "flex";
+            wrapper.style.flexDirection = "column";
+            wrapper.style.gap = "6px";
+            const search = document.createElement("input");
+            search.type = "text";
+            search.placeholder = "Buscar producto...";
+            selectEl.parentElement.insertBefore(wrapper, selectEl);
+            wrapper.appendChild(search);
+            wrapper.appendChild(selectEl);
+
+            const filterOptions = () => {
+                const q = search.value.trim().toLowerCase();
+                let visibleCount = 0;
+                Array.from(selectEl.options).forEach((opt) => {
+                    const label = opt.textContent || "";
+                    const show = !q || label.toLowerCase().includes(q);
+                    opt.style.display = show ? "" : "none";
+                    if (show) visibleCount += 1;
+                });
+                if (q && visibleCount > 0) {
+                    selectEl.size = Math.min(8, visibleCount);
+                    selectEl.style.display = "";
+                } else {
+                    selectEl.size = 0;
+                    selectEl.style.display = "none";
+                }
+            };
+            search.addEventListener("input", filterOptions);
+            search.addEventListener("focus", filterOptions);
+            search.addEventListener("blur", () => {
+                setTimeout(() => {
+                    selectEl.size = 0;
+                    selectEl.style.display = "none";
+                }, 120);
+            });
+            selectEl.addEventListener("change", () => {
+                const selected = selectEl.options[selectEl.selectedIndex]?.textContent || "";
+                search.value = selected;
+                selectEl.style.display = "none";
+            });
+            search.addEventListener("keydown", (event) => {
+                if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                    event.preventDefault();
+                    const visible = Array.from(selectEl.options).filter((opt) => opt.style.display !== "none");
+                    if (!visible.length) return;
+                    let idx = visible.findIndex((opt) => opt.selected);
+                    if (idx === -1) idx = 0;
+                    idx += event.key === "ArrowDown" ? 1 : -1;
+                    if (idx < 0) idx = 0;
+                    if (idx >= visible.length) idx = visible.length - 1;
+                    visible.forEach((opt) => (opt.selected = false));
+                    visible[idx].selected = true;
+                    selectEl.size = Math.min(8, visible.length);
+                    selectEl.style.display = "";
+                } else if (event.key === "Enter") {
+                    const selected = selectEl.options[selectEl.selectedIndex];
+                    if (selected) {
+                        search.value = selected.textContent || "";
+                        selectEl.style.display = "none";
+                        selectEl.size = 0;
+                    }
+                }
+            });
+        };
+
+        document.querySelectorAll("select[name$='-product']").forEach(setupProductSearch);
+
         addBtn.addEventListener("click", () => {
             const idx = parseInt(totalForms.value, 10);
             const emptyHtml = `{{ formset.empty_form.as_p|escapejs }}`.replace(/__prefix__/g, `form-${idx}`);
@@ -76,15 +154,28 @@
             const vat = container.querySelector("[name$='-vat_percent']");
             const deleteField = container.querySelector("[name$='-DELETE']");
 
-            [product, supplier, qty, cost, vat, deleteField].forEach(field => {
+            [product, supplier, qty, cost, vat].forEach(field => {
                 const td = document.createElement("td");
                 if (field) td.appendChild(field);
                 if (field && field.name?.includes("vat_percent")) td.classList.add("vat-col");
                 tr.appendChild(td);
             });
+            const deleteTd = document.createElement("td");
+            if (deleteField) {
+                deleteTd.appendChild(deleteField);
+                const deleteBtn = document.createElement("button");
+                deleteBtn.type = "button";
+                deleteBtn.className = "pill delete-row";
+                deleteBtn.style.fontSize = "12px";
+                deleteBtn.style.padding = "4px 8px";
+                deleteBtn.textContent = "Eliminar";
+                deleteTd.appendChild(deleteBtn);
+            }
+            tr.appendChild(deleteTd);
 
             totalForms.value = idx + 1;
             body.appendChild(tr);
+            setupProductSearch(tr.querySelector("select[name$='-product']"));
         });
 
         const toggleVat = document.getElementById("toggle-vat");
@@ -97,6 +188,17 @@
             });
             document.querySelectorAll(".vat-col").forEach((col) => (col.style.display = "none"));
         }
+
+        document.addEventListener("click", (event) => {
+            const btn = event.target.closest(".delete-row");
+            if (!btn) return;
+            const row = btn.closest("tr");
+            const checkbox = row?.querySelector("input[type='checkbox'][name$='-DELETE']");
+            if (checkbox) {
+                checkbox.checked = true;
+                row.style.opacity = "0.45";
+            }
+        });
     })();
 </script>
 {% endblock %}
