@@ -46,12 +46,12 @@
         <span class="hint">Buscar</span>
         <input id="price-filter" type="text" placeholder="SKU o producto">
     </div>
-    <div class="price-filter" style="flex-direction:column; align-items:stretch;">
+    <div class="price-filter" style="flex-direction:column; align-items:stretch; position:relative;">
         <div style="display:flex; align-items:center; gap:10px;">
             <span class="hint">Marcas</span>
             <input id="brand-search" type="text" placeholder="Buscar marca..." style="flex:1;">
         </div>
-        <select id="price-groups" multiple style="width:100%; background:transparent; border:none; color:var(--text); height:120px;">
+        <select id="price-groups" multiple style="width:100%; background:#0c141f; border:1px solid #2a313c; color:var(--text); height:140px; display:none;">
             {% for group in group_options %}
             <option value="{{ group }}">{{ group }}</option>
             {% endfor %}
@@ -141,11 +141,23 @@
         }
 
         if (brandSearch && groupSelect) {
-            brandSearch.addEventListener("input", () => {
+            const filterOptions = () => {
                 const query = brandSearch.value.trim().toLowerCase();
                 Array.from(groupSelect.options).forEach((opt) => {
                     opt.hidden = query && !opt.value.toLowerCase().includes(query);
                 });
+                groupSelect.style.display = query ? "block" : "none";
+            };
+            brandSearch.addEventListener("input", filterOptions);
+            brandSearch.addEventListener("focus", filterOptions);
+            brandSearch.addEventListener("blur", () => {
+                setTimeout(() => {
+                    groupSelect.style.display = "none";
+                }, 120);
+            });
+            groupSelect.addEventListener("change", () => {
+                brandSearch.value = "";
+                groupSelect.style.display = "none";
             });
         }
     })();
