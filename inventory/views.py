@@ -645,6 +645,32 @@ def sales_list(request):
         Sale.objects.filter(id__in=deleted_ids).delete()
         messages.success(request, f"Ventas eliminadas: {deleted}.")
         return redirect("inventory_sales_list")
+    if action == "bulk_delete_selected":
+        ids = request.POST.getlist("sale_ids")
+        if not ids:
+            messages.error(request, "No seleccionaste ventas para eliminar.")
+            return redirect("inventory_sales_list")
+        sales = list(
+            Sale.objects.filter(id__in=ids).prefetch_related("items", "movements")
+        )
+        deleted = 0
+        with transaction.atomic():
+            for sale in sales:
+                is_ml_sale = sale.ml_order_id or sale.reference.startswith("ML ORDER") or sale.reference.startswith("GS ORDER")
+                for movement in sale.movements.select_for_update():
+                    if not is_ml_sale and movement.movement_type == StockMovement.MovementType.EXIT and movement.from_warehouse:
+                        stock, _ = Stock.objects.select_for_update().get_or_create(
+                            product=movement.product,
+                            warehouse=movement.from_warehouse,
+                            defaults={"quantity": Decimal("0.00")},
+                        )
+                        stock.quantity = (stock.quantity + movement.quantity).quantize(Decimal("0.01"))
+                        stock.save(update_fields=["quantity"])
+                    movement.delete()
+                sale.delete()
+                deleted += 1
+        messages.success(request, f"Ventas eliminadas: {deleted}.")
+        return redirect("inventory_sales_list")
     if request.method == "POST":
         header_form = SaleHeaderForm(request.POST)
         formset = SaleItemFormSet(request.POST)

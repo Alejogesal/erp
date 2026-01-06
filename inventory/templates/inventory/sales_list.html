@@ -109,10 +109,24 @@
 </div>
 
 <div class="card table-card">
-    <div class="card-title">Historial de ventas</div>
-    <table>
+    <div class="card-title" style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+        <span>Historial de ventas</span>
+        <div style="font-size:12px; color:var(--muted); display:flex; align-items:center; gap:10px;">
+            <label>Desde <input id="bulk-select-start" type="date" style="margin-left:6px;"></label>
+            <label>Hasta <input id="bulk-select-end" type="date" style="margin-left:6px;"></label>
+            <button type="button" id="bulk-select-all">Seleccionar todas</button>
+        </div>
+    </div>
+    <form method="post" action="{% url 'inventory_sales_list' %}">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="bulk_delete_selected">
+        <div style="display:flex; align-items:center; gap:10px; margin:6px 0 10px;">
+            <button type="submit" onclick="return confirm('¿Eliminar ventas seleccionadas?');">Eliminar seleccionadas</button>
+        </div>
+        <table>
         <thead>
             <tr>
+                <th>Sel</th>
                 <th>Comprobante</th>
                 <th>Fecha</th>
                 <th>Cliente</th>
@@ -126,7 +140,8 @@
         </thead>
         <tbody>
             {% for sale in sales %}
-            <tr>
+            <tr data-created="{{ sale.created_at|date:'c' }}">
+                <td><input type="checkbox" name="sale_ids" value="{{ sale.id }}"></td>
                 <td>{{ sale.ml_order_id|default:sale.invoice_number }}</td>
                 <td>{{ sale.created_at|date:"d/m/Y H:i" }}</td>
                 <td>{{ sale.customer|default:"Consumidor final" }}</td>
@@ -145,10 +160,11 @@
                 </td>
             </tr>
             {% empty %}
-            <tr><td colspan="7">Aún no hay ventas registradas.</td></tr>
+            <tr><td colspan="10">Aún no hay ventas registradas.</td></tr>
             {% endfor %}
         </tbody>
-    </table>
+        </table>
+    </form>
 </div>
 {{ customer_audiences|json_script:"customer-audiences" }}
 <script>
@@ -256,6 +272,37 @@
             totalForms.value = idx + 1;
             body.appendChild(tr);
             setupProductSearch(tr.querySelector("select[name$='-product']"));
+        });
+    })();
+
+    (function() {
+        const selectAllBtn = document.getElementById("bulk-select-all");
+        const startInput = document.getElementById("bulk-select-start");
+        const endInput = document.getElementById("bulk-select-end");
+        if (!selectAllBtn) return;
+
+        const toDate = (value) => {
+            if (!value) return null;
+            const parts = value.split("-");
+            if (parts.length !== 3) return null;
+            return new Date(`${parts[0]}-${parts[1]}-${parts[2]}T00:00:00`);
+        };
+
+        selectAllBtn.addEventListener("click", () => {
+            const startDate = toDate(startInput?.value);
+            const endDate = toDate(endInput?.value);
+            const rows = Array.from(document.querySelectorAll("tbody tr[data-created]"));
+            rows.forEach((row) => {
+                const checkbox = row.querySelector("input[type='checkbox'][name='sale_ids']");
+                if (!checkbox) return;
+                const createdRaw = row.getAttribute("data-created");
+                const created = createdRaw ? new Date(createdRaw) : null;
+                if (!created || (startDate && created < startDate) || (endDate && created > new Date(endDate.getTime() + 86400000 - 1))) {
+                    checkbox.checked = false;
+                    return;
+                }
+                checkbox.checked = true;
+            });
         });
     })();
 </script>
