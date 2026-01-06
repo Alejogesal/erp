@@ -1049,7 +1049,7 @@ def stock_list(request):
     variant_qty_map = {
         row["product_id"]: Decimal(str(row["total_qty"]))
         for row in ProductVariant.objects.values("product_id").annotate(
-            total_qty=Coalesce(Sum("quantity"), 0)
+            total_qty=Coalesce(Sum("quantity"), Value(0, output_field=decimal_field), output_field=decimal_field)
         )
     }
     if query:
