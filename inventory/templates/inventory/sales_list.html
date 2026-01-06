@@ -45,6 +45,31 @@
 </div>
 
 <div class="card" style="margin-bottom:16px;">
+    <div class="card-title">Eliminar ventas en lote</div>
+    <form method="post" action="{% url 'inventory_sales_list' %}">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="bulk_delete_sales">
+        <div class="cards" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
+            <div>
+                <label for="bulk_start">Desde</label>
+                <input id="bulk_start" name="bulk_start" type="datetime-local">
+            </div>
+            <div>
+                <label for="bulk_end">Hasta</label>
+                <input id="bulk_end" name="bulk_end" type="datetime-local">
+            </div>
+            <div style="display:flex; align-items:center; gap:8px; padding-top:22px;">
+                <input id="bulk_only_ml" name="bulk_only_ml" type="checkbox" value="1">
+                <label for="bulk_only_ml">Solo MercadoLibre</label>
+            </div>
+        </div>
+        <div style="margin-top:12px;">
+            <button type="submit" onclick="return confirm('¿Eliminar ventas según el filtro?');">Eliminar ventas</button>
+        </div>
+    </form>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
     <div class="card-title">Registrar venta</div>
     <form method="post" action="{% url 'inventory_sales_list' %}">
         {% csrf_token %}
@@ -133,6 +158,10 @@
         const totalForms = document.getElementById("id_form-TOTAL_FORMS");
         const customerSelect = document.getElementById("id_cliente");
         const audienceSelect = document.getElementById("id_audiencia");
+        const warehouseSelect = document.getElementById("id_warehouse");
+        const totalVenta = document.getElementById("id_total_venta");
+        const comisionMl = document.getElementById("id_comision_ml");
+        const impuestosMl = document.getElementById("id_impuestos_ml");
         const audiences = JSON.parse(document.getElementById("customer-audiences").textContent || "{}");
 
         function syncAudience() {
@@ -151,7 +180,61 @@
             syncAudience();
         }
 
+        const syncMlFields = () => {
+            if (!warehouseSelect) return;
+            const isMl = warehouseSelect.options[warehouseSelect.selectedIndex]?.textContent?.toLowerCase().includes("mercadolibre");
+            [totalVenta, comisionMl, impuestosMl].forEach((field) => {
+                if (!field) return;
+                const wrapper = field.closest("p") || field.parentElement;
+                if (wrapper) wrapper.style.display = isMl ? "" : "none";
+            });
+        };
+        if (warehouseSelect) {
+            warehouseSelect.addEventListener("change", syncMlFields);
+            syncMlFields();
+        }
+
         if (!addBtn || !body || !totalForms) return;
+        const setupProductSearch = (selectEl) => {
+            if (!selectEl) return;
+            if (selectEl.dataset.searchReady === "1") return;
+            selectEl.dataset.searchReady = "1";
+            selectEl.style.display = "none";
+            const wrapper = document.createElement("div");
+            wrapper.style.display = "flex";
+            wrapper.style.flexDirection = "column";
+            wrapper.style.gap = "6px";
+            const search = document.createElement("input");
+            search.type = "text";
+            search.placeholder = "Buscar producto...";
+            selectEl.parentElement.insertBefore(wrapper, selectEl);
+            wrapper.appendChild(search);
+            wrapper.appendChild(selectEl);
+
+            const filterOptions = () => {
+                const q = search.value.trim().toLowerCase();
+                Array.from(selectEl.options).forEach((opt) => {
+                    const label = opt.textContent || "";
+                    opt.hidden = q && !label.toLowerCase().includes(q);
+                });
+                selectEl.style.display = q ? "" : "none";
+            };
+            search.addEventListener("input", filterOptions);
+            search.addEventListener("focus", filterOptions);
+            search.addEventListener("blur", () => {
+                setTimeout(() => {
+                    selectEl.style.display = "none";
+                }, 120);
+            });
+            selectEl.addEventListener("change", () => {
+                const selected = selectEl.options[selectEl.selectedIndex]?.textContent || "";
+                search.value = selected;
+                selectEl.style.display = "none";
+            });
+        };
+
+        document.querySelectorAll("select[name$='-product']").forEach(setupProductSearch);
+
         addBtn.addEventListener("click", () => {
             const idx = parseInt(totalForms.value, 10);
             const emptyHtml = `{{ formset.empty_form.as_p|escapejs }}`.replace(/__prefix__/g, `form-${idx}`);
@@ -172,6 +255,7 @@
 
             totalForms.value = idx + 1;
             body.appendChild(tr);
+            setupProductSearch(tr.querySelector("select[name$='-product']"));
         });
     })();
 </script>

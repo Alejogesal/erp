@@ -113,6 +113,24 @@ class SaleHeaderForm(forms.Form):
         required=False,
     )
     cliente = forms.ModelChoiceField(queryset=Customer.objects.all(), required=False)
+    total_venta = forms.DecimalField(
+        label="Total de venta",
+        min_value=Decimal("0.00"),
+        decimal_places=2,
+        required=False,
+    )
+    comision_ml = forms.DecimalField(
+        label="Comisión ML",
+        min_value=Decimal("0.00"),
+        decimal_places=2,
+        required=False,
+    )
+    impuestos_ml = forms.DecimalField(
+        label="Impuestos ML",
+        min_value=Decimal("0.00"),
+        decimal_places=2,
+        required=False,
+    )
 
 
 class SaleItemForm(forms.Form):
@@ -587,6 +605,46 @@ def sales_list(request):
             f"Ventas importadas: {created_sales}, omitidas: {skipped}, sin match: {unmatched}.",
         )
         return redirect("inventory_sales_list")
+    if action == "bulk_delete_sales":
+        start_raw = (request.POST.get("bulk_start") or "").strip()
+        end_raw = (request.POST.get("bulk_end") or "").strip()
+        only_ml = request.POST.get("bulk_only_ml") == "1"
+        if not start_raw and not end_raw and not only_ml:
+            messages.error(request, "Indicá un rango de fechas o seleccioná solo MercadoLibre.")
+            return redirect("inventory_sales_list")
+
+        sales_qs = Sale.objects.all()
+        if only_ml:
+            sales_qs = sales_qs.filter(
+                Q(reference__startswith="ML ORDER ")
+                | Q(reference__startswith="GS ORDER ")
+                | Q(ml_order_id__gt="")
+            )
+        if start_raw:
+            try:
+                start_dt = datetime.fromisoformat(start_raw)
+                if timezone.is_naive(start_dt):
+                    start_dt = timezone.make_aware(start_dt)
+                sales_qs = sales_qs.filter(created_at__gte=start_dt)
+            except ValueError:
+                messages.error(request, "Fecha desde inválida.")
+                return redirect("inventory_sales_list")
+        if end_raw:
+            try:
+                end_dt = datetime.fromisoformat(end_raw)
+                if timezone.is_naive(end_dt):
+                    end_dt = timezone.make_aware(end_dt)
+                sales_qs = sales_qs.filter(created_at__lte=end_dt)
+            except ValueError:
+                messages.error(request, "Fecha hasta inválida.")
+                return redirect("inventory_sales_list")
+
+        deleted_ids = list(sales_qs.values_list("id", flat=True))
+        StockMovement.objects.filter(sale_id__in=deleted_ids).delete()
+        deleted = len(deleted_ids)
+        Sale.objects.filter(id__in=deleted_ids).delete()
+        messages.success(request, f"Ventas eliminadas: {deleted}.")
+        return redirect("inventory_sales_list")
     if request.method == "POST":
         header_form = SaleHeaderForm(request.POST)
         formset = SaleItemFormSet(request.POST)
@@ -594,6 +652,9 @@ def sales_list(request):
             warehouse = header_form.cleaned_data["warehouse"]
             audience = header_form.cleaned_data.get("audiencia") or Customer.Audience.CONSUMER
             customer = header_form.cleaned_data.get("cliente")
+            total_venta = header_form.cleaned_data.get("total_venta")
+            comision_ml = header_form.cleaned_data.get("comision_ml") or Decimal("0.00")
+            impuestos_ml = header_form.cleaned_data.get("impuestos_ml") or Decimal("0.00")
             if customer:
                 audience = customer.audience
             items = [f.cleaned_data for f in formset.forms if f.cleaned_data and not f.cleaned_data.get("DELETE")]
@@ -608,6 +669,8 @@ def sales_list(request):
                             audience=audience,
                             reference=f"Venta {audience}",
                             user=request.user,
+                            ml_commission_total=comision_ml if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE else Decimal("0.00"),
+                            ml_tax_total=impuestos_ml if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE else Decimal("0.00"),
                         )
                         total = Decimal("0.00")
                         discount_total = Decimal("0.00")
@@ -646,17 +709,18 @@ def sales_list(request):
                             )
                             total += line_total
                             discount_total += discount_amount
-                            services.register_exit(
-                                product=data["product"],
-                                warehouse=warehouse,
-                                quantity=data["quantity"],
-                                user=request.user,
-                                reference=f"Venta {audience} #{sale.id}",
-                                sale_price=final_price,
-                                vat_percent=data.get("vat_percent") or Decimal("0.00"),
-                                sale=sale,
-                            )
-                        sale.total = total
+                            if warehouse.type != Warehouse.WarehouseType.MERCADOLIBRE:
+                                services.register_exit(
+                                    product=data["product"],
+                                    warehouse=warehouse,
+                                    quantity=data["quantity"],
+                                    user=request.user,
+                                    reference=f"Venta {audience} #{sale.id}",
+                                    sale_price=final_price,
+                                    vat_percent=data.get("vat_percent") or Decimal("0.00"),
+                                    sale=sale,
+                                )
+                        sale.total = total_venta if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE and total_venta is not None else total
                         sale.discount_total = discount_total
                         sale.save(update_fields=["total", "discount_total"])
                     messages.success(request, "Venta registrada.")
