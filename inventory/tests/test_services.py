@@ -47,10 +47,8 @@ class InventoryServiceTests(TestCase):
             reference="T-1",
         )
         comun_qty = self.product.stocks.get(warehouse=self.comun).quantity
-        ml_qty = self.product.stocks.get(warehouse=self.mercado_libre).quantity
-
         self.assertEqual(comun_qty, Decimal("3.00"))
-        self.assertEqual(ml_qty, Decimal("5.00"))
+        self.assertFalse(self.product.stocks.filter(warehouse=self.mercado_libre).exists())
         movement = StockMovement.objects.filter(movement_type=StockMovement.MovementType.TRANSFER).last()
         self.assertEqual(movement.from_warehouse, self.comun)
         self.assertEqual(movement.to_warehouse, self.mercado_libre)

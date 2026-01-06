@@ -165,10 +165,6 @@ def register_transfer(
     source_stock.quantity = (source_stock.quantity - qty).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     source_stock.save(update_fields=["quantity"])
 
-    target_stock = _get_stock_for_update(product, to_warehouse)
-    target_stock.quantity = (target_stock.quantity + qty).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    target_stock.save(update_fields=["quantity"])
-
     return StockMovement.objects.create(
         product=product,
         movement_type=StockMovement.MovementType.TRANSFER,

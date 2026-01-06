@@ -83,7 +83,6 @@
                 <th>SKU</th>
                 <th>Producto</th>
                 <th>Comun</th>
-                <th>MercadoLibre</th>
                 <th>Total</th>
             </tr>
         </thead>
@@ -119,11 +118,10 @@
                         </form>
                     {% endif %}
                 </td>
-                <td>{{ product.ml_qty|latam_number:2 }}</td>
-                <td>{{ product.comun_qty|add:product.ml_qty|latam_number:2 }}</td>
+                <td>{{ product.total_qty|latam_number:2 }}</td>
             </tr>
             {% empty %}
-            <tr><td colspan="5">Aún no hay stock registrado.</td></tr>
+            <tr><td colspan="4">Aún no hay stock registrado.</td></tr>
             {% endfor %}
         </tbody>
     </table>

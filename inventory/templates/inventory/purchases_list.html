@@ -70,6 +70,7 @@
                 <td>{{ purchase.warehouse.name }}</td>
                 <td>${{ purchase.total|latam_number:2 }}</td>
                 <td>
+                    <a class="pill" href="{% url 'inventory_purchase_receipt' purchase.id %}">Ver</a>
                     <form method="post" action="{% url 'inventory_purchase_delete' purchase.id %}" style="display:inline;" onsubmit="return confirm('¿Eliminar esta compra? Se revertirá el stock.');">
                         {% csrf_token %}
                         <button type="submit">Eliminar</button>

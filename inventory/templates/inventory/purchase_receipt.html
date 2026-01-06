@@ -1,0 +1,91 @@
+{% extends "inventory/base.html" %}
+{% load latam_numbers %}
+{% block title %}Comprobante {{ invoice_number }}{% endblock %}
+{% block content %}
+<style>
+    .receipt-wrapper {
+        background: #0f1622;
+        padding: 18px;
+        border-radius: 14px;
+        border: 1px solid #263041;
+    }
+    .receipt-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+    }
+    .receipt-header h2 { margin: 0; }
+    table.receipt-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+    }
+    table.receipt-table th,
+    table.receipt-table td {
+        border-bottom: 1px solid #1f2a3a;
+        padding: 8px 6px;
+        text-align: left;
+    }
+    table.receipt-table td.num { text-align: right; }
+    .totals {
+        margin-top: 12px;
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 6px;
+        font-size: 13px;
+    }
+    .totals div { text-align: right; }
+    .totals .label { text-align: left; }
+</style>
+
+<div class="receipt-wrapper">
+    <div class="receipt-header">
+        <div>
+            <h2>Comprobante de compra</h2>
+            <div>Nº {{ invoice_number }}</div>
+        </div>
+        <div style="text-align:right;">
+            <div>Fecha: {{ purchase.created_at|date:"d/m/Y H:i" }}</div>
+            <div>Proveedor: {{ purchase.supplier|default:"-" }}</div>
+            <div>Depósito: {{ purchase.warehouse.name }}</div>
+        </div>
+    </div>
+
+    <table class="receipt-table">
+        <thead>
+            <tr>
+                <th>Producto</th>
+                <th class="num">Cantidad</th>
+                <th class="num">Costo unitario</th>
+                <th class="num">IVA %</th>
+                <th class="num">Total</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in items %}
+            <tr>
+                <td>{{ item.product.name }}</td>
+                <td class="num">{{ item.quantity|latam_number:2 }}</td>
+                <td class="num">${{ item.unit_cost|latam_number:2 }}</td>
+                <td class="num">{{ item.vat_percent|latam_number:2 }}</td>
+                <td class="num">${{ item.line_total|latam_number:2 }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="totals">
+        <div class="label">Subtotal</div>
+        <div></div>
+        <div>${{ subtotal|latam_number:2 }}</div>
+        <div class="label" style="font-weight:600;">Total</div>
+        <div></div>
+        <div style="font-weight:600;">${{ total|latam_number:2 }}</div>
+    </div>
+</div>
+
+<div class="actions" style="margin-top:12px;">
+    <a class="pill" href="{% url 'inventory_purchases_list' %}">Volver a compras</a>
+</div>
+{% endblock %}

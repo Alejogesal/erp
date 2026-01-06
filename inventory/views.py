@@ -364,10 +364,13 @@ def purchase_receipt(request, purchase_id: int):
     purchase = get_object_or_404(
         Purchase.objects.select_related("supplier", "warehouse").prefetch_related("items__product"), pk=purchase_id
     )
-    subtotal = sum((item.quantity * item.unit_cost for item in purchase.items.all()), Decimal("0.00"))
+    items = list(purchase.items.all())
+    for item in items:
+        item.line_total = item.quantity * item.unit_cost
+    subtotal = sum((item.line_total for item in items), Decimal("0.00"))
     context = {
         "purchase": purchase,
-        "items": purchase.items.all(),
+        "items": items,
         "subtotal": subtotal,
         "total": purchase.total,
         "invoice_number": purchase.invoice_number,
@@ -1040,12 +1043,6 @@ def stock_list(request):
             ),
         )
     )
-    ml_qty_map = {
-        row["product_id"]: Decimal(str(row["total_qty"]))
-        for row in MercadoLibreItem.objects.filter(product__isnull=False, logistic_type="fulfillment")
-        .values("product_id")
-        .annotate(total_qty=Coalesce(Sum("available_quantity"), 0))
-    }
     variant_qty_map = {
         row["product_id"]: Decimal(str(row["total_qty"]))
         for row in ProductVariant.objects.values("product_id").annotate(
@@ -1062,7 +1059,7 @@ def stock_list(request):
             product.has_variants = True
         else:
             product.has_variants = False
-        product.ml_qty = ml_qty_map.get(product.id, Decimal("0.00"))
+        product.total_qty = product.comun_qty
     return render(
         request,
         "inventory/stock_list.html",

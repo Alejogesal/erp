@@ -93,7 +93,7 @@ class DashboardViewTests(TestCase):
         self.assertEqual(len(products), 1)
         p = products[0]
         self.assertEqual(p.comun_qty, Decimal("3.00"))
-        self.assertEqual(p.ml_qty, Decimal("5.00"))
+        self.assertEqual(p.total_qty, Decimal("3.00"))
 
     def test_product_price_list(self):
         self.product.avg_cost = Decimal("50.00")
