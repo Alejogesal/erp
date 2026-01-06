@@ -87,7 +87,7 @@ class PurchaseItemForm(forms.Form):
     product = forms.ModelChoiceField(queryset=Product.objects.all())
     quantity = forms.IntegerField(min_value=1)
     unit_cost = forms.DecimalField(min_value=Decimal("0.00"), decimal_places=2)
-    supplier = forms.ModelChoiceField(queryset=Supplier.objects.all(), label="Proveedor")
+    supplier = forms.ModelChoiceField(queryset=Supplier.objects.all(), label="Proveedor", required=False)
     vat_percent = forms.DecimalField(
         label="IVA %",
         min_value=Decimal("0.00"),
@@ -796,6 +796,104 @@ def purchases_list(request):
             "form": header_form,
             "formset": formset,
         },
+    )
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def purchase_edit(request, purchase_id: int):
+    purchase = get_object_or_404(
+        Purchase.objects.select_related("supplier", "warehouse").prefetch_related("items__product", "movements"),
+        pk=purchase_id,
+    )
+    PurchaseItemFormSet = formset_factory(PurchaseItemForm, extra=1, can_delete=True)
+    if request.method == "POST":
+        header_form = PurchaseHeaderForm(request.POST)
+        formset = PurchaseItemFormSet(request.POST)
+        if header_form.is_valid() and formset.is_valid():
+            items = []
+            for form in formset:
+                if form.cleaned_data.get("DELETE"):
+                    continue
+                if not form.cleaned_data.get("product"):
+                    continue
+                items.append(form.cleaned_data)
+            if not items:
+                messages.error(request, "Agregá al menos un producto.")
+            else:
+                try:
+                    with transaction.atomic():
+                        # Revert previous stock movements
+                        for movement in purchase.movements.select_for_update():
+                            if movement.movement_type == StockMovement.MovementType.ENTRY and movement.to_warehouse:
+                                stock, _ = Stock.objects.select_for_update().get_or_create(
+                                    product=movement.product,
+                                    warehouse=movement.to_warehouse,
+                                    defaults={"quantity": Decimal("0.00")},
+                                )
+                                stock.quantity = (stock.quantity - movement.quantity).quantize(Decimal("0.01"))
+                                if stock.quantity < 0:
+                                    raise services.NegativeStockError("Stock cannot go negative")
+                                stock.save(update_fields=["quantity"])
+                            movement.delete()
+                        purchase.items.all().delete()
+
+                        purchase.warehouse = header_form.cleaned_data["warehouse"]
+                        purchase.supplier = items[0].get("supplier")
+                        purchase.save(update_fields=["warehouse", "supplier"])
+
+                        total = Decimal("0.00")
+                        for item in items:
+                            product = item["product"]
+                            qty = item["quantity"]
+                            unit_cost = item["unit_cost"]
+                            vat = item.get("vat_percent") or Decimal("0.00")
+                            total += unit_cost * qty
+                            PurchaseItem.objects.create(
+                                purchase=purchase,
+                                product=product,
+                                quantity=qty,
+                                unit_cost=unit_cost,
+                                vat_percent=vat,
+                            )
+                            services.register_entry(
+                                product=product,
+                                warehouse=purchase.warehouse,
+                                quantity=qty,
+                                unit_cost=unit_cost,
+                                vat_percent=vat,
+                                user=request.user,
+                                reference=f"Compra #{purchase.id}",
+                                supplier=purchase.supplier,
+                                purchase=purchase,
+                            )
+                        purchase.total = total.quantize(Decimal("0.01"))
+                        purchase.save(update_fields=["total"])
+                    messages.success(request, "Compra actualizada.")
+                    return redirect("inventory_purchase_receipt", purchase_id=purchase.id)
+                except services.NegativeStockError:
+                    messages.error(request, "No se puede actualizar: el stock quedaría negativo.")
+                except Exception as exc:
+                    messages.error(request, f"No se pudo actualizar la compra: {exc}")
+        else:
+            messages.error(request, "Revisá los campos de la compra.")
+    else:
+        header_form = PurchaseHeaderForm(initial={"warehouse": purchase.warehouse})
+        initial = [
+            {
+                "product": item.product,
+                "quantity": int(item.quantity),
+                "unit_cost": item.unit_cost,
+                "supplier": purchase.supplier,
+                "vat_percent": item.vat_percent,
+            }
+            for item in purchase.items.all()
+        ]
+        formset = PurchaseItemFormSet(initial=initial)
+    return render(
+        request,
+        "inventory/purchase_edit.html",
+        {"purchase": purchase, "form": header_form, "formset": formset},
     )
 
 

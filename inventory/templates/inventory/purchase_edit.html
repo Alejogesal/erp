@@ -1,17 +1,20 @@
 {% extends "inventory/base.html" %}
 {% load latam_numbers %}
-{% block title %}Compras{% endblock %}
+{% block title %}Editar compra {{ purchase.invoice_number }}{% endblock %}
 {% block content %}
-<h1>Compras</h1>
-<p class="subtitle">Registrá compras y consultá el historial.</p>
+<h1>Editar compra</h1>
+<p class="subtitle">Actualizá productos y cantidades.</p>
 
 <div class="card" style="margin-bottom:16px;">
-    <div class="card-title">Registrar compra</div>
-    <form method="post" action="{% url 'inventory_purchases_list' %}">
+    <div class="card-title">Compra Nº {{ purchase.invoice_number }}</div>
+    <form method="post">
         {% csrf_token %}
         <h3>Depósito</h3>
         {{ form.as_p }}
         {{ formset.non_form_errors }}
+        <div style="display:flex; align-items:center; gap:10px; margin:10px 0;">
+            <button type="button" id="toggle-vat">Mostrar IVA</button>
+        </div>
         <h3>Productos</h3>
         {{ formset.management_form }}
         <table>
@@ -20,8 +23,8 @@
                     <th>Producto</th>
                     <th>Proveedor</th>
                     <th>Cantidad</th>
-                    <th>Costo unitario</th>
-                <th class="vat-col">IVA %</th>
+                    <th>Costo unitario (con IVA)</th>
+                    <th class="vat-col">IVA %</th>
                     <th>Eliminar</th>
                 </tr>
             </thead>
@@ -43,53 +46,18 @@
                 {% endfor %}
             </tbody>
         </table>
-        <button type="button" id="toggle-vat">Mostrar IVA</button>
         <button type="button" id="add-item">Agregar producto</button>
-        <button type="submit">Registrar compra</button>
+        <button type="submit">Guardar cambios</button>
     </form>
 </div>
 
-<div class="card table-card">
-    <div class="card-title">Historial de compras</div>
-    <table>
-        <thead>
-            <tr>
-                <th>Comprobante</th>
-                <th>Fecha</th>
-                <th>Proveedor</th>
-                <th>Depósito</th>
-                <th>Total</th>
-                <th>Acciones</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for purchase in purchases %}
-            <tr>
-                <td>{{ purchase.invoice_number }}</td>
-                <td>{{ purchase.created_at|date:"d/m/Y H:i" }}</td>
-                <td>{{ purchase.supplier|default:"-" }}</td>
-                <td>{{ purchase.warehouse.name }}</td>
-                <td>${{ purchase.total|latam_number:2 }}</td>
-                <td>
-                    <a class="pill" href="{% url 'inventory_purchase_receipt' purchase.id %}">Ver</a>
-                    <a class="pill" href="{% url 'inventory_purchase_edit' purchase.id %}">Editar</a>
-                    <form method="post" action="{% url 'inventory_purchase_delete' purchase.id %}" style="display:inline;" onsubmit="return confirm('¿Eliminar esta compra? Se revertirá el stock.');">
-                        {% csrf_token %}
-                        <button type="submit">Eliminar</button>
-                    </form>
-                </td>
-            </tr>
-            {% empty %}
-            <tr><td colspan="6">Aún no hay compras registradas.</td></tr>
-            {% endfor %}
-        </tbody>
-    </table>
+<div class="actions">
+    <a class="pill" href="{% url 'inventory_purchase_receipt' purchase.id %}">Volver al comprobante</a>
 </div>
 
 <script>
     (function() {
         const addBtn = document.getElementById("add-item");
-        const toggleVat = document.getElementById("toggle-vat");
         const body = document.getElementById("items-body");
         const totalForms = document.getElementById("id_form-TOTAL_FORMS");
         if (!addBtn || !body || !totalForms) return;
@@ -119,6 +87,7 @@
             body.appendChild(tr);
         });
 
+        const toggleVat = document.getElementById("toggle-vat");
         if (toggleVat) {
             toggleVat.addEventListener("click", () => {
                 const cols = document.querySelectorAll(".vat-col");
