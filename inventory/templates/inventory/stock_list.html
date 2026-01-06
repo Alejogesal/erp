@@ -91,7 +91,14 @@
             {% for product in products %}
             <tr>
                 <td>{{ product.sku }}</td>
-                <td>{{ product.name }}</td>
+                <td>
+                    {{ product.name }}
+                    <div style="margin-top:6px; font-size:12px;">
+                        <a href="{% url 'inventory_product_variants' product.id %}" style="color: var(--muted);">
+                            Variedades
+                        </a>
+                    </div>
+                </td>
                 <td>
                     {% if product.has_variants %}
                         <div style="color: var(--muted); font-size: 12px;">
