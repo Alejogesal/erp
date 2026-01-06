@@ -114,19 +114,18 @@
         <div style="font-size:12px; color:var(--muted); display:flex; align-items:center; gap:10px;">
             <label>Desde <input id="bulk-select-start" type="date" style="margin-left:6px;"></label>
             <label>Hasta <input id="bulk-select-end" type="date" style="margin-left:6px;"></label>
-            <button type="button" id="bulk-select-all">Seleccionar todas</button>
+            <button type="button" id="bulk-select-all" style="padding:4px 8px; font-size:12px;">Seleccionar todas</button>
         </div>
     </div>
     <form method="post" action="{% url 'inventory_sales_list' %}">
         {% csrf_token %}
         <input type="hidden" name="action" value="bulk_delete_selected">
         <div style="display:flex; align-items:center; gap:10px; margin:6px 0 10px;">
-            <button type="submit" onclick="return confirm('¿Eliminar ventas seleccionadas?');">Eliminar seleccionadas</button>
+            <button type="submit" onclick="return confirm('¿Eliminar ventas seleccionadas?');" style="padding:4px 8px; font-size:12px;">Eliminar seleccionadas</button>
         </div>
         <table>
         <thead>
             <tr>
-                <th>Sel</th>
                 <th>Comprobante</th>
                 <th>Fecha</th>
                 <th>Cliente</th>
@@ -141,7 +140,6 @@
         <tbody>
             {% for sale in sales %}
             <tr data-created="{{ sale.created_at|date:'c' }}">
-                <td><input type="checkbox" name="sale_ids" value="{{ sale.id }}"></td>
                 <td>{{ sale.ml_order_id|default:sale.invoice_number }}</td>
                 <td>{{ sale.created_at|date:"d/m/Y H:i" }}</td>
                 <td>{{ sale.customer|default:"Consumidor final" }}</td>
@@ -157,10 +155,11 @@
                         {% csrf_token %}
                         <button type="submit">Eliminar</button>
                     </form>
+                    <input type="checkbox" name="sale_ids" value="{{ sale.id }}" style="margin-left:8px;">
                 </td>
             </tr>
             {% empty %}
-            <tr><td colspan="10">Aún no hay ventas registradas.</td></tr>
+            <tr><td colspan="9">Aún no hay ventas registradas.</td></tr>
             {% endfor %}
         </tbody>
         </table>
