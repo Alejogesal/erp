@@ -119,9 +119,11 @@
     <form method="post" action="{% url 'inventory_sales_list' %}">
         {% csrf_token %}
         <input type="hidden" name="action" value="bulk_delete_selected">
-        <div style="display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin:6px 0 10px;">
-            <button type="button" id="bulk-select-all" class="pill" style="font-size:12px; padding:4px 8px;">Seleccionar todas</button>
-            <button type="submit" class="pill" onclick="return confirm('¿Eliminar ventas seleccionadas?');" style="font-size:12px; padding:4px 8px;">Eliminar seleccionadas</button>
+        <div style="display:flex; justify-content:flex-end; margin:6px 0 10px;">
+            <div style="display:flex; flex-direction:column; align-items:flex-start; gap:6px;">
+                <button type="button" id="bulk-select-all" class="pill" style="font-size:12px; padding:4px 8px;">Seleccionar todas</button>
+                <button type="submit" class="pill" onclick="return confirm('¿Eliminar ventas seleccionadas?');" style="font-size:12px; padding:4px 8px;">Eliminar seleccionadas</button>
+            </div>
         </div>
         <table>
         <thead>
@@ -149,8 +151,8 @@
                 <td>${{ sale.ml_tax_total|latam_number:2 }}</td>
                 <td>${{ sale.margin_total|latam_number:2 }}</td>
                 <td>
-                    <a class="pill" href="{% url 'inventory_sale_receipt' sale.id %}">Ver</a>
-                    <a class="pill" href="{% url 'inventory_sale_receipt_pdf' sale.id %}">PDF</a>
+                    <a class="pill" href="{% url 'inventory_sale_receipt' sale.id %}" style="font-size:12px; padding:4px 8px;">Ver</a>
+                    <a class="pill" href="{% url 'inventory_sale_receipt_pdf' sale.id %}" style="font-size:12px; padding:4px 8px;">PDF</a>
                     <input type="checkbox" name="sale_ids" value="{{ sale.id }}" style="margin-left:8px;">
                 </td>
             </tr>
