@@ -157,6 +157,11 @@
                         {{ form.product_id }}
                         {{ form.name }}
                         {{ form.name.errors }}
+                        <div style="margin-top:6px; font-size:12px;">
+                            <a href="{% url 'inventory_product_variants' form.product_id.value %}" style="color: var(--muted);">
+                                Variedades
+                            </a>
+                        </div>
                     </td>
                     <td>
                         {{ form.group }}

@@ -93,18 +93,24 @@
                 <td>{{ product.sku }}</td>
                 <td>{{ product.name }}</td>
                 <td>
-                    <form method="post">
-                        {% csrf_token %}
-                        <input type="hidden" name="action" value="set_comun_stock">
-                        <input type="hidden" name="product_id" value="{{ product.id }}">
-                        <div class="stock-adjust">
-                            <div style="color: var(--muted); font-size: 12px;">
-                                Actual: {{ product.comun_qty|latam_number:2 }}
-                            </div>
-                            <input name="quantity" type="text" value="{{ product.comun_qty|latam_number:2 }}">
-                            <button type="submit">Actualizar</button>
+                    {% if product.has_variants %}
+                        <div style="color: var(--muted); font-size: 12px;">
+                            Variedades: {{ product.comun_qty|latam_number:2 }}
                         </div>
-                    </form>
+                    {% else %}
+                        <form method="post">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="set_comun_stock">
+                            <input type="hidden" name="product_id" value="{{ product.id }}">
+                            <div class="stock-adjust">
+                                <div style="color: var(--muted); font-size: 12px;">
+                                    Actual: {{ product.comun_qty|latam_number:2 }}
+                                </div>
+                                <input name="quantity" type="text" value="{{ product.comun_qty|latam_number:2 }}">
+                                <button type="submit">Actualizar</button>
+                            </div>
+                        </form>
+                    {% endif %}
                 </td>
                 <td>{{ product.ml_qty|latam_number:2 }}</td>
                 <td>{{ product.comun_qty|add:product.ml_qty|latam_number:2 }}</td>

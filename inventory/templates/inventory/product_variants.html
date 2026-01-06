@@ -1,0 +1,65 @@
+{% extends "inventory/base.html" %}
+{% load latam_numbers %}
+{% block title %}Variedades{% endblock %}
+{% block content %}
+<h1>Variedades</h1>
+<p class="subtitle">Stock por variedad para {{ product.name }}.</p>
+
+<div class="card" style="margin-bottom:16px;">
+    <div class="card-title">Agregar variedad</div>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="add_variant">
+        <div class="cards" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
+            <div>
+                {{ add_form.name.label_tag }}
+                {{ add_form.name }}
+            </div>
+            <div>
+                {{ add_form.quantity.label_tag }}
+                {{ add_form.quantity }}
+            </div>
+        </div>
+        <div style="margin-top:12px;">
+            <button type="submit">Agregar</button>
+        </div>
+    </form>
+</div>
+
+<div class="card table-card">
+    <div class="card-title">Listado de variedades</div>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="update_variants">
+        {{ formset.management_form }}
+        <table>
+            <thead>
+                <tr>
+                    <th>Variedad</th>
+                    <th>Stock (Común)</th>
+                    <th>Eliminar</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for form in formset.forms %}
+                <tr>
+                    <td>
+                        {{ form.variant_id }}
+                        {{ form.name }}
+                    </td>
+                    <td>{{ form.quantity }}</td>
+                    <td>{{ form.delete }}</td>
+                </tr>
+                {% endfor %}
+                {% if not formset.forms %}
+                <tr><td colspan="3">Aún no hay variedades.</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+        <div style="margin-top:12px;">
+            <button type="submit">Guardar cambios</button>
+            <a class="pill" href="{% url 'inventory_product_costs' %}" style="margin-left:8px;">Volver</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

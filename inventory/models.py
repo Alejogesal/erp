@@ -114,6 +114,19 @@ class Product(models.Model):
         return f"{self.last_purchase_cost():.2f}"
 
 
+class ProductVariant(models.Model):
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="variants")
+    name = models.CharField(max_length=255)
+    quantity = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+
+    class Meta:
+        ordering = ["name", "id"]
+        unique_together = ("product", "name")
+
+    def __str__(self) -> str:
+        return f"{self.product.sku or 'Sin SKU'} - {self.name}"
+
+
 class Customer(models.Model):
     class Audience(models.TextChoices):
         CONSUMER = "CONSUMER", "Consumidor final"

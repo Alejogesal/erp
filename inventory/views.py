@@ -38,6 +38,7 @@ from .models import (
     MercadoLibreConnection,
     MercadoLibreItem,
     Product,
+    ProductVariant,
     Purchase,
     PurchaseItem,
     Stock,
@@ -154,6 +155,18 @@ class SupplierProductForm(forms.Form):
         decimal_places=2,
         required=False,
     )
+
+
+class ProductVariantForm(forms.Form):
+    name = forms.CharField(label="Variedad")
+    quantity = forms.DecimalField(min_value=Decimal("0.00"), decimal_places=2, label="Stock")
+
+
+class ProductVariantRowForm(forms.Form):
+    variant_id = forms.IntegerField(widget=forms.HiddenInput)
+    name = forms.CharField(label="Variedad")
+    quantity = forms.DecimalField(min_value=Decimal("0.00"), decimal_places=2, label="Stock")
+    delete = forms.BooleanField(required=False, label="Eliminar")
 
 
 class ProductCostRowForm(forms.Form):
@@ -1033,11 +1046,22 @@ def stock_list(request):
         .values("product_id")
         .annotate(total_qty=Coalesce(Sum("available_quantity"), 0))
     }
+    variant_qty_map = {
+        row["product_id"]: Decimal(str(row["total_qty"]))
+        for row in ProductVariant.objects.values("product_id").annotate(
+            total_qty=Coalesce(Sum("quantity"), 0)
+        )
+    }
     if query:
         products = products.filter(
             Q(sku__icontains=query) | Q(name__icontains=query) | Q(group__icontains=query)
         )
     for product in products:
+        if product.id in variant_qty_map:
+            product.comun_qty = variant_qty_map[product.id]
+            product.has_variants = True
+        else:
+            product.has_variants = False
         product.ml_qty = ml_qty_map.get(product.id, Decimal("0.00"))
     return render(
         request,
@@ -1047,6 +1071,59 @@ def stock_list(request):
             "transfer_form": transfer_form,
             "can_transfer": comun_wh is not None and ml_wh is not None,
             "query": query,
+        },
+    )
+
+
+@login_required
+def product_variants(request, product_id: int):
+    product = get_object_or_404(Product, pk=product_id)
+    VariantFormSet = formset_factory(ProductVariantRowForm, extra=0)
+    if request.method == "POST":
+        action = request.POST.get("action") or ""
+        if action == "add_variant":
+            add_form = ProductVariantForm(request.POST)
+            if add_form.is_valid():
+                ProductVariant.objects.create(
+                    product=product,
+                    name=add_form.cleaned_data["name"].strip(),
+                    quantity=add_form.cleaned_data["quantity"],
+                )
+                messages.success(request, "Variedad agregada.")
+                return redirect("inventory_product_variants", product_id=product.id)
+            messages.error(request, "Revisá los datos de la variedad.")
+        elif action == "update_variants":
+            formset = VariantFormSet(request.POST)
+            if formset.is_valid():
+                for form in formset:
+                    variant_id = form.cleaned_data["variant_id"]
+                    variant = ProductVariant.objects.filter(id=variant_id, product=product).first()
+                    if not variant:
+                        continue
+                    if form.cleaned_data.get("delete"):
+                        variant.delete()
+                        continue
+                    variant.name = form.cleaned_data["name"].strip()
+                    variant.quantity = form.cleaned_data["quantity"]
+                    variant.save(update_fields=["name", "quantity"])
+                messages.success(request, "Variedades actualizadas.")
+                return redirect("inventory_product_variants", product_id=product.id)
+            messages.error(request, "Revisá los datos de las variedades.")
+    variants = ProductVariant.objects.filter(product=product).order_by("name", "id")
+    formset = VariantFormSet(
+        initial=[
+            {"variant_id": v.id, "name": v.name, "quantity": v.quantity, "delete": False}
+            for v in variants
+        ]
+    )
+    add_form = ProductVariantForm()
+    return render(
+        request,
+        "inventory/product_variants.html",
+        {
+            "product": product,
+            "formset": formset,
+            "add_form": add_form,
         },
     )
 
