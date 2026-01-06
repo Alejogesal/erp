@@ -46,9 +46,12 @@
         <span class="hint">Buscar</span>
         <input id="price-filter" type="text" placeholder="SKU o producto">
     </div>
-    <div class="price-filter">
-        <span class="hint">Marcas</span>
-        <select id="price-groups" multiple style="width:100%; background:transparent; border:none; color:var(--text);">
+    <div class="price-filter" style="flex-direction:column; align-items:stretch;">
+        <div style="display:flex; align-items:center; gap:10px;">
+            <span class="hint">Marcas</span>
+            <input id="brand-search" type="text" placeholder="Buscar marca..." style="flex:1;">
+        </div>
+        <select id="price-groups" multiple style="width:100%; background:transparent; border:none; color:var(--text); height:120px;">
             {% for group in group_options %}
             <option value="{{ group }}">{{ group }}</option>
             {% endfor %}
@@ -59,6 +62,7 @@
             <tr>
                 <th>SKU</th>
                 <th>Producto</th>
+                <th>Marca</th>
                 <th>Consumidor final</th>
                 <th>Peluquerías / Barberías</th>
                 <th>Distribuidores</th>
@@ -70,6 +74,7 @@
             <tr>
                 <td>{{ product.sku }}</td>
                 <td>{{ product.name }}</td>
+                <td>{{ product.group|default:"-" }}</td>
                 <td>{{ product.consumer_price|latam_number:2 }}</td>
                 <td>{{ product.barber_price|latam_number:2 }}</td>
                 <td>{{ product.distributor_price|latam_number:2 }}</td>
@@ -91,19 +96,28 @@
     (function() {
         const filterInput = document.getElementById("price-filter");
         const groupSelect = document.getElementById("price-groups");
+        const brandSearch = document.getElementById("brand-search");
         const downloadLinks = Array.from(document.querySelectorAll(".price-download"));
         if (!filterInput) return;
         const rows = Array.from(document.querySelectorAll("table tbody tr"));
         const getRowText = (row) => {
             const sku = row.children[0]?.textContent || "";
             const name = row.children[1]?.textContent || "";
-            return `${sku} ${name}`.toLowerCase();
+            const brand = row.children[2]?.textContent || "";
+            return `${sku} ${name} ${brand}`.toLowerCase();
         };
+        const getRowBrand = (row) => (row.children[2]?.textContent || "").trim();
         const applyFilter = () => {
             const query = filterInput.value.trim().toLowerCase();
+            const selectedBrands = groupSelect
+                ? Array.from(groupSelect.selectedOptions).map(opt => opt.value)
+                : [];
             rows.forEach((row) => {
                 if (!row.querySelector("td")) return;
-                row.style.display = !query || getRowText(row).includes(query) ? "" : "none";
+                const matchesText = !query || getRowText(row).includes(query);
+                const rowBrand = getRowBrand(row);
+                const matchesBrand = !selectedBrands.length || selectedBrands.includes(rowBrand);
+                row.style.display = matchesText && matchesBrand ? "" : "none";
             });
         };
         filterInput.addEventListener("input", applyFilter);
@@ -119,8 +133,20 @@
             });
         };
         if (groupSelect) {
-            groupSelect.addEventListener("change", updateDownloads);
+            groupSelect.addEventListener("change", () => {
+                updateDownloads();
+                applyFilter();
+            });
             updateDownloads();
+        }
+
+        if (brandSearch && groupSelect) {
+            brandSearch.addEventListener("input", () => {
+                const query = brandSearch.value.trim().toLowerCase();
+                Array.from(groupSelect.options).forEach((opt) => {
+                    opt.hidden = query && !opt.value.toLowerCase().includes(query);
+                });
+            });
         }
     })();
 </script>
