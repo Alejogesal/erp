@@ -112,22 +112,33 @@
 
             const filterOptions = () => {
                 const q = search.value.trim().toLowerCase();
+                let visibleCount = 0;
                 Array.from(selectEl.options).forEach((opt) => {
                     const label = opt.textContent || "";
-                    opt.hidden = q && !label.toLowerCase().includes(q);
+                    const show = !q || label.toLowerCase().includes(q);
+                    opt.style.display = show ? "" : "none";
+                    if (show) visibleCount += 1;
                 });
-                selectEl.style.display = q ? "" : "none";
+                if (q && visibleCount > 0) {
+                    selectEl.size = Math.min(8, visibleCount);
+                    selectEl.style.display = "";
+                } else {
+                    selectEl.size = 0;
+                    selectEl.style.display = "none";
+                }
             };
             search.addEventListener("input", filterOptions);
             search.addEventListener("focus", filterOptions);
             search.addEventListener("blur", () => {
                 setTimeout(() => {
+                    selectEl.size = 0;
                     selectEl.style.display = "none";
                 }, 120);
             });
             selectEl.addEventListener("change", () => {
                 const selected = selectEl.options[selectEl.selectedIndex]?.textContent || "";
                 search.value = selected;
+                selectEl.size = 0;
                 selectEl.style.display = "none";
             });
         };
