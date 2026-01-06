@@ -879,6 +879,10 @@ def purchases_list(request):
         .values("id", "default_supplier_id", "supplier_count")
         .filter(supplier_count__lte=1, default_supplier_id__isnull=False)
     }
+    cost_autofill = {
+        str(product.id): f"{product.cost_with_vat():.2f}"
+        for product in Product.objects.all()
+    }
     purchases = (
         Purchase.objects.select_related("supplier", "warehouse", "user")
         .prefetch_related("items__product")
@@ -892,6 +896,7 @@ def purchases_list(request):
             "form": header_form,
             "formset": formset,
             "supplier_autofill": supplier_autofill,
+            "cost_autofill": cost_autofill,
         },
     )
 
@@ -909,6 +914,10 @@ def purchase_edit(request, purchase_id: int):
         for row in Product.objects.annotate(supplier_count=Count("supplier_products"))
         .values("id", "default_supplier_id", "supplier_count")
         .filter(supplier_count__lte=1, default_supplier_id__isnull=False)
+    }
+    cost_autofill = {
+        str(product.id): f"{product.cost_with_vat():.2f}"
+        for product in Product.objects.all()
     }
     if request.method == "POST":
         header_form = PurchaseHeaderForm(request.POST)
@@ -996,7 +1005,13 @@ def purchase_edit(request, purchase_id: int):
     return render(
         request,
         "inventory/purchase_edit.html",
-        {"purchase": purchase, "form": header_form, "formset": formset, "supplier_autofill": supplier_autofill},
+        {
+            "purchase": purchase,
+            "form": header_form,
+            "formset": formset,
+            "supplier_autofill": supplier_autofill,
+            "cost_autofill": cost_autofill,
+        },
     )
 
 

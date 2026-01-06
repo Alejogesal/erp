@@ -61,12 +61,14 @@
 </div>
 
 {{ supplier_autofill|json_script:"supplier-autofill" }}
+{{ cost_autofill|json_script:"cost-autofill" }}
 <script>
     (function() {
         const addBtn = document.getElementById("add-item");
         const body = document.getElementById("items-body");
         const totalForms = document.getElementById("id_form-TOTAL_FORMS");
         const supplierMap = JSON.parse(document.getElementById("supplier-autofill")?.textContent || "{}");
+        const costMap = JSON.parse(document.getElementById("cost-autofill")?.textContent || "{}");
         if (!addBtn || !body || !totalForms) return;
 
         const setSupplierIfAvailable = (productSelect) => {
@@ -78,6 +80,17 @@
             const supplierId = supplierMap[productId];
             if (supplierId) {
                 supplierSelect.value = String(supplierId);
+            }
+        };
+        const setCostIfAvailable = (productSelect) => {
+            if (!productSelect) return;
+            const row = productSelect.closest("tr");
+            const costInput = row?.querySelector("input[name$='-unit_cost']");
+            if (!costInput) return;
+            const productId = productSelect.value;
+            const cost = costMap[productId];
+            if (cost) {
+                costInput.value = cost;
             }
         };
 
@@ -113,6 +126,7 @@
                 if (match) {
                     selectEl.value = match.dataset.value || "";
                     setSupplierIfAvailable(selectEl);
+                    setCostIfAvailable(selectEl);
                 }
             };
             search.addEventListener("change", syncSelection);
@@ -125,6 +139,7 @@
 
         document.querySelectorAll("select[name$='-product']").forEach(setupProductSearch);
         document.querySelectorAll("select[name$='-product']").forEach(setSupplierIfAvailable);
+        document.querySelectorAll("select[name$='-product']").forEach(setCostIfAvailable);
         document.querySelectorAll("input[type='checkbox'][name$='-DELETE']").forEach((checkbox) => {
             checkbox.style.display = "none";
         });
@@ -186,7 +201,7 @@
             const checkbox = row?.querySelector("input[type='checkbox'][name$='-DELETE']");
             if (checkbox) {
                 checkbox.checked = true;
-                row.style.opacity = "0.45";
+                row.remove();
             }
         });
     })();
