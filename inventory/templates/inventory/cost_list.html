@@ -32,6 +32,11 @@
     .danger {
         background: var(--negative);
     }
+    .autosave-status {
+        font-size: 11px;
+        color: var(--muted);
+        margin-top: 6px;
+    }
 </style>
 <h1>Productos</h1>
 <p class="subtitle">Cargá productos y editá costos, SKU, nombre y proveedor.</p>
@@ -184,6 +189,7 @@
         </table>
         <div style="margin-top:16px;">
             <button type="submit">Guardar costos</button>
+            <div class="autosave-status" id="autosave-status">Auto-guardado activo.</div>
         </div>
     </form>
 </div>
@@ -292,6 +298,49 @@
                 deleteInput.value = productId;
                 deleteForm.submit();
             });
+        });
+
+        const status = document.getElementById("autosave-status");
+        const getCookie = (name) => {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(";").shift();
+            return "";
+        };
+        const csrfToken = getCookie("csrftoken");
+        const timers = new Map();
+        const autosave = (row) => {
+            const productId = row.querySelector("input[name$='-product_id']")?.value;
+            const avgCostInput = row.querySelector("input[name$='-avg_cost']");
+            if (!productId || !avgCostInput) return;
+            const payload = new FormData();
+            payload.append("action", "quick_update_cost");
+            payload.append("product_id", productId);
+            payload.append("avg_cost", avgCostInput.value || "");
+            fetch(window.location.href, {
+                method: "POST",
+                headers: {
+                    "X-CSRFToken": csrfToken || "",
+                },
+                body: payload,
+                credentials: "same-origin",
+            }).then(() => {
+                if (status) status.textContent = "Auto-guardado activo.";
+            }).catch(() => {
+                if (status) status.textContent = "No se pudo auto-guardar.";
+            });
+        };
+
+        document.querySelectorAll("#productos tbody tr").forEach((row) => {
+            const avgCostInput = row.querySelector("input[name$='-avg_cost']");
+            if (!avgCostInput) return;
+            avgCostInput.addEventListener("input", () => {
+                if (status) status.textContent = "Guardando...";
+                const key = row;
+                clearTimeout(timers.get(key));
+                timers.set(key, setTimeout(() => autosave(row), 400));
+            });
+            avgCostInput.addEventListener("blur", () => autosave(row));
         });
     })();
 </script>

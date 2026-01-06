@@ -12,7 +12,7 @@ from django.db.models import Case, DecimalField, Sum, Value, When, Q, Count
 from django.db.models.deletion import ProtectedError
 from django.db.models.functions import Coalesce
 from django.forms import formset_factory
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from urllib.request import urlopen
 import csv
 from django.shortcuts import get_object_or_404, redirect, render
@@ -1474,6 +1474,21 @@ def product_costs(request):
                     "No se puede eliminar el producto porque está usado en ventas o movimientos. Podés desactivarlo retirando stock o duplicarlo.",
                 )
             return redirect("inventory_product_costs")
+        elif action == "quick_update_cost":
+            product_id = request.POST.get("product_id")
+            avg_cost_raw = request.POST.get("avg_cost")
+            if not product_id:
+                return JsonResponse({"ok": False, "error": "missing_product_id"}, status=400)
+            product = Product.objects.filter(id=product_id).first()
+            if not product:
+                return JsonResponse({"ok": False, "error": "product_not_found"}, status=404)
+            try:
+                avg_cost = _parse_decimal(avg_cost_raw)
+            except Exception:
+                avg_cost = Decimal("0.00")
+            product.avg_cost = avg_cost
+            product.save(update_fields=["avg_cost"])
+            return JsonResponse({"ok": True})
         elif action == "bulk_update":
             bulk_form = ProductBulkUpdateForm(request.POST)
             if bulk_form.is_valid():

@@ -2,6 +2,11 @@
 {% load latam_numbers %}
 {% block title %}Compras{% endblock %}
 {% block content %}
+<style>
+    input[type="checkbox"][name$="-DELETE"] {
+        display: none;
+    }
+</style>
 <h1>Compras</h1>
 <p class="subtitle">Registrá compras y consultá el historial.</p>
 

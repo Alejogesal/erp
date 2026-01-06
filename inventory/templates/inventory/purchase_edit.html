@@ -2,6 +2,11 @@
 {% load latam_numbers %}
 {% block title %}Editar compra {{ purchase.invoice_number }}{% endblock %}
 {% block content %}
+<style>
+    input[type="checkbox"][name$="-DELETE"] {
+        display: none;
+    }
+</style>
 <h1>Editar compra</h1>
 <p class="subtitle">Actualizá productos y cantidades.</p>
 
