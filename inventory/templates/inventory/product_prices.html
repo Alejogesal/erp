@@ -35,9 +35,9 @@
 </style>
 
 <div class="actions" style="margin-bottom:16px;">
-    <a class="pill" href="{% url 'inventory_product_prices_download' 'consumer' %}">Descargar consumidor final</a>
-    <a class="pill" href="{% url 'inventory_product_prices_download' 'barber' %}">Descargar peluquerías/barberías</a>
-    <a class="pill" href="{% url 'inventory_product_prices_download' 'distributor' %}">Descargar distribuidores</a>
+    <a class="pill price-download" data-base-href="{% url 'inventory_product_prices_download' 'consumer' %}" href="{% url 'inventory_product_prices_download' 'consumer' %}">Descargar consumidor final</a>
+    <a class="pill price-download" data-base-href="{% url 'inventory_product_prices_download' 'barber' %}" href="{% url 'inventory_product_prices_download' 'barber' %}">Descargar peluquerías/barberías</a>
+    <a class="pill price-download" data-base-href="{% url 'inventory_product_prices_download' 'distributor' %}" href="{% url 'inventory_product_prices_download' 'distributor' %}">Descargar distribuidores</a>
 </div>
 
 <div class="card table-card">
@@ -45,6 +45,14 @@
     <div class="price-filter">
         <span class="hint">Buscar</span>
         <input id="price-filter" type="text" placeholder="SKU o producto">
+    </div>
+    <div class="price-filter">
+        <span class="hint">Marcas</span>
+        <select id="price-groups" multiple style="width:100%; background:transparent; border:none; color:var(--text);">
+            {% for group in group_options %}
+            <option value="{{ group }}">{{ group }}</option>
+            {% endfor %}
+        </select>
     </div>
     <table>
         <thead>
@@ -82,6 +90,8 @@
 <script>
     (function() {
         const filterInput = document.getElementById("price-filter");
+        const groupSelect = document.getElementById("price-groups");
+        const downloadLinks = Array.from(document.querySelectorAll(".price-download"));
         if (!filterInput) return;
         const rows = Array.from(document.querySelectorAll("table tbody tr"));
         const getRowText = (row) => {
@@ -97,6 +107,21 @@
             });
         };
         filterInput.addEventListener("input", applyFilter);
+
+        const updateDownloads = () => {
+            if (!groupSelect) return;
+            const selected = Array.from(groupSelect.selectedOptions).map(opt => opt.value);
+            const groups = selected.join(",");
+            downloadLinks.forEach((link) => {
+                const base = link.getAttribute("data-base-href");
+                if (!base) return;
+                link.href = groups ? `${base}?groups=${encodeURIComponent(groups)}` : base;
+            });
+        };
+        if (groupSelect) {
+            groupSelect.addEventListener("change", updateDownloads);
+            updateDownloads();
+        }
     })();
 </script>
 {% endblock %}

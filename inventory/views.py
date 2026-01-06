@@ -1128,7 +1128,18 @@ def product_variants(request, product_id: int):
 @login_required
 def product_prices(request):
     products = Product.objects.order_by("sku")
-    return render(request, "inventory/product_prices.html", {"products": products})
+    group_options = (
+        Product.objects.exclude(group="")
+        .exclude(group__isnull=True)
+        .values_list("group", flat=True)
+        .distinct()
+        .order_by("group")
+    )
+    return render(
+        request,
+        "inventory/product_prices.html",
+        {"products": products, "group_options": group_options},
+    )
 
 
 @login_required
@@ -1479,6 +1490,11 @@ def _build_xlsx(headers: list[str], rows: list[list[str | Decimal]]) -> bytes:
 @login_required
 def product_prices_download(request, audience: str):
     products = Product.objects.order_by("sku")
+    groups_raw = request.GET.get("groups", "")
+    if groups_raw:
+        groups = [g.strip() for g in groups_raw.split(",") if g.strip()]
+        if groups:
+            products = products.filter(group__in=groups)
     headers = ["SKU", "Producto", "Precio"]
     price_attr_map = {
         "consumer": "consumer_price",
