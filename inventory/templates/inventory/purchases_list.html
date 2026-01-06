@@ -91,13 +91,27 @@
     </table>
 </div>
 
+{{ supplier_autofill|json_script:"supplier-autofill" }}
 <script>
     (function() {
         const addBtn = document.getElementById("add-item");
         const toggleVat = document.getElementById("toggle-vat");
         const body = document.getElementById("items-body");
         const totalForms = document.getElementById("id_form-TOTAL_FORMS");
+        const supplierMap = JSON.parse(document.getElementById("supplier-autofill")?.textContent || "{}");
         if (!addBtn || !body || !totalForms) return;
+
+        const setSupplierIfAvailable = (productSelect) => {
+            if (!productSelect) return;
+            const row = productSelect.closest("tr");
+            const supplierSelect = row?.querySelector("select[name$='-supplier']");
+            if (!supplierSelect) return;
+            const productId = productSelect.value;
+            const supplierId = supplierMap[productId];
+            if (supplierId) {
+                supplierSelect.value = String(supplierId);
+            }
+        };
 
         const setupProductSearch = (selectEl) => {
             if (!selectEl) return;
@@ -111,67 +125,41 @@
             const search = document.createElement("input");
             search.type = "text";
             search.placeholder = "Buscar producto...";
+            const datalist = document.createElement("datalist");
+            const listId = `product-options-${Math.random().toString(36).slice(2)}`;
+            datalist.id = listId;
+            search.setAttribute("list", listId);
+            Array.from(selectEl.options).forEach((opt) => {
+                const option = document.createElement("option");
+                option.value = opt.textContent || "";
+                option.dataset.value = opt.value;
+                datalist.appendChild(option);
+            });
             selectEl.parentElement.insertBefore(wrapper, selectEl);
             wrapper.appendChild(search);
+            wrapper.appendChild(datalist);
             wrapper.appendChild(selectEl);
 
-            const filterOptions = () => {
-                const q = search.value.trim().toLowerCase();
-                let visibleCount = 0;
-                Array.from(selectEl.options).forEach((opt) => {
-                    const label = opt.textContent || "";
-                    const show = !q || label.toLowerCase().includes(q);
-                    opt.style.display = show ? "" : "none";
-                    if (show) visibleCount += 1;
-                });
-                if (q && visibleCount > 0) {
-                    selectEl.size = Math.min(8, visibleCount);
-                    selectEl.style.display = "";
-                } else {
-                    selectEl.size = 0;
-                    selectEl.style.display = "none";
+            const syncSelection = () => {
+                const match = Array.from(datalist.options).find((opt) => opt.value === search.value);
+                if (match) {
+                    selectEl.value = match.dataset.value || "";
+                    setSupplierIfAvailable(selectEl);
                 }
             };
-            search.addEventListener("input", filterOptions);
-            search.addEventListener("focus", filterOptions);
-            search.addEventListener("blur", () => {
-                setTimeout(() => {
-                    selectEl.size = 0;
-                    selectEl.style.display = "none";
-                }, 120);
-            });
-            selectEl.addEventListener("change", () => {
-                const selected = selectEl.options[selectEl.selectedIndex]?.textContent || "";
-                search.value = selected;
-                selectEl.size = 0;
-                selectEl.style.display = "none";
-            });
+            search.addEventListener("change", syncSelection);
             search.addEventListener("keydown", (event) => {
-                if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-                    event.preventDefault();
-                    const visible = Array.from(selectEl.options).filter((opt) => opt.style.display !== "none");
-                    if (!visible.length) return;
-                    let idx = visible.findIndex((opt) => opt.selected);
-                    if (idx === -1) idx = 0;
-                    idx += event.key === "ArrowDown" ? 1 : -1;
-                    if (idx < 0) idx = 0;
-                    if (idx >= visible.length) idx = visible.length - 1;
-                    visible.forEach((opt) => (opt.selected = false));
-                    visible[idx].selected = true;
-                    selectEl.size = Math.min(8, visible.length);
-                    selectEl.style.display = "";
-                } else if (event.key === "Enter") {
-                    const selected = selectEl.options[selectEl.selectedIndex];
-                    if (selected) {
-                        search.value = selected.textContent || "";
-                        selectEl.style.display = "none";
-                        selectEl.size = 0;
-                    }
+                if (event.key === "Enter") {
+                    syncSelection();
                 }
             });
         };
 
         document.querySelectorAll("select[name$='-product']").forEach(setupProductSearch);
+        document.querySelectorAll("select[name$='-product']").forEach(setSupplierIfAvailable);
+        document.querySelectorAll("input[type='checkbox'][name$='-DELETE']").forEach((checkbox) => {
+            checkbox.style.display = "none";
+        });
 
         addBtn.addEventListener("click", () => {
             const idx = parseInt(totalForms.value, 10);
@@ -195,6 +183,7 @@
             });
             const deleteTd = document.createElement("td");
             if (deleteField) {
+                deleteField.style.display = "none";
                 deleteTd.appendChild(deleteField);
                 const deleteBtn = document.createElement("button");
                 deleteBtn.type = "button";

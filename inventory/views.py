@@ -8,7 +8,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.utils import OperationalError
-from django.db.models import Case, DecimalField, Sum, Value, When, Q
+from django.db.models import Case, DecimalField, Sum, Value, When, Q, Count
 from django.db.models.deletion import ProtectedError
 from django.db.models.functions import Coalesce
 from django.forms import formset_factory
@@ -873,6 +873,12 @@ def purchases_list(request):
         header_form = PurchaseHeaderForm()
         formset = PurchaseItemFormSet()
 
+    supplier_autofill = {
+        row["id"]: row["default_supplier_id"]
+        for row in Product.objects.annotate(supplier_count=Count("supplier_products"))
+        .values("id", "default_supplier_id", "supplier_count")
+        .filter(supplier_count__lte=1, default_supplier_id__isnull=False)
+    }
     purchases = (
         Purchase.objects.select_related("supplier", "warehouse", "user")
         .prefetch_related("items__product")
@@ -885,6 +891,7 @@ def purchases_list(request):
             "purchases": purchases,
             "form": header_form,
             "formset": formset,
+            "supplier_autofill": supplier_autofill,
         },
     )
 
@@ -897,6 +904,12 @@ def purchase_edit(request, purchase_id: int):
         pk=purchase_id,
     )
     PurchaseItemFormSet = formset_factory(PurchaseItemForm, extra=1, can_delete=True)
+    supplier_autofill = {
+        row["id"]: row["default_supplier_id"]
+        for row in Product.objects.annotate(supplier_count=Count("supplier_products"))
+        .values("id", "default_supplier_id", "supplier_count")
+        .filter(supplier_count__lte=1, default_supplier_id__isnull=False)
+    }
     if request.method == "POST":
         header_form = PurchaseHeaderForm(request.POST)
         formset = PurchaseItemFormSet(request.POST)
@@ -983,7 +996,7 @@ def purchase_edit(request, purchase_id: int):
     return render(
         request,
         "inventory/purchase_edit.html",
-        {"purchase": purchase, "form": header_form, "formset": formset},
+        {"purchase": purchase, "form": header_form, "formset": formset, "supplier_autofill": supplier_autofill},
     )
 
 
