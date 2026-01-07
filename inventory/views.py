@@ -868,9 +868,71 @@ def purchases_list(request):
                 form.empty_permitted = True
             elif not form.has_changed():
                 form.empty_permitted = True
-        if header_form.is_valid() and formset.is_valid():
+        if header_form.is_valid():
+            def parse_decimal(raw: str | None) -> Decimal | None:
+                if raw is None:
+                    return None
+                value = str(raw).strip().replace(",", ".")
+                if not value:
+                    return None
+                try:
+                    return Decimal(value)
+                except Exception:
+                    return None
+
+            def parse_items_from_post() -> tuple[list[dict], list[str]]:
+                total_forms = int(request.POST.get("form-TOTAL_FORMS", 0))
+                items_data: list[dict] = []
+                errors: list[str] = []
+                for idx in range(total_forms):
+                    prefix = f"form-{idx}-"
+                    product_id = (request.POST.get(f"{prefix}product") or "").strip()
+                    qty_raw = request.POST.get(f"{prefix}quantity")
+                    cost_raw = request.POST.get(f"{prefix}unit_cost")
+                    supplier_id = (request.POST.get(f"{prefix}supplier") or "").strip()
+                    vat_raw = request.POST.get(f"{prefix}vat_percent")
+                    if not product_id and not (qty_raw or "").strip() and not (cost_raw or "").strip():
+                        continue
+                    if not product_id or not (qty_raw or "").strip() or not (cost_raw or "").strip():
+                        errors.append(f"Fila {idx + 1}: completá producto, cantidad y costo.")
+                        continue
+                    product = Product.objects.filter(id=product_id).first()
+                    if not product:
+                        errors.append(f"Fila {idx + 1}: producto inválido.")
+                        continue
+                    qty = parse_decimal(qty_raw)
+                    unit_cost = parse_decimal(cost_raw)
+                    vat_percent = parse_decimal(vat_raw) or Decimal("0.00")
+                    if qty is None or qty <= 0:
+                        errors.append(f"Fila {idx + 1}: cantidad inválida.")
+                        continue
+                    if unit_cost is None or unit_cost < 0:
+                        errors.append(f"Fila {idx + 1}: costo inválido.")
+                        continue
+                    supplier = Supplier.objects.filter(id=supplier_id).first() if supplier_id else None
+                    items_data.append(
+                        {
+                            "product": product,
+                            "quantity": qty,
+                            "unit_cost": unit_cost,
+                            "vat_percent": vat_percent,
+                            "supplier": supplier,
+                        }
+                    )
+                return items_data, errors
+
+            items: list[dict] = []
+            if formset.is_valid():
+                items = [f.cleaned_data for f in formset.forms if f.cleaned_data and not f.cleaned_data.get("DELETE")]
+            else:
+                items, parse_errors = parse_items_from_post()
+                if parse_errors:
+                    for err in parse_errors[:3]:
+                        messages.error(request, err)
+                    if len(parse_errors) > 3:
+                        messages.error(request, f"Hay {len(parse_errors)} filas con errores.")
+                    items = []
             warehouse = header_form.cleaned_data["warehouse"]
-            items = [f.cleaned_data for f in formset.forms if f.cleaned_data and not f.cleaned_data.get("DELETE")]
             if not items:
                 messages.error(request, "Agregá al menos un producto.")
                 return redirect("inventory_purchases_list")
