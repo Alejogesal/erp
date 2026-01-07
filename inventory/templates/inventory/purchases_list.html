@@ -172,7 +172,21 @@
             }
 
             const syncSelection = () => {
-                const match = Array.from(datalist.options).find((opt) => opt.value === search.value);
+                const raw = (search.value || "").trim();
+                if (!raw) return;
+                const opts = Array.from(datalist.options);
+                let match = opts.find((opt) => opt.value === raw);
+                if (!match) {
+                    const lowered = raw.toLowerCase();
+                    match = opts.find((opt) => (opt.value || "").toLowerCase() === lowered);
+                }
+                if (!match) {
+                    const lowered = raw.toLowerCase();
+                    const candidates = opts.filter((opt) => (opt.value || "").toLowerCase().includes(lowered));
+                    if (candidates.length === 1) {
+                        match = candidates[0];
+                    }
+                }
                 if (match) {
                     selectEl.value = match.dataset.value || "";
                     setSupplierIfAvailable(selectEl);
