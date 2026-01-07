@@ -890,7 +890,7 @@ def purchases_list(request):
             def parse_items_from_post() -> tuple[list[dict], list[str]]:
                 indices: set[int] = set()
                 for key in request.POST.keys():
-                    if key.startswith("form-") and key.endswith("-product"):
+                    if key.startswith("form-") and (key.endswith("-product") or key.endswith("-product_text")):
                         parts = key.split("-")
                         if len(parts) >= 3 and parts[1].isdigit():
                             indices.add(int(parts[1]))
@@ -899,12 +899,30 @@ def purchases_list(request):
                 for idx in sorted(indices):
                     prefix = f"form-{idx}-"
                     product_id = (request.POST.get(f"{prefix}product") or "").strip()
+                    product_text = (request.POST.get(f"{prefix}product_text") or "").strip()
                     qty_raw = request.POST.get(f"{prefix}quantity")
                     cost_raw = request.POST.get(f"{prefix}unit_cost")
                     supplier_id = (request.POST.get(f"{prefix}supplier") or "").strip()
                     vat_raw = request.POST.get(f"{prefix}vat_percent")
                     if not product_id and not (qty_raw or "").strip() and not (cost_raw or "").strip():
                         continue
+                    if not product_id and product_text:
+                        label = product_text.split(" (", 1)[0].strip()
+                        sku_candidate = ""
+                        name_candidate = label
+                        if " - " in label:
+                            sku_candidate, name_candidate = [part.strip() for part in label.split(" - ", 1)]
+                        if sku_candidate and sku_candidate.lower() != "sin sku":
+                            product = Product.objects.filter(sku__iexact=sku_candidate).first()
+                        else:
+                            product = None
+                        if not product and name_candidate:
+                            product = (
+                                Product.objects.filter(name__iexact=name_candidate).first()
+                                or Product.objects.filter(name__icontains=name_candidate).first()
+                            )
+                        if product:
+                            product_id = str(product.id)
                     if not product_id or not (qty_raw or "").strip() or not (cost_raw or "").strip():
                         errors.append(f"Fila {idx + 1}: completá producto, cantidad y costo.")
                         continue

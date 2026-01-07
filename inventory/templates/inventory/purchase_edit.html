@@ -118,6 +118,7 @@
             const search = document.createElement("input");
             search.type = "text";
             search.placeholder = "Buscar producto...";
+            search.name = (selectEl.name || "").replace("-product", "-product_text");
             const datalist = document.createElement("datalist");
             const listId = `product-options-${Math.random().toString(36).slice(2)}`;
             datalist.id = listId;
