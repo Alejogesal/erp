@@ -99,6 +99,13 @@
             }
         };
 
+        const updateSearchFromSelect = (selectEl) => {
+            const searchInput = selectEl?._searchInput;
+            if (!searchInput) return;
+            const selectedText = selectEl.options[selectEl.selectedIndex]?.textContent || "";
+            searchInput.value = selectedText;
+        };
+
         const setupProductSearch = (selectEl) => {
             if (!selectEl) return;
             if (selectEl.dataset.searchReady === "1") return;
@@ -115,6 +122,7 @@
             const listId = `product-options-${Math.random().toString(36).slice(2)}`;
             datalist.id = listId;
             search.setAttribute("list", listId);
+            selectEl._searchInput = search;
             Array.from(selectEl.options).forEach((opt) => {
                 const option = document.createElement("option");
                 option.value = opt.textContent || "";
@@ -125,6 +133,10 @@
             wrapper.appendChild(search);
             wrapper.appendChild(datalist);
             wrapper.appendChild(selectEl);
+            const initialLabel = selectEl.options[selectEl.selectedIndex]?.textContent || "";
+            if (initialLabel) {
+                search.value = initialLabel;
+            }
 
             const syncSelection = () => {
                 const match = Array.from(datalist.options).find((opt) => opt.value === search.value);
@@ -132,6 +144,7 @@
                     selectEl.value = match.dataset.value || "";
                     setSupplierIfAvailable(selectEl);
                     setCostIfAvailable(selectEl);
+                    updateSearchFromSelect(selectEl);
                 }
             };
             search.addEventListener("change", syncSelection);
@@ -186,17 +199,25 @@
             totalForms.value = idx + 1;
             body.appendChild(tr);
             setupProductSearch(tr.querySelector("select[name$='-product']"));
+            if (vatHidden) {
+                tr.querySelectorAll(".vat-col").forEach((col) => {
+                    col.style.display = "none";
+                });
+            }
         });
 
         const toggleVat = document.getElementById("toggle-vat");
+        let vatHidden = false;
         if (toggleVat) {
             toggleVat.addEventListener("click", () => {
                 const cols = document.querySelectorAll(".vat-col");
                 cols.forEach((col) => {
                     col.style.display = col.style.display === "none" ? "" : "none";
                 });
+                vatHidden = Array.from(cols).every((col) => col.style.display === "none");
             });
             document.querySelectorAll(".vat-col").forEach((col) => (col.style.display = "none"));
+            vatHidden = true;
         }
 
         document.addEventListener("click", (event) => {
@@ -209,6 +230,97 @@
                 row.remove();
             }
         });
+
+        const formEl = addBtn.closest("form");
+        const storageKey = "erp:purchase_edit:{{ purchase.id }}";
+
+        const serializeRow = (row) => {
+            const productSelect = row.querySelector("select[name$='-product']");
+            const supplierSelect = row.querySelector("select[name$='-supplier']");
+            const qtyInput = row.querySelector("input[name$='-quantity']");
+            const costInput = row.querySelector("input[name$='-unit_cost']");
+            const vatInput = row.querySelector("input[name$='-vat_percent']");
+            const searchInput = productSelect?._searchInput;
+            const data = {
+                product_id: productSelect?.value || "",
+                product_search: searchInput?.value || "",
+                supplier_id: supplierSelect?.value || "",
+                quantity: qtyInput?.value || "",
+                unit_cost: costInput?.value || "",
+                vat_percent: vatInput?.value || "",
+            };
+            const hasValue = Object.values(data).some((value) => value);
+            return hasValue ? data : null;
+        };
+
+        const saveDraft = () => {
+            if (!formEl) return;
+            const warehouseSelect = formEl.querySelector("select[name='warehouse']");
+            const rows = Array.from(body.querySelectorAll("tr"));
+            const items = rows.map(serializeRow).filter(Boolean);
+            const payload = {
+                warehouse: warehouseSelect?.value || "",
+                items,
+            };
+            localStorage.setItem(storageKey, JSON.stringify(payload));
+        };
+
+        const fillRow = (row, data) => {
+            if (!data) return;
+            const productSelect = row.querySelector("select[name$='-product']");
+            const supplierSelect = row.querySelector("select[name$='-supplier']");
+            const qtyInput = row.querySelector("input[name$='-quantity']");
+            const costInput = row.querySelector("input[name$='-unit_cost']");
+            const vatInput = row.querySelector("input[name$='-vat_percent']");
+            if (productSelect) {
+                if (data.product_id) {
+                    productSelect.value = data.product_id;
+                    updateSearchFromSelect(productSelect);
+                } else if (productSelect._searchInput) {
+                    productSelect._searchInput.value = data.product_search || "";
+                }
+                setSupplierIfAvailable(productSelect);
+                setCostIfAvailable(productSelect);
+            }
+            if (supplierSelect && data.supplier_id) supplierSelect.value = data.supplier_id;
+            if (qtyInput && data.quantity) qtyInput.value = data.quantity;
+            if (costInput && data.unit_cost) costInput.value = data.unit_cost;
+            if (vatInput && data.vat_percent) vatInput.value = data.vat_percent;
+        };
+
+        const restoreDraft = () => {
+            const raw = localStorage.getItem(storageKey);
+            if (!raw) return;
+            let draft = null;
+            try {
+                draft = JSON.parse(raw);
+            } catch (err) {
+                return;
+            }
+            const warehouseSelect = formEl?.querySelector("select[name='warehouse']");
+            if (warehouseSelect && draft?.warehouse) {
+                warehouseSelect.value = draft.warehouse;
+            }
+            const items = Array.isArray(draft?.items) ? draft.items : [];
+            if (!items.length) return;
+            while (body.querySelectorAll("tr").length < items.length) {
+                addBtn.click();
+            }
+            const rows = Array.from(body.querySelectorAll("tr"));
+            items.forEach((item, idx) => fillRow(rows[idx], item));
+        };
+
+        formEl?.addEventListener("input", saveDraft);
+        formEl?.addEventListener("change", saveDraft);
+        window.addEventListener("beforeunload", saveDraft);
+        window.addEventListener("pagehide", saveDraft);
+        document.addEventListener("visibilitychange", () => {
+            if (document.visibilityState === "hidden") saveDraft();
+        });
+        formEl?.addEventListener("submit", () => {
+            localStorage.removeItem(storageKey);
+        });
+        restoreDraft();
     })();
 </script>
 {% endblock %}

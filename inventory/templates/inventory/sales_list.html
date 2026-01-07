@@ -208,6 +208,13 @@
         }
 
         if (!addBtn || !body || !totalForms) return;
+        const updateSearchFromSelect = (selectEl) => {
+            const searchInput = selectEl?._searchInput;
+            if (!searchInput) return;
+            const selectedText = selectEl.options[selectEl.selectedIndex]?.textContent || "";
+            searchInput.value = selectedText;
+        };
+
         const setupProductSearch = (selectEl) => {
             if (!selectEl) return;
             if (selectEl.dataset.searchReady === "1") return;
@@ -220,6 +227,7 @@
             const search = document.createElement("input");
             search.type = "text";
             search.placeholder = "Buscar producto...";
+            selectEl._searchInput = search;
             selectEl.parentElement.insertBefore(wrapper, selectEl);
             wrapper.appendChild(search);
             wrapper.appendChild(selectEl);
@@ -240,8 +248,7 @@
                 }, 120);
             });
             selectEl.addEventListener("change", () => {
-                const selected = selectEl.options[selectEl.selectedIndex]?.textContent || "";
-                search.value = selected;
+                updateSearchFromSelect(selectEl);
                 selectEl.style.display = "none";
             });
         };
@@ -270,6 +277,86 @@
             body.appendChild(tr);
             setupProductSearch(tr.querySelector("select[name$='-product']"));
         });
+
+        const formEl = addBtn.closest("form");
+        const storageKey = "erp:sales_draft";
+
+        const serializeRow = (row) => {
+            const productSelect = row.querySelector("select[name$='-product']");
+            const qtyInput = row.querySelector("input[name$='-quantity']");
+            const vatInput = row.querySelector("input[name$='-vat_percent']");
+            const searchInput = productSelect?._searchInput;
+            const data = {
+                product_id: productSelect?.value || "",
+                product_search: searchInput?.value || "",
+                quantity: qtyInput?.value || "",
+                vat_percent: vatInput?.value || "",
+            };
+            const hasValue = Object.values(data).some((value) => value);
+            return hasValue ? data : null;
+        };
+
+        const saveDraft = () => {
+            if (!formEl) return;
+            const header = {};
+            ["warehouse", "audiencia", "cliente", "total_venta", "comision_ml", "impuestos_ml"].forEach((name) => {
+                const field = formEl.querySelector(`[name='${name}']`);
+                if (field) header[name] = field.value || "";
+            });
+            const rows = Array.from(body.querySelectorAll("tr"));
+            const items = rows.map(serializeRow).filter(Boolean);
+            const payload = { header, items };
+            localStorage.setItem(storageKey, JSON.stringify(payload));
+        };
+
+        const fillRow = (row, data) => {
+            if (!data) return;
+            const productSelect = row.querySelector("select[name$='-product']");
+            const qtyInput = row.querySelector("input[name$='-quantity']");
+            const vatInput = row.querySelector("input[name$='-vat_percent']");
+            if (productSelect) {
+                if (data.product_id) {
+                    productSelect.value = data.product_id;
+                    updateSearchFromSelect(productSelect);
+                } else if (productSelect._searchInput) {
+                    productSelect._searchInput.value = data.product_search || "";
+                }
+            }
+            if (qtyInput && data.quantity) qtyInput.value = data.quantity;
+            if (vatInput && data.vat_percent) vatInput.value = data.vat_percent;
+        };
+
+        const restoreDraft = () => {
+            const raw = localStorage.getItem(storageKey);
+            if (!raw) return;
+            let draft = null;
+            try {
+                draft = JSON.parse(raw);
+            } catch (err) {
+                return;
+            }
+            const header = draft?.header || {};
+            Object.keys(header).forEach((name) => {
+                const field = formEl?.querySelector(`[name='${name}']`);
+                if (field && header[name]) field.value = header[name];
+            });
+            syncAudience();
+            syncMlFields();
+            const items = Array.isArray(draft?.items) ? draft.items : [];
+            if (!items.length) return;
+            while (body.querySelectorAll("tr").length < items.length) {
+                addBtn.click();
+            }
+            const rows = Array.from(body.querySelectorAll("tr"));
+            items.forEach((item, idx) => fillRow(rows[idx], item));
+        };
+
+        formEl?.addEventListener("input", saveDraft);
+        formEl?.addEventListener("change", saveDraft);
+        formEl?.addEventListener("submit", () => {
+            localStorage.removeItem(storageKey);
+        });
+        restoreDraft();
     })();
 
     (function() {

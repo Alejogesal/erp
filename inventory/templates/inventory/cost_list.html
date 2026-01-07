@@ -42,6 +42,32 @@
         color: var(--muted);
         margin-top: 6px;
     }
+    .product-form-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 12px;
+    }
+    .product-form-grid .full {
+        grid-column: 1 / -1;
+    }
+    .product-advanced {
+        margin-top: 12px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid #2a313c;
+        background: #0f1622;
+    }
+    .product-advanced summary {
+        cursor: pointer;
+        color: var(--muted);
+        font-size: 12px;
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
+    }
+    .product-advanced[open] summary { margin-bottom: 10px; }
+    #productos table {
+        table-layout: auto;
+    }
     #productos table input,
     #productos table select {
         padding: 8px 10px;
@@ -51,20 +77,70 @@
     #productos table th:first-child,
     #productos table td:first-child {
         min-width: 260px;
+        width: 36%;
     }
     #productos input[name$='-name'] {
-        min-width: 240px;
+        width: 100%;
+        min-width: 320px;
     }
 </style>
 <h1>Productos</h1>
-<p class="subtitle">Cargá productos y editá costos, SKU, nombre y proveedor.</p>
+<p class="subtitle">Cargá productos y editá costos, nombre y proveedor. El SKU se genera automáticamente.</p>
 
 <div class="card" style="margin-bottom:16px;">
     <div class="card-title">Nuevo producto</div>
     <form method="post">
         {% csrf_token %}
         <input type="hidden" name="action" value="create_product">
-        {{ product_form.as_p }}
+        <div class="product-form-grid">
+            <div>
+                {{ product_form.name.label_tag }}
+                {{ product_form.name }}
+                {{ product_form.name.errors }}
+            </div>
+            <div>
+                {{ product_form.group.label_tag }}
+                {{ product_form.group }}
+                {{ product_form.group.errors }}
+            </div>
+            <div>
+                {{ product_form.avg_cost.label_tag }}
+                {{ product_form.avg_cost }}
+                {{ product_form.avg_cost.errors }}
+            </div>
+            <div>
+                {{ product_form.vat_percent.label_tag }}
+                {{ product_form.vat_percent }}
+                {{ product_form.vat_percent.errors }}
+            </div>
+            <div class="full">
+                {{ product_form.default_supplier.label_tag }}
+                {{ product_form.default_supplier }}
+                {{ product_form.default_supplier.errors }}
+            </div>
+            <div class="full">
+                <details class="product-advanced">
+                    <summary>Margenes (opcional)</summary>
+                    <div class="product-form-grid">
+                        <div>
+                            {{ product_form.margin_consumer.label_tag }}
+                            {{ product_form.margin_consumer }}
+                            {{ product_form.margin_consumer.errors }}
+                        </div>
+                        <div>
+                            {{ product_form.margin_barber.label_tag }}
+                            {{ product_form.margin_barber }}
+                            {{ product_form.margin_barber.errors }}
+                        </div>
+                        <div>
+                            {{ product_form.margin_distributor.label_tag }}
+                            {{ product_form.margin_distributor }}
+                            {{ product_form.margin_distributor.errors }}
+                        </div>
+                    </div>
+                </details>
+            </div>
+        </div>
         <button type="submit">Guardar producto</button>
     </form>
 </div>

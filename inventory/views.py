@@ -292,7 +292,17 @@ def create_product(request):
     if request.method == "POST":
         form = ProductForm(request.POST)
         if form.is_valid():
-            form.save()
+            product = form.save(commit=False)
+            if not product.sku:
+                prefix = _sku_prefix(product.group or "", product.name or "")
+                existing = Product.objects.filter(sku__startswith=prefix).values_list("sku", flat=True)
+                max_suffix = 0
+                for sku in existing:
+                    suffix = sku[len(prefix):]
+                    if suffix.isdigit():
+                        max_suffix = max(max_suffix, int(suffix))
+                product.sku = f"{prefix}{max_suffix + 1:04d}"
+            product.save()
             messages.success(request, "Producto creado.")
             return redirect("inventory_dashboard")
     else:
@@ -306,7 +316,17 @@ def edit_product(request, pk: int):
     if request.method == "POST":
         form = ProductForm(request.POST, instance=product)
         if form.is_valid():
-            form.save()
+            product = form.save(commit=False)
+            if not product.sku:
+                prefix = _sku_prefix(product.group or "", product.name or "")
+                existing = Product.objects.filter(sku__startswith=prefix).values_list("sku", flat=True)
+                max_suffix = 0
+                for sku in existing:
+                    suffix = sku[len(prefix):]
+                    if suffix.isdigit():
+                        max_suffix = max(max_suffix, int(suffix))
+                product.sku = f"{prefix}{max_suffix + 1:04d}"
+            product.save()
             messages.success(request, "Producto actualizado.")
             return redirect("inventory_product_prices")
         messages.error(request, "Revisá los datos del producto.")
@@ -823,6 +843,9 @@ def purchases_list(request):
     if request.method == "POST":
         header_form = PurchaseHeaderForm(request.POST)
         formset = PurchaseItemFormSet(request.POST)
+        for form in formset.forms:
+            if not form.has_changed():
+                form.empty_permitted = True
         if header_form.is_valid() and formset.is_valid():
             warehouse = header_form.cleaned_data["warehouse"]
             items = [f.cleaned_data for f in formset.forms if f.cleaned_data and not f.cleaned_data.get("DELETE")]
@@ -922,6 +945,9 @@ def purchase_edit(request, purchase_id: int):
     if request.method == "POST":
         header_form = PurchaseHeaderForm(request.POST)
         formset = PurchaseItemFormSet(request.POST)
+        for form in formset.forms:
+            if not form.has_changed():
+                form.empty_permitted = True
         if header_form.is_valid() and formset.is_valid():
             items = []
             for form in formset:
@@ -1399,7 +1425,17 @@ def product_costs(request):
         if action == "create_product":
             product_form = ProductForm(request.POST)
             if product_form.is_valid():
-                product_form.save()
+                product = product_form.save(commit=False)
+                if not product.sku:
+                    prefix = _sku_prefix(product.group or "", product.name or "")
+                    existing = Product.objects.filter(sku__startswith=prefix).values_list("sku", flat=True)
+                    max_suffix = 0
+                    for sku in existing:
+                        suffix = sku[len(prefix):]
+                        if suffix.isdigit():
+                            max_suffix = max(max_suffix, int(suffix))
+                    product.sku = f"{prefix}{max_suffix + 1:04d}"
+                product.save()
                 messages.success(request, "Producto creado.")
                 return redirect("inventory_product_costs")
             messages.error(request, "Revisá los datos del producto.")

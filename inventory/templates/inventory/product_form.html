@@ -1,12 +1,85 @@
 {% extends "inventory/base.html" %}
 {% block title %}{{ title }}{% endblock %}
 {% block content %}
+<style>
+    .product-form-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 12px;
+    }
+    .product-form-grid .full {
+        grid-column: 1 / -1;
+    }
+    .product-advanced {
+        margin-top: 12px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid #2a313c;
+        background: #0f1622;
+    }
+    .product-advanced summary {
+        cursor: pointer;
+        color: var(--muted);
+        font-size: 12px;
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
+    }
+    .product-advanced[open] summary { margin-bottom: 10px; }
+</style>
 <h1>{{ title }}</h1>
-<p class="subtitle">Cargá un producto con SKU opcional, costo y márgenes por canal.</p>
+<p class="subtitle">Cargá un producto con costos por defecto. El SKU se genera automáticamente.</p>
 <div class="card">
     <form method="post">
         {% csrf_token %}
-        {{ form.as_p }}
+        <div class="product-form-grid">
+            <div>
+                {{ form.name.label_tag }}
+                {{ form.name }}
+                {{ form.name.errors }}
+            </div>
+            <div>
+                {{ form.group.label_tag }}
+                {{ form.group }}
+                {{ form.group.errors }}
+            </div>
+            <div>
+                {{ form.avg_cost.label_tag }}
+                {{ form.avg_cost }}
+                {{ form.avg_cost.errors }}
+            </div>
+            <div>
+                {{ form.vat_percent.label_tag }}
+                {{ form.vat_percent }}
+                {{ form.vat_percent.errors }}
+            </div>
+            <div class="full">
+                {{ form.default_supplier.label_tag }}
+                {{ form.default_supplier }}
+                {{ form.default_supplier.errors }}
+            </div>
+            <div class="full">
+                <details class="product-advanced">
+                    <summary>Márgenes (opcional)</summary>
+                    <div class="product-form-grid">
+                        <div>
+                            {{ form.margin_consumer.label_tag }}
+                            {{ form.margin_consumer }}
+                            {{ form.margin_consumer.errors }}
+                        </div>
+                        <div>
+                            {{ form.margin_barber.label_tag }}
+                            {{ form.margin_barber }}
+                            {{ form.margin_barber.errors }}
+                        </div>
+                        <div>
+                            {{ form.margin_distributor.label_tag }}
+                            {{ form.margin_distributor }}
+                            {{ form.margin_distributor.errors }}
+                        </div>
+                    </div>
+                </details>
+            </div>
+        </div>
         <button type="submit">Guardar producto</button>
     </form>
     <p>¿Tenés muchos productos? <a href="{% url 'inventory_import_products' %}">Importalos desde CSV</a>.</p>
