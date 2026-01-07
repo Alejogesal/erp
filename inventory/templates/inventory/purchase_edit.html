@@ -153,11 +153,13 @@
                     syncSelection();
                 }
             });
+            updateSearchFromSelect(selectEl);
         };
 
         document.querySelectorAll("select[name$='-product']").forEach(setupProductSearch);
         document.querySelectorAll("select[name$='-product']").forEach(setSupplierIfAvailable);
         document.querySelectorAll("select[name$='-product']").forEach(setCostIfAvailable);
+        document.querySelectorAll("select[name$='-product']").forEach(updateSearchFromSelect);
         document.querySelectorAll("input[type='checkbox'][name$='-DELETE']").forEach((checkbox) => {
             checkbox.style.display = "none";
         });

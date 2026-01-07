@@ -931,7 +931,7 @@ def purchase_edit(request, purchase_id: int):
         Purchase.objects.select_related("supplier", "warehouse").prefetch_related("items__product", "movements"),
         pk=purchase_id,
     )
-    PurchaseItemFormSet = formset_factory(PurchaseItemForm, extra=1, can_delete=True)
+    PurchaseItemFormSet = formset_factory(PurchaseItemForm, extra=0, can_delete=True)
     supplier_autofill = {
         row["id"]: row["default_supplier_id"]
         for row in Product.objects.annotate(supplier_count=Count("supplier_products"))
