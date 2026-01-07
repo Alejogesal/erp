@@ -341,6 +341,12 @@
         };
 
         const restoreDraft = () => {
+            const navEntry = performance.getEntriesByType?.("navigation")?.[0];
+            const wasReload = navEntry ? navEntry.type === "reload" : performance.navigation?.type === 1;
+            if (!wasReload) {
+                localStorage.removeItem(storageKey);
+                return;
+            }
             const raw = localStorage.getItem(storageKey);
             if (!raw) return;
             let draft = null;
