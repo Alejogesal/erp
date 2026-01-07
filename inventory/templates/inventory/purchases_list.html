@@ -183,7 +183,7 @@
                 if (!match) {
                     const lowered = raw.toLowerCase();
                     const candidates = opts.filter((opt) => (opt.value || "").toLowerCase().includes(lowered));
-                    if (candidates.length === 1) {
+                    if (candidates.length >= 1) {
                         match = candidates[0];
                     }
                 }
