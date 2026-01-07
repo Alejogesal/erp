@@ -353,6 +353,11 @@
         });
         formEl?.addEventListener("submit", () => {
             suppressDraftSave = true;
+            document.querySelectorAll("input[name$='-unit_cost'], input[name$='-vat_percent']").forEach((input) => {
+                if (typeof input.value === "string" && input.value.includes(",")) {
+                    input.value = input.value.replace(",", ".");
+                }
+            });
             document.querySelectorAll("select[name$='-product']").forEach((selectEl) => {
                 if (typeof selectEl._syncSelection === "function") {
                     selectEl._syncSelection();
