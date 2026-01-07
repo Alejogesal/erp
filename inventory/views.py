@@ -888,10 +888,15 @@ def purchases_list(request):
                     return None
 
             def parse_items_from_post() -> tuple[list[dict], list[str]]:
-                total_forms = int(request.POST.get("form-TOTAL_FORMS", 0))
+                indices: set[int] = set()
+                for key in request.POST.keys():
+                    if key.startswith("form-") and key.endswith("-product"):
+                        parts = key.split("-")
+                        if len(parts) >= 3 and parts[1].isdigit():
+                            indices.add(int(parts[1]))
                 items_data: list[dict] = []
                 errors: list[str] = []
-                for idx in range(total_forms):
+                for idx in sorted(indices):
                     prefix = f"form-{idx}-"
                     product_id = (request.POST.get(f"{prefix}product") or "").strip()
                     qty_raw = request.POST.get(f"{prefix}quantity")
@@ -928,17 +933,13 @@ def purchases_list(request):
                     )
                 return items_data, errors
 
-            items: list[dict] = []
-            if formset.is_valid():
-                items = [f.cleaned_data for f in formset.forms if f.cleaned_data and not f.cleaned_data.get("DELETE")]
-            else:
-                items, parse_errors = parse_items_from_post()
-                if parse_errors:
-                    for err in parse_errors[:3]:
-                        messages.error(request, err)
-                    if len(parse_errors) > 3:
-                        messages.error(request, f"Hay {len(parse_errors)} filas con errores.")
-                    items = []
+            items, parse_errors = parse_items_from_post()
+            if parse_errors:
+                for err in parse_errors[:3]:
+                    messages.error(request, err)
+                if len(parse_errors) > 3:
+                    messages.error(request, f"Hay {len(parse_errors)} filas con errores.")
+                items = []
             warehouse = header_form.cleaned_data["warehouse"]
             purchase_date = header_form.cleaned_data.get("purchase_date")
             if not items:
