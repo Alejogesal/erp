@@ -147,6 +147,7 @@
                     updateSearchFromSelect(selectEl);
                 }
             };
+            selectEl._syncSelection = syncSelection;
             search.addEventListener("change", syncSelection);
             search.addEventListener("keydown", (event) => {
                 if (event.key === "Enter") {
@@ -255,7 +256,9 @@
             return hasValue ? data : null;
         };
 
+        let suppressDraftSave = false;
         const saveDraft = () => {
+            if (suppressDraftSave) return;
             if (!formEl) return;
             const warehouseSelect = formEl.querySelector("select[name='warehouse']");
             const rows = Array.from(body.querySelectorAll("tr"));
@@ -339,6 +342,12 @@
             if (document.visibilityState === "hidden") saveDraft();
         });
         formEl?.addEventListener("submit", () => {
+            suppressDraftSave = true;
+            document.querySelectorAll("select[name$='-product']").forEach((selectEl) => {
+                if (typeof selectEl._syncSelection === "function") {
+                    selectEl._syncSelection();
+                }
+            });
             pruneEmptyRows();
             localStorage.removeItem(storageKey);
         });

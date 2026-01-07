@@ -695,6 +695,12 @@ def sales_list(request):
     if request.method == "POST":
         header_form = SaleHeaderForm(request.POST)
         formset = SaleItemFormSet(request.POST)
+        for form in formset.forms:
+            prefix = form.prefix
+            if not (request.POST.get(f"{prefix}-product") or request.POST.get(f"{prefix}-quantity")):
+                form.empty_permitted = True
+            elif not form.has_changed():
+                form.empty_permitted = True
         if header_form.is_valid() and formset.is_valid():
             warehouse = header_form.cleaned_data["warehouse"]
             audience = header_form.cleaned_data.get("audiencia") or Customer.Audience.CONSUMER
@@ -859,47 +865,48 @@ def purchases_list(request):
             items = [f.cleaned_data for f in formset.forms if f.cleaned_data and not f.cleaned_data.get("DELETE")]
             if not items:
                 messages.error(request, "Agregá al menos un producto.")
-            else:
-                try:
-                    with transaction.atomic():
-                        purchase_supplier = items[0].get("supplier") if items else None
-                        purchase = Purchase.objects.create(
-                            supplier=purchase_supplier,
-                            warehouse=warehouse,
-                            reference="Compra",
-                            user=request.user,
+                return redirect("inventory_purchases_list")
+            try:
+                with transaction.atomic():
+                    purchase_supplier = items[0].get("supplier") if items else None
+                    purchase = Purchase.objects.create(
+                        supplier=purchase_supplier,
+                        warehouse=warehouse,
+                        reference="Compra",
+                        user=request.user,
+                    )
+                    total = Decimal("0.00")
+                    for data in items:
+                        qty = Decimal(data["quantity"])
+                        unit_cost = data["unit_cost"]
+                        total += qty * unit_cost
+                        PurchaseItem.objects.create(
+                            purchase=purchase,
+                            product=data["product"],
+                            quantity=qty,
+                            unit_cost=unit_cost,
+                            vat_percent=data.get("vat_percent") or Decimal("0.00"),
                         )
-                        total = Decimal("0.00")
-                        for data in items:
-                            qty = Decimal(data["quantity"])
-                            unit_cost = data["unit_cost"]
-                            total += qty * unit_cost
-                            PurchaseItem.objects.create(
-                                purchase=purchase,
-                                product=data["product"],
-                                quantity=qty,
-                                unit_cost=unit_cost,
-                                vat_percent=data.get("vat_percent") or Decimal("0.00"),
-                            )
-                            services.register_entry(
-                                product=data["product"],
-                                warehouse=warehouse,
-                                quantity=qty,
-                                unit_cost=unit_cost,
-                                supplier=data["supplier"],
-                                vat_percent=data.get("vat_percent") or Decimal("0.00"),
-                                user=request.user,
-                                reference=f"Compra #{purchase.id}",
-                                purchase=purchase,
-                            )
-                        purchase.total = total
-                        purchase.save(update_fields=["total"])
-                    messages.success(request, "Compra registrada.")
-                    return redirect("inventory_purchases_list")
-                except Exception as exc:
-                    messages.error(request, f"No se pudo registrar la compra: {exc}")
-        else:
-            messages.error(request, "Revisá los campos de la compra.")
+                        services.register_entry(
+                            product=data["product"],
+                            warehouse=warehouse,
+                            quantity=qty,
+                            unit_cost=unit_cost,
+                            supplier=data["supplier"],
+                            vat_percent=data.get("vat_percent") or Decimal("0.00"),
+                            user=request.user,
+                            reference=f"Compra #{purchase.id}",
+                            purchase=purchase,
+                        )
+                    purchase.total = total
+                    purchase.save(update_fields=["total"])
+                messages.success(request, "Compra registrada.")
+                return redirect("inventory_purchases_list")
+            except Exception as exc:
+                messages.error(request, f"No se pudo registrar la compra: {exc}")
+                return redirect("inventory_purchases_list")
+        messages.error(request, "Revisá los campos de la compra.")
+        return redirect("inventory_purchases_list")
     else:
         header_form = PurchaseHeaderForm()
         formset = PurchaseItemFormSet()
@@ -973,63 +980,65 @@ def purchase_edit(request, purchase_id: int):
                 items.append(form.cleaned_data)
             if not items:
                 messages.error(request, "Agregá al menos un producto.")
-            else:
-                try:
-                    with transaction.atomic():
-                        # Revert previous stock movements
-                        for movement in purchase.movements.select_for_update():
-                            if movement.movement_type == StockMovement.MovementType.ENTRY and movement.to_warehouse:
-                                stock, _ = Stock.objects.select_for_update().get_or_create(
-                                    product=movement.product,
-                                    warehouse=movement.to_warehouse,
-                                    defaults={"quantity": Decimal("0.00")},
-                                )
-                                stock.quantity = (stock.quantity - movement.quantity).quantize(Decimal("0.01"))
-                                if stock.quantity < 0:
-                                    raise services.NegativeStockError("Stock cannot go negative")
-                                stock.save(update_fields=["quantity"])
-                            movement.delete()
-                        purchase.items.all().delete()
-
-                        purchase.warehouse = header_form.cleaned_data["warehouse"]
-                        purchase.supplier = items[0].get("supplier")
-                        purchase.save(update_fields=["warehouse", "supplier"])
-
-                        total = Decimal("0.00")
-                        for item in items:
-                            product = item["product"]
-                            qty = item["quantity"]
-                            unit_cost = item["unit_cost"]
-                            vat = item.get("vat_percent") or Decimal("0.00")
-                            total += unit_cost * qty
-                            PurchaseItem.objects.create(
-                                purchase=purchase,
-                                product=product,
-                                quantity=qty,
-                                unit_cost=unit_cost,
-                                vat_percent=vat,
+                return redirect("inventory_purchase_edit", purchase_id=purchase.id)
+            try:
+                with transaction.atomic():
+                    # Revert previous stock movements
+                    for movement in purchase.movements.select_for_update():
+                        if movement.movement_type == StockMovement.MovementType.ENTRY and movement.to_warehouse:
+                            stock, _ = Stock.objects.select_for_update().get_or_create(
+                                product=movement.product,
+                                warehouse=movement.to_warehouse,
+                                defaults={"quantity": Decimal("0.00")},
                             )
-                            services.register_entry(
-                                product=product,
-                                warehouse=purchase.warehouse,
-                                quantity=qty,
-                                unit_cost=unit_cost,
-                                vat_percent=vat,
-                                user=request.user,
-                                reference=f"Compra #{purchase.id}",
-                                supplier=purchase.supplier,
-                                purchase=purchase,
-                            )
-                        purchase.total = total.quantize(Decimal("0.01"))
-                        purchase.save(update_fields=["total"])
-                    messages.success(request, "Compra actualizada.")
-                    return redirect("inventory_purchase_receipt", purchase_id=purchase.id)
-                except services.NegativeStockError:
-                    messages.error(request, "No se puede actualizar: el stock quedaría negativo.")
-                except Exception as exc:
-                    messages.error(request, f"No se pudo actualizar la compra: {exc}")
-        else:
-            messages.error(request, "Revisá los campos de la compra.")
+                            stock.quantity = (stock.quantity - movement.quantity).quantize(Decimal("0.01"))
+                            if stock.quantity < 0:
+                                raise services.NegativeStockError("Stock cannot go negative")
+                            stock.save(update_fields=["quantity"])
+                        movement.delete()
+                    purchase.items.all().delete()
+
+                    purchase.warehouse = header_form.cleaned_data["warehouse"]
+                    purchase.supplier = items[0].get("supplier")
+                    purchase.save(update_fields=["warehouse", "supplier"])
+
+                    total = Decimal("0.00")
+                    for item in items:
+                        product = item["product"]
+                        qty = item["quantity"]
+                        unit_cost = item["unit_cost"]
+                        vat = item.get("vat_percent") or Decimal("0.00")
+                        total += unit_cost * qty
+                        PurchaseItem.objects.create(
+                            purchase=purchase,
+                            product=product,
+                            quantity=qty,
+                            unit_cost=unit_cost,
+                            vat_percent=vat,
+                        )
+                        services.register_entry(
+                            product=product,
+                            warehouse=purchase.warehouse,
+                            quantity=qty,
+                            unit_cost=unit_cost,
+                            vat_percent=vat,
+                            user=request.user,
+                            reference=f"Compra #{purchase.id}",
+                            supplier=purchase.supplier,
+                            purchase=purchase,
+                        )
+                    purchase.total = total.quantize(Decimal("0.01"))
+                    purchase.save(update_fields=["total"])
+                messages.success(request, "Compra actualizada.")
+                return redirect("inventory_purchase_receipt", purchase_id=purchase.id)
+            except services.NegativeStockError:
+                messages.error(request, "No se puede actualizar: el stock quedaría negativo.")
+                return redirect("inventory_purchase_edit", purchase_id=purchase.id)
+            except Exception as exc:
+                messages.error(request, f"No se pudo actualizar la compra: {exc}")
+                return redirect("inventory_purchase_edit", purchase_id=purchase.id)
+        messages.error(request, "Revisá los campos de la compra.")
+        return redirect("inventory_purchase_edit", purchase_id=purchase.id)
     else:
         header_form = PurchaseHeaderForm(initial={"warehouse": purchase.warehouse})
         initial = [
@@ -2329,8 +2338,23 @@ def customers_view(request):
                 messages.success(request, "Descuento por grupo asignado.")
                 return redirect("inventory_customers")
             messages.error(request, "Revisá los datos del descuento por grupo.")
+        elif action == "update_customer_audience":
+            customer_id = request.POST.get("customer_id")
+            audience = request.POST.get("audience")
+            valid_audiences = {choice[0] for choice in Customer.Audience.choices}
+            if customer_id and audience in valid_audiences:
+                Customer.objects.filter(id=customer_id).update(audience=audience)
+                messages.success(request, "Tipo de cliente actualizado.")
+                return redirect("inventory_customers")
+            messages.error(request, "Revisá el tipo de cliente.")
 
     customers = Customer.objects.prefetch_related("discounts__product", "group_discounts").order_by("name")
+    group_options = list(
+        Product.objects.exclude(group__exact="")
+        .values_list("group", flat=True)
+        .distinct()
+        .order_by("group")
+    )
     return render(
         request,
         "inventory/customers.html",
@@ -2339,6 +2363,8 @@ def customers_view(request):
             "discount_form": discount_form,
             "group_discount_form": group_discount_form,
             "customers": customers,
+            "audience_choices": Customer.Audience.choices,
+            "group_options": group_options,
         },
     )
 

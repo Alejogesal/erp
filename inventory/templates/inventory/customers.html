@@ -50,7 +50,21 @@
             <tr>
                 <td>{{ customer.name }}</td>
                 <td>{{ customer.email }}</td>
-                <td>{{ customer.get_audience_display }}</td>
+                <td>
+                    <form method="post" class="inline-audience-form">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="update_customer_audience">
+                        <input type="hidden" name="customer_id" value="{{ customer.id }}">
+                        <select name="audience" class="customer-audience-select">
+                            {% for value, label in audience_choices %}
+                                <option value="{{ value }}" {% if customer.audience == value %}selected{% endif %}>
+                                    {{ label }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                        <button type="submit" class="pill" style="font-size:12px; padding:4px 8px;">Guardar</button>
+                    </form>
+                </td>
                 <td>
                     {% if customer.discounts.all or customer.group_discounts.all %}
                         {% for d in customer.discounts.all %}
@@ -62,6 +76,19 @@
                     {% else %}
                         Sin descuentos
                     {% endif %}
+                    <form method="post" class="inline-discount-form" style="margin-top:8px; display:flex; gap:8px; align-items:center;">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="create_group_discount">
+                        <input type="hidden" name="customer" value="{{ customer.id }}">
+                        <select name="group" class="group-select">
+                            <option value="">Marca / Grupo</option>
+                            {% for group in group_options %}
+                                <option value="{{ group }}">{{ group }}</option>
+                            {% endfor %}
+                        </select>
+                        <input type="number" name="discount_percent" step="0.01" min="0" max="100" placeholder="%">
+                        <button type="submit" class="pill" style="font-size:12px; padding:4px 8px;">Asignar</button>
+                    </form>
                 </td>
             </tr>
             {% empty %}
@@ -70,4 +97,27 @@
         </tbody>
     </table>
 </div>
+<script>
+    (function() {
+        document.querySelectorAll(".customer-audience-select").forEach((select) => {
+            select.addEventListener("change", () => select.form?.submit());
+            select.addEventListener("keydown", (event) => {
+                if (event.key === "Enter") {
+                    event.preventDefault();
+                    select.form?.submit();
+                }
+            });
+        });
+        document.querySelectorAll(".inline-discount-form").forEach((form) => {
+            form.querySelectorAll("select, input").forEach((field) => {
+                field.addEventListener("keydown", (event) => {
+                    if (event.key === "Enter") {
+                        event.preventDefault();
+                        form.submit();
+                    }
+                });
+            });
+        });
+    })();
+</script>
 {% endblock %}
