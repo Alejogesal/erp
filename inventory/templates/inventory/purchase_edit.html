@@ -153,7 +153,7 @@
                     syncSelection();
                 }
             });
-            updateSearchFromSelect(selectEl);
+            requestAnimationFrame(() => updateSearchFromSelect(selectEl));
         };
 
         document.querySelectorAll("select[name$='-product']").forEach(setupProductSearch);

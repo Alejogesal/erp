@@ -845,7 +845,14 @@ def purchases_list(request):
         header_form = PurchaseHeaderForm(request.POST)
         formset = PurchaseItemFormSet(request.POST)
         for form in formset.forms:
-            if not form.has_changed():
+            prefix = form.prefix
+            if not (
+                request.POST.get(f"{prefix}-product")
+                or request.POST.get(f"{prefix}-quantity")
+                or request.POST.get(f"{prefix}-unit_cost")
+            ):
+                form.empty_permitted = True
+            elif not form.has_changed():
                 form.empty_permitted = True
         if header_form.is_valid() and formset.is_valid():
             warehouse = header_form.cleaned_data["warehouse"]
@@ -947,7 +954,14 @@ def purchase_edit(request, purchase_id: int):
         header_form = PurchaseHeaderForm(request.POST)
         formset = PurchaseItemFormSet(request.POST)
         for form in formset.forms:
-            if not form.has_changed():
+            prefix = form.prefix
+            if not (
+                request.POST.get(f"{prefix}-product")
+                or request.POST.get(f"{prefix}-quantity")
+                or request.POST.get(f"{prefix}-unit_cost")
+            ):
+                form.empty_permitted = True
+            elif not form.has_changed():
                 form.empty_permitted = True
         if header_form.is_valid() and formset.is_valid():
             items = []

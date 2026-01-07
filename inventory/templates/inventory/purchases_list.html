@@ -186,6 +186,7 @@
                     syncSelection();
                 }
             });
+            requestAnimationFrame(() => updateSearchFromSelect(selectEl));
         };
 
         document.querySelectorAll("select[name$='-product']").forEach(setupProductSearch);
