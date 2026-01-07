@@ -82,6 +82,13 @@ class ProductForm(forms.ModelForm):
 class PurchaseHeaderForm(forms.Form):
     warehouse = forms.ModelChoiceField(queryset=Warehouse.objects.all())
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not self.initial.get("warehouse"):
+            first_warehouse = Warehouse.objects.order_by("name").first()
+            if first_warehouse:
+                self.initial["warehouse"] = first_warehouse
+
 
 class PurchaseItemForm(forms.Form):
     product = forms.ModelChoiceField(queryset=Product.objects.all())
@@ -907,7 +914,6 @@ def purchases_list(request):
                 messages.error(request, f"No se pudo registrar la compra: {exc}")
                 return redirect("inventory_purchases_list")
         messages.error(request, "Revisá los campos de la compra.")
-        return redirect("inventory_purchases_list")
     else:
         header_form = PurchaseHeaderForm()
         formset = PurchaseItemFormSet()
