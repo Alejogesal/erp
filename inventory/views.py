@@ -81,6 +81,11 @@ class ProductForm(forms.ModelForm):
 
 class PurchaseHeaderForm(forms.Form):
     warehouse = forms.ModelChoiceField(queryset=Warehouse.objects.all())
+    purchase_date = forms.DateField(
+        label="Fecha",
+        required=False,
+        widget=forms.DateInput(attrs={"type": "date"}),
+    )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -88,6 +93,8 @@ class PurchaseHeaderForm(forms.Form):
             first_warehouse = Warehouse.objects.order_by("name").first()
             if first_warehouse:
                 self.initial["warehouse"] = first_warehouse
+        if not self.initial.get("purchase_date"):
+            self.initial["purchase_date"] = timezone.localdate()
 
 
 class PurchaseItemForm(forms.Form):
@@ -933,6 +940,7 @@ def purchases_list(request):
                         messages.error(request, f"Hay {len(parse_errors)} filas con errores.")
                     items = []
             warehouse = header_form.cleaned_data["warehouse"]
+            purchase_date = header_form.cleaned_data.get("purchase_date")
             if not items:
                 messages.error(request, "Agregá al menos un producto.")
                 return redirect("inventory_purchases_list")
@@ -945,6 +953,11 @@ def purchases_list(request):
                         reference="Compra",
                         user=request.user,
                     )
+                    if purchase_date:
+                        created_at = datetime.combine(purchase_date, time(12, 0))
+                        if timezone.is_naive(created_at):
+                            created_at = timezone.make_aware(created_at)
+                        Purchase.objects.filter(pk=purchase.pk).update(created_at=created_at)
                     total = Decimal("0.00")
                     for data in items:
                         qty = Decimal(data["quantity"])
@@ -1069,7 +1082,15 @@ def purchase_edit(request, purchase_id: int):
 
                     purchase.warehouse = header_form.cleaned_data["warehouse"]
                     purchase.supplier = items[0].get("supplier")
-                    purchase.save(update_fields=["warehouse", "supplier"])
+                    purchase_date = header_form.cleaned_data.get("purchase_date")
+                    update_fields = ["warehouse", "supplier"]
+                    if purchase_date:
+                        created_at = datetime.combine(purchase_date, time(12, 0))
+                        if timezone.is_naive(created_at):
+                            created_at = timezone.make_aware(created_at)
+                        purchase.created_at = created_at
+                        update_fields.append("created_at")
+                    purchase.save(update_fields=update_fields)
 
                     total = Decimal("0.00")
                     for item in items:
@@ -1109,7 +1130,12 @@ def purchase_edit(request, purchase_id: int):
         messages.error(request, "Revisá los campos de la compra.")
         return redirect("inventory_purchase_edit", purchase_id=purchase.id)
     else:
-        header_form = PurchaseHeaderForm(initial={"warehouse": purchase.warehouse})
+        header_form = PurchaseHeaderForm(
+            initial={
+                "warehouse": purchase.warehouse,
+                "purchase_date": timezone.localtime(purchase.created_at).date(),
+            }
+        )
         initial = [
             {
                 "product": item.product,
