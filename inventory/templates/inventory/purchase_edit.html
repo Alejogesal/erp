@@ -312,6 +312,25 @@
             items.forEach((item, idx) => fillRow(rows[idx], item));
         };
 
+        const pruneEmptyRows = () => {
+            const rows = Array.from(body.querySelectorAll("tr"));
+            rows.forEach((row) => {
+                const productSelect = row.querySelector("select[name$='-product']");
+                const qtyInput = row.querySelector("input[name$='-quantity']");
+                const costInput = row.querySelector("input[name$='-unit_cost']");
+                const supplierSelect = row.querySelector("select[name$='-supplier']");
+                const vatInput = row.querySelector("input[name$='-vat_percent']");
+                const deleteCheckbox = row.querySelector("input[type='checkbox'][name$='-DELETE']");
+                if (!productSelect || !qtyInput || !costInput || !deleteCheckbox) return;
+                const isEmpty = !productSelect.value && !qtyInput.value && !costInput.value;
+                if (isEmpty) {
+                    deleteCheckbox.checked = true;
+                    if (supplierSelect) supplierSelect.value = "";
+                    if (vatInput) vatInput.value = "";
+                }
+            });
+        };
+
         formEl?.addEventListener("input", saveDraft);
         formEl?.addEventListener("change", saveDraft);
         window.addEventListener("beforeunload", saveDraft);
@@ -320,6 +339,7 @@
             if (document.visibilityState === "hidden") saveDraft();
         });
         formEl?.addEventListener("submit", () => {
+            pruneEmptyRows();
             localStorage.removeItem(storageKey);
         });
         restoreDraft();
