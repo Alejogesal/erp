@@ -362,7 +362,11 @@
                 const vatInput = row.querySelector("input[name$='-vat_percent']");
                 const deleteCheckbox = row.querySelector("input[type='checkbox'][name$='-DELETE']");
                 if (!productSelect || !qtyInput || !costInput || !deleteCheckbox) return;
-                const isEmpty = !productSelect.value && !qtyInput.value && !costInput.value;
+                const qtyRaw = (qtyInput.value || "").trim();
+                const costRaw = (costInput.value || "").trim();
+                const qtyZeroish = !qtyRaw || qtyRaw === "0" || qtyRaw === "0.0" || qtyRaw === "0.00" || qtyRaw === "0,00";
+                const costZeroish = !costRaw || costRaw === "0" || costRaw === "0.0" || costRaw === "0.00" || costRaw === "0,00";
+                const isEmpty = !productSelect.value && qtyZeroish && costZeroish;
                 if (isEmpty) {
                     deleteCheckbox.checked = true;
                     if (supplierSelect) supplierSelect.value = "";

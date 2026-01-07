@@ -852,11 +852,12 @@ def purchases_list(request):
         formset = PurchaseItemFormSet(request.POST)
         for form in formset.forms:
             prefix = form.prefix
-            if not (
-                request.POST.get(f"{prefix}-product")
-                or request.POST.get(f"{prefix}-quantity")
-                or request.POST.get(f"{prefix}-unit_cost")
-            ):
+            product_raw = (request.POST.get(f"{prefix}-product") or "").strip()
+            qty_raw = (request.POST.get(f"{prefix}-quantity") or "").strip()
+            cost_raw = (request.POST.get(f"{prefix}-unit_cost") or "").strip()
+            qty_zeroish = qty_raw in {"", "0", "0.0", "0.00", "0,00"}
+            cost_zeroish = cost_raw in {"", "0", "0.0", "0.00", "0,00"}
+            if not product_raw and qty_zeroish and cost_zeroish:
                 form.empty_permitted = True
             elif not form.has_changed():
                 form.empty_permitted = True
