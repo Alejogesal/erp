@@ -1413,15 +1413,7 @@ def product_prices(request):
 @require_http_methods(["GET", "POST"])
 def product_costs(request):
     ProductCostFormSet = formset_factory(ProductCostRowForm, extra=0)
-    query = (request.GET.get("q") or "").strip()
     products_qs = Product.objects.select_related("default_supplier").order_by("sku")
-    if query:
-        products_qs = products_qs.filter(
-            Q(sku__icontains=query)
-            | Q(name__icontains=query)
-            | Q(group__icontains=query)
-            | Q(default_supplier__name__icontains=query)
-        )
     products = list(products_qs)
     group_options = (
         Product.objects.exclude(group="")
@@ -1556,19 +1548,10 @@ def product_costs(request):
                 group = (bulk_form.cleaned_data.get("group") or "").strip()
                 supplier = bulk_form.cleaned_data.get("supplier")
                 cost_percent = bulk_form.cleaned_data.get("cost_percent")
-                if not query and not group and not supplier:
-                    messages.error(request, "Usá el buscador o completá un filtro (grupo/proveedor) antes de aplicar.")
-                elif not group and not supplier and cost_percent is None:
+                if not group and not supplier and cost_percent is None:
                     messages.error(request, "Completá al menos un campo para aplicar cambios.")
                 else:
                     target_qs = Product.objects.select_related("default_supplier").order_by("sku")
-                    if query:
-                        target_qs = target_qs.filter(
-                            Q(sku__icontains=query)
-                            | Q(name__icontains=query)
-                            | Q(group__icontains=query)
-                            | Q(default_supplier__name__icontains=query)
-                        )
                     if group:
                         target_qs = target_qs.filter(group__iexact=group)
 
@@ -1671,7 +1654,6 @@ def product_costs(request):
             "formset": formset,
             "product_form": product_form,
             "bulk_form": bulk_form,
-            "query": query,
             "group_options": group_options,
         },
     )

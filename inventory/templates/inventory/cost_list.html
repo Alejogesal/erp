@@ -171,59 +171,12 @@
     </form>
 </div>
 
+{% if bulk_form.errors %}
 <div class="card" style="margin-bottom:16px;">
-    <div class="card-title">Buscar productos</div>
-    <form method="get">
-        <p>
-            <label for="q">Coincidencia</label>
-            <input id="q" name="q" type="text" value="{{ query }}" placeholder="Nombre, marca o proveedor" list="product-options">
-            <datalist id="product-options">
-                {% for form in formset %}
-                <option value="{{ form.initial.name }}"></option>
-                {% if form.initial.group %}
-                <option value="{{ form.initial.group }}"></option>
-                {% endif %}
-                {% endfor %}
-            </datalist>
-        </p>
-        <button type="submit">Buscar</button>
-    </form>
+    <div class="card-title">Edición masiva</div>
+    {{ bulk_form.errors }}
 </div>
-
-<div class="card" style="margin-bottom:16px;">
-    <div class="card-title">Edición masiva (sobre los resultados filtrados)</div>
-    <form method="post">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="bulk_update">
-        <div class="cards" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
-            <div>
-                {{ bulk_form.group.label_tag }}
-                <input name="{{ bulk_form.group.name }}" id="{{ bulk_form.group.id_for_label }}" type="text" list="group-options">
-                <datalist id="group-options">
-                    {% for group in group_options %}
-                    <option value="{{ group }}"></option>
-                    {% endfor %}
-                </datalist>
-            </div>
-            <div>
-                {{ bulk_form.supplier.label_tag }}
-                {{ bulk_form.supplier }}
-            </div>
-            <div>
-                {{ bulk_form.cost_percent.label_tag }}
-                {{ bulk_form.cost_percent }}
-                {% if bulk_form.cost_percent.help_text %}
-                <p style="color: var(--muted); font-size: 12px; margin: 4px 0 0;">
-                    {{ bulk_form.cost_percent.help_text }}
-                </p>
-                {% endif %}
-            </div>
-        </div>
-        <div style="margin-top:12px;">
-            <button type="submit">Aplicar cambios</button>
-        </div>
-    </form>
-</div>
+{% endif %}
 
 <div class="card table-card" id="productos">
     <div class="card-title">Productos</div>
