@@ -44,18 +44,16 @@
     <div class="card-title">Precios por producto</div>
     <div class="price-filter">
         <span class="hint">Buscar</span>
-        <input id="price-filter" type="text" placeholder="SKU o producto">
-    </div>
-    <div class="price-filter" style="flex-direction:column; align-items:stretch; position:relative;">
-        <div style="display:flex; align-items:center; gap:10px;">
-            <span class="hint">Marcas</span>
-            <input id="brand-search" type="text" placeholder="Buscar marca..." style="flex:1;">
-        </div>
-        <select id="price-groups" multiple style="width:100%; background:#0c141f; border:1px solid #2a313c; color:var(--text); height:140px; display:none;">
-            {% for group in group_options %}
-            <option value="{{ group }}">{{ group }}</option>
+        <input id="price-search" type="text" placeholder="SKU, producto o marca" list="price-options">
+        <datalist id="price-options">
+            {% for product in products %}
+            <option value="{{ product.sku }}"></option>
+            <option value="{{ product.name }}"></option>
+            {% if product.group %}
+            <option value="{{ product.group }}"></option>
+            {% endif %}
             {% endfor %}
-        </select>
+        </datalist>
     </div>
     <table>
         <thead>
@@ -94,9 +92,7 @@
 </div>
 <script>
     (function() {
-        const filterInput = document.getElementById("price-filter");
-        const groupSelect = document.getElementById("price-groups");
-        const brandSearch = document.getElementById("brand-search");
+        const filterInput = document.getElementById("price-search");
         const downloadLinks = Array.from(document.querySelectorAll(".price-download"));
         if (!filterInput) return;
         const rows = Array.from(document.querySelectorAll("table tbody tr"));
@@ -107,59 +103,29 @@
             return `${sku} ${name} ${brand}`.toLowerCase();
         };
         const getRowBrand = (row) => (row.children[2]?.textContent || "").trim();
+        const brands = Array.from(new Set(rows.map(getRowBrand).filter(Boolean)));
         const applyFilter = () => {
             const query = filterInput.value.trim().toLowerCase();
-            const selectedBrands = groupSelect
-                ? Array.from(groupSelect.selectedOptions).map(opt => opt.value)
-                : [];
             rows.forEach((row) => {
                 if (!row.querySelector("td")) return;
                 const matchesText = !query || getRowText(row).includes(query);
-                const rowBrand = getRowBrand(row);
-                const matchesBrand = !selectedBrands.length || selectedBrands.includes(rowBrand);
-                row.style.display = matchesText && matchesBrand ? "" : "none";
+                row.style.display = matchesText ? "" : "none";
             });
         };
         filterInput.addEventListener("input", applyFilter);
 
         const updateDownloads = () => {
-            if (!groupSelect) return;
-            const selected = Array.from(groupSelect.selectedOptions).map(opt => opt.value);
-            const groups = selected.join(",");
+            const query = filterInput.value.trim();
+            const matchedBrand = brands.find((brand) => brand.toLowerCase() === query.toLowerCase());
             downloadLinks.forEach((link) => {
                 const base = link.getAttribute("data-base-href");
                 if (!base) return;
-                link.href = groups ? `${base}?groups=${encodeURIComponent(groups)}` : base;
+                link.href = matchedBrand ? `${base}?groups=${encodeURIComponent(matchedBrand)}` : base;
             });
         };
-        if (groupSelect) {
-            groupSelect.addEventListener("change", () => {
-                updateDownloads();
-                applyFilter();
-            });
-            updateDownloads();
-        }
-
-        if (brandSearch && groupSelect) {
-            const filterOptions = () => {
-                const query = brandSearch.value.trim().toLowerCase();
-                Array.from(groupSelect.options).forEach((opt) => {
-                    opt.hidden = query && !opt.value.toLowerCase().includes(query);
-                });
-                groupSelect.style.display = query ? "block" : "none";
-            };
-            brandSearch.addEventListener("input", filterOptions);
-            brandSearch.addEventListener("focus", filterOptions);
-            brandSearch.addEventListener("blur", () => {
-                setTimeout(() => {
-                    groupSelect.style.display = "none";
-                }, 120);
-            });
-            groupSelect.addEventListener("change", () => {
-                brandSearch.value = "";
-                groupSelect.style.display = "none";
-            });
-        }
+        filterInput.addEventListener("change", updateDownloads);
+        filterInput.addEventListener("blur", updateDownloads);
+        updateDownloads();
     })();
 </script>
 {% endblock %}
