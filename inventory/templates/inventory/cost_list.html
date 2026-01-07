@@ -32,10 +32,21 @@
     .danger {
         background: var(--negative);
     }
+    .danger.small {
+        padding: 6px 10px;
+        font-size: 12px;
+        border-radius: 8px;
+    }
     .autosave-status {
         font-size: 11px;
         color: var(--muted);
         margin-top: 6px;
+    }
+    #productos table input,
+    #productos table select {
+        padding: 8px 10px;
+        border-radius: 8px;
+        font-size: 13px;
     }
 </style>
 <h1>Productos</h1>
@@ -179,7 +190,7 @@
                         <input type="text" class="cost-with-vat" readonly>
                     </td>
                     <td>
-                        <button type="button" class="danger" data-product-id="{{ form.product_id.value }}">Eliminar</button>
+                        <button type="button" class="danger small" data-product-id="{{ form.product_id.value }}">Eliminar</button>
                     </td>
                 </tr>
                 {% empty %}
