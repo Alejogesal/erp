@@ -19,31 +19,6 @@
 </div>
 
 <div class="card" style="margin-bottom:16px;">
-    <div class="card-title">Eliminar ventas en lote</div>
-    <form method="post" action="{% url 'inventory_sales_list' %}">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="bulk_delete_sales">
-        <div class="cards" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
-            <div>
-                <label for="bulk_start">Desde</label>
-                <input id="bulk_start" name="bulk_start" type="datetime-local">
-            </div>
-            <div>
-                <label for="bulk_end">Hasta</label>
-                <input id="bulk_end" name="bulk_end" type="datetime-local">
-            </div>
-            <div style="display:flex; align-items:center; gap:8px; padding-top:22px;">
-                <input id="bulk_only_ml" name="bulk_only_ml" type="checkbox" value="1">
-                <label for="bulk_only_ml">Solo MercadoLibre</label>
-            </div>
-        </div>
-        <div style="margin-top:12px;">
-            <button type="submit" onclick="return confirm('¿Eliminar ventas según el filtro?');">Eliminar ventas</button>
-        </div>
-    </form>
-</div>
-
-<div class="card" style="margin-bottom:16px;">
     <div class="card-title">Registrar venta</div>
     <form method="post" action="{% url 'inventory_sales_list' %}">
         {% csrf_token %}
