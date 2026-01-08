@@ -681,7 +681,9 @@ def sales_list(request):
             deleted_count = ml_sales.count()
             ml_sales.delete()
             messages.info(request, f"Ventas ML eliminadas: {deleted_count}.")
-        sheet_url = os.environ.get("GOOGLE_SHEETS_SALES_URL", "")
+        sheet_url = (request.POST.get("sheet_url") or "").strip()
+        if not sheet_url:
+            sheet_url = os.environ.get("GOOGLE_SHEETS_SALES_URL", "")
         if not sheet_url:
             messages.error(request, "Falta GOOGLE_SHEETS_SALES_URL en el entorno.")
             return redirect("inventory_sales_list")
@@ -760,13 +762,13 @@ def sales_list(request):
         cantidad_idx = idx("Cantidad")
         precio_idx = idx("Precio Bruto Venta", "Precio Bruto", "Precio")
         comision_idx = idx("Comision", "Comisión")
-        iibb_idx = idx("IIBB")
+        iibb_idx = idx("IIBB", "Impuestos", "Impuesto")
 
         required = [fecha_idx, idventa_idx, producto_idx, cantidad_idx, precio_idx, comision_idx, iibb_idx]
         if any(i is None for i in required):
             messages.error(
                 request,
-                "Faltan columnas requeridas en la hoja (Fecha, IDVenta, Producto, Cantidad, Precio, Comision, IIBB).",
+                "Faltan columnas requeridas en la hoja (Fecha, IDVenta, Producto, Cantidad, Precio Bruto Venta, Comision, Impuestos).",
             )
             return redirect("inventory_sales_list")
 
@@ -1106,6 +1108,7 @@ def sales_list(request):
             "search_query": search_query,
             "include_comun": include_comun,
             "include_ml": include_ml,
+            "sales_sheet_url": os.environ.get("GOOGLE_SHEETS_SALES_URL", ""),
             "customers": customers,
             "form": header_form,
             "formset": formset,

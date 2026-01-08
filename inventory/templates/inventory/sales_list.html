@@ -13,11 +13,16 @@
         <p style="color: var(--muted); margin: 0 0 10px;">
             Importa ventas desde la hoja pública configurada en el servidor.
         </p>
+        <label for="sheet-url" style="font-size:12px; color:var(--muted); display:block; margin-bottom:6px;">
+            URL Google Sheets (opcional)
+        </label>
+        <input id="sheet-url" name="sheet_url" type="url" placeholder="https://docs.google.com/spreadsheets/d/..." value="{{ sales_sheet_url }}">
         <button type="submit">Sincronizar ventas</button>
     </form>
     <form method="post" action="{% url 'inventory_sales_list' %}" style="margin-top:10px;">
         {% csrf_token %}
         <input type="hidden" name="action" value="reset_google_sales">
+        <input type="hidden" name="sheet_url" value="{{ sales_sheet_url }}">
         <button type="submit" onclick="return confirm('¿Eliminar ventas de MercadoLibre y reimportar desde Sheets?');">
             Borrar ventas ML y reimportar
         </button>
