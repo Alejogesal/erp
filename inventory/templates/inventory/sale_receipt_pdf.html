@@ -84,7 +84,15 @@
                         <td class="desc">{{ item.product.name }}</td>
                         <td class="num">{{ item.quantity|latam_number:2 }}</td>
                         <td class="num">${{ item.unit_price|latam_number:2 }}</td>
-                        <td class="num">{% if item.discount_percent %}-{{ item.discount_percent|latam_number:0 }}%{% else %}0%{% endif %}</td>
+                        <td class="num">
+                            {% if item.discount_percent %}
+                                -{{ item.discount_percent|latam_number:0 }}%
+                            {% elif extra_discount_percent %}
+                                -{{ extra_discount_percent|latam_number:0 }}%
+                            {% else %}
+                                0%
+                            {% endif %}
+                        </td>
                         <td class="num">${{ item.line_total|latam_number:2 }}</td>
                     </tr>
                     {% endfor %}

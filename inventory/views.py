@@ -377,6 +377,15 @@ def sale_receipt(request, sale_id: int):
     items = list(sale.items.all())
     subtotal = sum((item.unit_price * item.quantity for item in items), Decimal("0.00"))
     discount_total = sale.discount_total or Decimal("0.00")
+    per_item_discount = sum(((item.unit_price * item.quantity) - item.line_total for item in items), Decimal("0.00"))
+    extra_discount_amount = discount_total - per_item_discount
+    if extra_discount_amount < 0:
+        extra_discount_amount = Decimal("0.00")
+    extra_discount_percent = (
+        (extra_discount_amount / subtotal * Decimal("100.00")).quantize(Decimal("0.01"))
+        if subtotal > 0
+        else Decimal("0.00")
+    )
     total = subtotal - discount_total
     invoice_number = sale.ml_order_id or sale.invoice_number
     context = {
@@ -384,6 +393,7 @@ def sale_receipt(request, sale_id: int):
         "items": items,
         "subtotal": subtotal,
         "discount_total": discount_total,
+        "extra_discount_percent": extra_discount_percent,
         "total": total,
         "invoice_number": invoice_number,
     }
@@ -398,6 +408,15 @@ def sale_receipt_pdf(request, sale_id: int):
     items = list(sale.items.all())
     subtotal = sum((item.unit_price * item.quantity for item in items), Decimal("0.00"))
     discount_total = sale.discount_total or Decimal("0.00")
+    per_item_discount = sum(((item.unit_price * item.quantity) - item.line_total for item in items), Decimal("0.00"))
+    extra_discount_amount = discount_total - per_item_discount
+    if extra_discount_amount < 0:
+        extra_discount_amount = Decimal("0.00")
+    extra_discount_percent = (
+        (extra_discount_amount / subtotal * Decimal("100.00")).quantize(Decimal("0.01"))
+        if subtotal > 0
+        else Decimal("0.00")
+    )
     total = subtotal - discount_total
     from django.template.loader import render_to_string
 
@@ -408,6 +427,7 @@ def sale_receipt_pdf(request, sale_id: int):
             "items": items,
             "subtotal": subtotal,
             "discount_total": discount_total,
+            "extra_discount_percent": extra_discount_percent,
             "total": total,
             "invoice_number": sale.ml_order_id or sale.invoice_number,
         },
