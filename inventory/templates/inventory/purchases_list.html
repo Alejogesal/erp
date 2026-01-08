@@ -14,6 +14,7 @@
     <div class="card-title">Registrar compra</div>
     <form method="post" action="{% url 'inventory_purchases_list' %}">
         {% csrf_token %}
+        <input type="hidden" name="items_payload" id="items-payload">
         <h3>Depósito</h3>
         {{ form.as_p }}
         {{ formset.non_form_errors }}
@@ -282,6 +283,24 @@
 
         const formEl = addBtn.closest("form");
         const storageKey = "erp:purchases_draft";
+        const resolveProductId = (productSelect) => {
+            if (!productSelect) return "";
+            if (productSelect.value) return productSelect.value;
+            const searchValue = productSelect._searchInput?.value?.trim() || "";
+            if (!searchValue) return "";
+            const options = Array.from(productSelect.options || []);
+            let match = options.find((opt) => (opt.textContent || "") === searchValue);
+            if (!match) {
+                const lowered = searchValue.toLowerCase();
+                match = options.find((opt) => (opt.textContent || "").toLowerCase() === lowered);
+            }
+            if (!match) {
+                const lowered = searchValue.toLowerCase();
+                const candidates = options.filter((opt) => (opt.textContent || "").toLowerCase().includes(lowered));
+                if (candidates.length) match = candidates[0];
+            }
+            return match?.value || "";
+        };
 
         const serializeRow = (row) => {
             const productSelect = row.querySelector("select[name$='-product']");
@@ -291,7 +310,8 @@
             const vatInput = row.querySelector("input[name$='-vat_percent']");
             const searchInput = productSelect?._searchInput;
             const data = {
-                product_id: productSelect?.value || "",
+                product_id: resolveProductId(productSelect),
+                product_text: searchInput?.value || "",
                 product_search: searchInput?.value || "",
                 supplier_id: supplierSelect?.value || "",
                 quantity: qtyInput?.value || "",
@@ -404,6 +424,12 @@
                     input.value = input.value.replace(",", ".");
                 }
             });
+            const payloadInput = document.getElementById("items-payload");
+            if (payloadInput) {
+                const rows = Array.from(body.querySelectorAll("tr"));
+                const items = rows.map(serializeRow).filter(Boolean);
+                payloadInput.value = JSON.stringify(items);
+            }
             document.querySelectorAll("select[name$='-product']").forEach((selectEl) => {
                 if (typeof selectEl._syncSelection === "function") {
                     selectEl._syncSelection();

@@ -887,6 +887,79 @@ def purchases_list(request):
                 except Exception:
                     return None
 
+            def resolve_product(product_id: str, product_text: str):
+                product = None
+                if product_id:
+                    product = Product.objects.filter(id=product_id).first()
+                if not product and product_text:
+                    label = product_text.split(" (", 1)[0].strip()
+                    sku_candidate = ""
+                    name_candidate = label
+                    if " - " in label:
+                        sku_candidate, name_candidate = [part.strip() for part in label.split(" - ", 1)]
+                    if sku_candidate and sku_candidate.lower() != "sin sku":
+                        product = Product.objects.filter(sku__iexact=sku_candidate).first()
+                    if not product and name_candidate:
+                        product = (
+                            Product.objects.filter(name__iexact=name_candidate).first()
+                            or Product.objects.filter(name__icontains=name_candidate).first()
+                        )
+                return product
+
+            def parse_items_from_payload() -> tuple[list[dict], list[str]]:
+                raw = request.POST.get("items_payload")
+                if not raw:
+                    return [], []
+                try:
+                    items_raw = json.loads(raw)
+                except Exception:
+                    return [], ["No se pudo leer el detalle de la compra."]
+                if not isinstance(items_raw, list):
+                    return [], ["Detalle de compra inválido."]
+                items_data: list[dict] = []
+                errors: list[str] = []
+                for idx, entry in enumerate(items_raw, start=1):
+                    if not isinstance(entry, dict):
+                        continue
+                    product_id = str(entry.get("product_id") or "").strip()
+                    product_text = str(entry.get("product_text") or "").strip()
+                    qty_raw = entry.get("quantity")
+                    cost_raw = entry.get("unit_cost")
+                    supplier_id = str(entry.get("supplier_id") or "").strip()
+                    vat_raw = entry.get("vat_percent")
+                    if not product_id and not str(qty_raw or "").strip() and not str(cost_raw or "").strip():
+                        continue
+                    if not product_id and not product_text:
+                        errors.append(f"Fila {idx}: producto inválido.")
+                        continue
+                    if not str(qty_raw or "").strip() or not str(cost_raw or "").strip():
+                        errors.append(f"Fila {idx}: completá cantidad y costo.")
+                        continue
+                    product = resolve_product(product_id, product_text)
+                    if not product:
+                        errors.append(f"Fila {idx}: producto inválido.")
+                        continue
+                    qty = parse_decimal(str(qty_raw))
+                    unit_cost = parse_decimal(str(cost_raw))
+                    vat_percent = parse_decimal(str(vat_raw)) or Decimal("0.00")
+                    if qty is None or qty <= 0:
+                        errors.append(f"Fila {idx}: cantidad inválida.")
+                        continue
+                    if unit_cost is None or unit_cost < 0:
+                        errors.append(f"Fila {idx}: costo inválido.")
+                        continue
+                    supplier = Supplier.objects.filter(id=supplier_id).first() if supplier_id else None
+                    items_data.append(
+                        {
+                            "product": product,
+                            "quantity": qty,
+                            "unit_cost": unit_cost,
+                            "vat_percent": vat_percent,
+                            "supplier": supplier,
+                        }
+                    )
+                return items_data, errors
+
             def parse_items_from_post() -> tuple[list[dict], list[str]]:
                 indices: set[int] = set()
                 for key in request.POST.keys():
@@ -926,7 +999,7 @@ def purchases_list(request):
                     if not product_id or not (qty_raw or "").strip() or not (cost_raw or "").strip():
                         errors.append(f"Fila {idx + 1}: completá producto, cantidad y costo.")
                         continue
-                    product = Product.objects.filter(id=product_id).first()
+                    product = resolve_product(product_id, product_text)
                     if not product:
                         errors.append(f"Fila {idx + 1}: producto inválido.")
                         continue
@@ -951,7 +1024,9 @@ def purchases_list(request):
                     )
                 return items_data, errors
 
-            items, parse_errors = parse_items_from_post()
+            items, parse_errors = parse_items_from_payload()
+            if not items and not parse_errors:
+                items, parse_errors = parse_items_from_post()
             if parse_errors:
                 for err in parse_errors[:3]:
                     messages.error(request, err)
@@ -1061,24 +1136,94 @@ def purchase_edit(request, purchase_id: int):
     if request.method == "POST":
         header_form = PurchaseHeaderForm(request.POST)
         formset = PurchaseItemFormSet(request.POST)
+        items_payload_raw = request.POST.get("items_payload")
         for form in formset.forms:
             prefix = form.prefix
-            if not (
-                request.POST.get(f"{prefix}-product")
-                or request.POST.get(f"{prefix}-quantity")
-                or request.POST.get(f"{prefix}-unit_cost")
-            ):
+            product_raw = (request.POST.get(f"{prefix}-product") or "").strip()
+            qty_raw = (request.POST.get(f"{prefix}-quantity") or "").strip()
+            cost_raw = (request.POST.get(f"{prefix}-unit_cost") or "").strip()
+            qty_zeroish = qty_raw in {"", "0", "0.0", "0.00", "0,00"}
+            cost_zeroish = cost_raw in {"", "0", "0.0", "0.00", "0,00"}
+            if not product_raw and qty_zeroish and cost_zeroish:
                 form.empty_permitted = True
             elif not form.has_changed():
                 form.empty_permitted = True
-        if header_form.is_valid() and formset.is_valid():
+        if header_form.is_valid():
             items = []
-            for form in formset:
-                if form.cleaned_data.get("DELETE"):
-                    continue
-                if not form.cleaned_data.get("product"):
-                    continue
-                items.append(form.cleaned_data)
+            errors: list[str] = []
+            if items_payload_raw:
+                def parse_decimal(raw: str | None) -> Decimal | None:
+                    if raw is None:
+                        return None
+                    value = str(raw).strip().replace(",", ".")
+                    if not value:
+                        return None
+                    try:
+                        return Decimal(value)
+                    except Exception:
+                        return None
+
+                def resolve_product(product_id: str, product_text: str):
+                    product = None
+                    if product_id:
+                        product = Product.objects.filter(id=product_id).first()
+                    if not product and product_text:
+                        label = product_text.split(" (", 1)[0].strip()
+                        sku_candidate = ""
+                        name_candidate = label
+                        if " - " in label:
+                            sku_candidate, name_candidate = [part.strip() for part in label.split(" - ", 1)]
+                        if sku_candidate and sku_candidate.lower() != "sin sku":
+                            product = Product.objects.filter(sku__iexact=sku_candidate).first()
+                        if not product and name_candidate:
+                            product = (
+                                Product.objects.filter(name__iexact=name_candidate).first()
+                                or Product.objects.filter(name__icontains=name_candidate).first()
+                            )
+                    return product
+
+                try:
+                    items_raw = json.loads(items_payload_raw)
+                except Exception:
+                    items_raw = []
+                if isinstance(items_raw, list):
+                    for idx, entry in enumerate(items_raw, start=1):
+                        if not isinstance(entry, dict):
+                            continue
+                        product_id = str(entry.get("product_id") or "").strip()
+                        product_text = str(entry.get("product_text") or "").strip()
+                        qty_raw = entry.get("quantity")
+                        cost_raw = entry.get("unit_cost")
+                        supplier_id = str(entry.get("supplier_id") or "").strip()
+                        vat_raw = entry.get("vat_percent")
+                        if not product_id and not product_text:
+                            continue
+                        product = resolve_product(product_id, product_text)
+                        qty = parse_decimal(str(qty_raw))
+                        unit_cost = parse_decimal(str(cost_raw))
+                        if not product or qty is None or qty <= 0 or unit_cost is None:
+                            errors.append(f"Fila {idx}: datos inválidos.")
+                            continue
+                        supplier = Supplier.objects.filter(id=supplier_id).first() if supplier_id else None
+                        items.append(
+                            {
+                                "product": product,
+                                "quantity": qty,
+                                "unit_cost": unit_cost,
+                                "vat_percent": parse_decimal(str(vat_raw)) or Decimal("0.00"),
+                                "supplier": supplier,
+                            }
+                        )
+            elif formset.is_valid():
+                for form in formset:
+                    if form.cleaned_data.get("DELETE"):
+                        continue
+                    if not form.cleaned_data.get("product"):
+                        continue
+                    items.append(form.cleaned_data)
+            if errors:
+                for err in errors[:3]:
+                    messages.error(request, err)
             if not items:
                 messages.error(request, "Agregá al menos un producto.")
                 return redirect("inventory_purchase_edit", purchase_id=purchase.id)
