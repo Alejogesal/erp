@@ -96,7 +96,7 @@
             <label>Hasta <input id="bulk-select-end" type="date" style="margin-left:6px;"></label>
         </div>
     </div>
-    <form method="get" style="margin:10px 0 12px;">
+    <form method="get" id="history-filter" style="margin:10px 0 12px;">
         <div class="cards" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
             <div>
                 <label for="q">Buscar</label>
@@ -112,9 +112,6 @@
                     MercadoLibre
                 </label>
             </div>
-        </div>
-        <div style="margin-top:12px;">
-            <button type="submit">Aplicar filtro</button>
         </div>
     </form>
     <form method="post" action="{% url 'inventory_sales_list' %}">
@@ -143,7 +140,7 @@
         </thead>
         <tbody>
             {% for sale in sales_comun %}
-            <tr data-created="{{ sale.created_at|date:'c' }}">
+            <tr class="sale-row" data-created="{{ sale.created_at|date:'c' }}" data-search="{% if sale.customer %}{{ sale.customer.name }}{% endif %} {% for item in sale.items.all %}{{ item.product.name }} {{ item.product.sku }} {% endfor %}">
                 <td>{{ sale.ml_order_id|default:sale.invoice_number }}</td>
                 <td>{{ sale.created_at|date:"d/m/Y H:i" }}</td>
                 <td>{{ sale.customer|default:"Consumidor final" }}</td>
@@ -160,8 +157,11 @@
                 </td>
             </tr>
             {% empty %}
-            <tr><td colspan="9">No hay ventas en Depósito Común.</td></tr>
+            <tr class="empty-row"><td colspan="9">No hay ventas en Depósito Común.</td></tr>
             {% endfor %}
+            {% if sales_comun %}
+            <tr class="empty-row" style="display:none;"><td colspan="9">No hay ventas en Depósito Común.</td></tr>
+            {% endif %}
         </tbody>
         </table>
         <h4 style="margin:16px 0 6px;">MercadoLibre</h4>
@@ -181,7 +181,7 @@
         </thead>
         <tbody>
             {% for sale in sales_ml %}
-            <tr data-created="{{ sale.created_at|date:'c' }}">
+            <tr class="sale-row" data-created="{{ sale.created_at|date:'c' }}" data-search="{% if sale.customer %}{{ sale.customer.name }}{% endif %} {% for item in sale.items.all %}{{ item.product.name }} {{ item.product.sku }} {% endfor %}">
                 <td>{{ sale.ml_order_id|default:sale.invoice_number }}</td>
                 <td>{{ sale.created_at|date:"d/m/Y H:i" }}</td>
                 <td>{{ sale.customer|default:"Consumidor final" }}</td>
@@ -198,14 +198,71 @@
                 </td>
             </tr>
             {% empty %}
-            <tr><td colspan="9">No hay ventas de MercadoLibre.</td></tr>
+            <tr class="empty-row"><td colspan="9">No hay ventas de MercadoLibre.</td></tr>
             {% endfor %}
+            {% if sales_ml %}
+            <tr class="empty-row" style="display:none;"><td colspan="9">No hay ventas de MercadoLibre.</td></tr>
+            {% endif %}
         </tbody>
         </table>
     </form>
 </div>
 {{ customer_audiences|json_script:"customer-audiences" }}
 <script>
+    (function() {
+        const form = document.getElementById("history-filter");
+        const queryInput = document.getElementById("q");
+        const whComun = form ? form.querySelector("input[name='wh_comun']") : null;
+        const whMl = form ? form.querySelector("input[name='wh_ml']") : null;
+        const tables = Array.from(document.querySelectorAll(".card.table-card table"));
+        const comunTable = tables[0] || null;
+        const mlTable = tables[1] || null;
+
+        const normalize = (value) => (value || "").toString().toLowerCase();
+
+        const filterTable = (table, enabled, hasFilters, query) => {
+            if (!table) return;
+            const rows = Array.from(table.querySelectorAll("tbody tr.sale-row"));
+            let visibleCount = 0;
+            rows.forEach((row) => {
+                const haystack = normalize(row.dataset.search);
+                const matches = !query || haystack.includes(query);
+                const shouldShow = enabled ? matches : (!hasFilters ? matches : false);
+                row.style.display = shouldShow ? "" : "none";
+                if (shouldShow) visibleCount += 1;
+            });
+            const emptyRow = table.querySelector("tbody tr.empty-row");
+            if (emptyRow) {
+                emptyRow.style.display = visibleCount === 0 ? "" : "none";
+            }
+            const heading = table.previousElementSibling;
+            if (heading && heading.tagName === "H4") {
+                heading.style.display = (enabled || !hasFilters) ? "" : "none";
+            }
+            table.style.display = (enabled || !hasFilters) ? "" : "none";
+        };
+
+        const applyFilter = () => {
+            const query = normalize(queryInput ? queryInput.value : "");
+            const showComun = whComun ? whComun.checked : false;
+            const showMl = whMl ? whMl.checked : false;
+            const hasFilters = showComun || showMl;
+            filterTable(comunTable, showComun, hasFilters, query);
+            filterTable(mlTable, showMl, hasFilters, query);
+        };
+
+        if (form) {
+            form.addEventListener("submit", (event) => event.preventDefault());
+        }
+        if (queryInput) {
+            queryInput.addEventListener("input", applyFilter);
+        }
+        [whComun, whMl].forEach((checkbox) => {
+            if (checkbox) checkbox.addEventListener("change", applyFilter);
+        });
+        applyFilter();
+    })();
+
     (function() {
         const addBtn = document.getElementById("add-item");
         const body = document.getElementById("items-body");
