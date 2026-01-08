@@ -136,7 +136,7 @@ class SaleHeaderForm(forms.Form):
         required=False,
     )
     descuento_total = forms.DecimalField(
-        label="Descuento total",
+        label="DTO %",
         min_value=Decimal("0.00"),
         decimal_places=2,
         required=False,
@@ -460,7 +460,7 @@ def sale_edit(request, sale_id: int):
             audience = header_form.cleaned_data.get("audiencia") or Customer.Audience.CONSUMER
             customer = header_form.cleaned_data.get("cliente")
             total_venta = header_form.cleaned_data.get("total_venta")
-            extra_discount = header_form.cleaned_data.get("descuento_total") or Decimal("0.00")
+            extra_discount_percent = header_form.cleaned_data.get("descuento_total") or Decimal("0.00")
             comision_ml = header_form.cleaned_data.get("comision_ml") or Decimal("0.00")
             impuestos_ml = header_form.cleaned_data.get("impuestos_ml") or Decimal("0.00")
             if customer:
@@ -498,6 +498,7 @@ def sale_edit(request, sale_id: int):
 
                     total = Decimal("0.00")
                     discount_total = Decimal("0.00")
+                    base_subtotal = Decimal("0.00")
                     for data in items:
                         base_price = {
                             Customer.Audience.CONSUMER: data["product"].consumer_price,
@@ -521,6 +522,7 @@ def sale_edit(request, sale_id: int):
                         qty = Decimal(data["quantity"])
                         line_total = (qty * final_price).quantize(Decimal("0.01"))
                         discount_amount = (qty * (base_price - final_price)).quantize(Decimal("0.01"))
+                        base_subtotal += (qty * base_price).quantize(Decimal("0.01"))
                         SaleItem.objects.create(
                             sale=sale,
                             product=data["product"],
@@ -549,8 +551,10 @@ def sale_edit(request, sale_id: int):
                         if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE and total_venta is not None
                         else total
                     )
-                    sale.total = (gross_total - extra_discount).quantize(Decimal("0.01"))
-                    sale.discount_total = (discount_total + extra_discount).quantize(Decimal("0.01"))
+                    discount_base = total_venta if total_venta is not None else base_subtotal
+                    extra_discount_amount = (discount_base * extra_discount_percent / Decimal("100.00")).quantize(Decimal("0.01"))
+                    sale.total = (gross_total - extra_discount_amount).quantize(Decimal("0.01"))
+                    sale.discount_total = (discount_total + extra_discount_amount).quantize(Decimal("0.01"))
                     sale.save(update_fields=["total", "discount_total"])
                 messages.success(request, "Venta actualizada.")
                 return redirect("inventory_sale_receipt", sale_id=sale.id)
@@ -564,13 +568,19 @@ def sale_edit(request, sale_id: int):
             messages.error(request, "Revisá los campos de la venta.")
         return redirect("inventory_sale_edit", sale_id=sale.id)
     else:
+        subtotal_base = sum((item.unit_price * item.quantity for item in sale.items.all()), Decimal("0.00"))
+        discount_percent = (
+            (sale.discount_total / subtotal_base * Decimal("100.00")).quantize(Decimal("0.01"))
+            if subtotal_base > 0
+            else Decimal("0.00")
+        )
         header_form = SaleHeaderForm(
             initial={
                 "warehouse": sale.warehouse,
                 "audiencia": sale.audience,
                 "cliente": sale.customer,
                 "total_venta": sale.total if sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE else None,
-                "descuento_total": sale.discount_total or Decimal("0.00"),
+                "descuento_total": discount_percent,
                 "comision_ml": sale.ml_commission_total or Decimal("0.00"),
                 "impuestos_ml": sale.ml_tax_total or Decimal("0.00"),
             }
@@ -908,7 +918,7 @@ def sales_list(request):
             audience = header_form.cleaned_data.get("audiencia") or Customer.Audience.CONSUMER
             customer = header_form.cleaned_data.get("cliente")
             total_venta = header_form.cleaned_data.get("total_venta")
-            extra_discount = header_form.cleaned_data.get("descuento_total") or Decimal("0.00")
+            extra_discount_percent = header_form.cleaned_data.get("descuento_total") or Decimal("0.00")
             comision_ml = header_form.cleaned_data.get("comision_ml") or Decimal("0.00")
             impuestos_ml = header_form.cleaned_data.get("impuestos_ml") or Decimal("0.00")
             if customer:
@@ -930,6 +940,7 @@ def sales_list(request):
                         )
                         total = Decimal("0.00")
                         discount_total = Decimal("0.00")
+                        base_subtotal = Decimal("0.00")
                         for data in items:
                             base_price = {
                                 Customer.Audience.CONSUMER: data["product"].consumer_price,
@@ -953,6 +964,7 @@ def sales_list(request):
                             qty = Decimal(data["quantity"])
                             line_total = (qty * final_price).quantize(Decimal("0.01"))
                             discount_amount = (qty * (base_price - final_price)).quantize(Decimal("0.01"))
+                            base_subtotal += (qty * base_price).quantize(Decimal("0.01"))
                             SaleItem.objects.create(
                                 sale=sale,
                                 product=data["product"],
@@ -981,8 +993,10 @@ def sales_list(request):
                             if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE and total_venta is not None
                             else total
                         )
-                        sale.total = (gross_total - extra_discount).quantize(Decimal("0.01"))
-                        sale.discount_total = (discount_total + extra_discount).quantize(Decimal("0.01"))
+                        discount_base = total_venta if total_venta is not None else base_subtotal
+                        extra_discount_amount = (discount_base * extra_discount_percent / Decimal("100.00")).quantize(Decimal("0.01"))
+                        sale.total = (gross_total - extra_discount_amount).quantize(Decimal("0.01"))
+                        sale.discount_total = (discount_total + extra_discount_amount).quantize(Decimal("0.01"))
                         sale.save(update_fields=["total", "discount_total"])
                     messages.success(request, "Venta registrada.")
                     return redirect("inventory_sale_receipt", sale_id=sale.id)
