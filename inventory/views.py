@@ -367,14 +367,17 @@ def sale_receipt(request, sale_id: int):
     sale = get_object_or_404(
         Sale.objects.select_related("customer", "warehouse").prefetch_related("items__product"), pk=sale_id
     )
-    subtotal = sum((item.line_total for item in sale.items.all()), Decimal("0.00"))
+    items = list(sale.items.all())
+    subtotal = sum((item.unit_price * item.quantity for item in items), Decimal("0.00"))
+    discount_total = sale.discount_total or Decimal("0.00")
+    total = subtotal - discount_total
     invoice_number = sale.ml_order_id or sale.invoice_number
     context = {
         "sale": sale,
-        "items": sale.items.all(),
+        "items": items,
         "subtotal": subtotal,
-        "discount_total": sale.discount_total,
-        "total": sale.total,
+        "discount_total": discount_total,
+        "total": total,
         "invoice_number": invoice_number,
     }
     return render(request, "inventory/sale_receipt.html", context)
@@ -385,16 +388,20 @@ def sale_receipt_pdf(request, sale_id: int):
     sale = get_object_or_404(
         Sale.objects.select_related("customer", "warehouse").prefetch_related("items__product"), pk=sale_id
     )
+    items = list(sale.items.all())
+    subtotal = sum((item.unit_price * item.quantity for item in items), Decimal("0.00"))
+    discount_total = sale.discount_total or Decimal("0.00")
+    total = subtotal - discount_total
     from django.template.loader import render_to_string
 
     html = render_to_string(
         "inventory/sale_receipt.html",
         {
             "sale": sale,
-            "items": sale.items.all(),
-            "subtotal": sum((item.line_total for item in sale.items.all()), Decimal("0.00")),
-            "discount_total": sale.discount_total,
-            "total": sale.total,
+            "items": items,
+            "subtotal": subtotal,
+            "discount_total": discount_total,
+            "total": total,
             "is_pdf": True,
             "invoice_number": sale.ml_order_id or sale.invoice_number,
         },
