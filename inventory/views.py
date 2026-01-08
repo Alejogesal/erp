@@ -1031,7 +1031,17 @@ def sales_list(request):
         )
         commission_total = sale.ml_commission_total or Decimal("0.00")
         tax_total = sale.ml_tax_total or Decimal("0.00")
-        sale.margin_total = (sale.total or Decimal("0.00")) - commission_total - tax_total - cost_total
+        is_ml_sale = (
+            sale.ml_order_id
+            or sale.reference.startswith("ML ORDER")
+            or sale.reference.startswith("GS ORDER")
+            or sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE
+        )
+        if is_ml_sale:
+            net_total = (sale.total or Decimal("0.00")) - commission_total - tax_total
+            sale.margin_total = net_total - cost_total
+        else:
+            sale.margin_total = (sale.total or Decimal("0.00")) - cost_total
     return render(
         request,
         "inventory/sales_list.html",
