@@ -2493,10 +2493,12 @@ def mercadolibre_webhook(request):
 
 
 class CustomerForm(forms.ModelForm):
+    email = forms.CharField(label="Teléfono", required=False)
+
     class Meta:
         model = Customer
         fields = ["name", "email", "audience"]
-        labels = {"name": "Nombre", "email": "Email", "audience": "Tipo"}
+        labels = {"name": "Nombre", "email": "Teléfono", "audience": "Tipo"}
 
 
 class CustomerDiscountForm(forms.ModelForm):
