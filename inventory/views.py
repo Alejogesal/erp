@@ -163,6 +163,7 @@ class SaleItemForm(forms.Form):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields["product"].empty_label = ""
         self.fields["product"].label_from_instance = (
             lambda obj: f"{obj.sku or 'Sin SKU'} - {obj.name} (último costo: {obj.last_purchase_cost_display()})"
         )
