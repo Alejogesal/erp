@@ -568,9 +568,17 @@ def sale_edit(request, sale_id: int):
             messages.error(request, "Revisá los campos de la venta.")
         return redirect("inventory_sale_edit", sale_id=sale.id)
     else:
-        subtotal_base = sum((item.unit_price * item.quantity for item in sale.items.all()), Decimal("0.00"))
+        items_for_discount = list(sale.items.all())
+        subtotal_base = sum((item.unit_price * item.quantity for item in items_for_discount), Decimal("0.00"))
+        per_item_discount = sum(
+            ((item.unit_price * item.quantity) - item.line_total for item in items_for_discount),
+            Decimal("0.00"),
+        )
+        extra_discount_amount = (sale.discount_total or Decimal("0.00")) - per_item_discount
+        if extra_discount_amount < 0:
+            extra_discount_amount = Decimal("0.00")
         discount_percent = (
-            (sale.discount_total / subtotal_base * Decimal("100.00")).quantize(Decimal("0.01"))
+            (extra_discount_amount / subtotal_base * Decimal("100.00")).quantize(Decimal("0.01"))
             if subtotal_base > 0
             else Decimal("0.00")
         )
