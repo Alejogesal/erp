@@ -17,18 +17,18 @@
             display: flex;
             flex-direction: column;
         }
-        .invoice-header { display: grid; grid-template-columns: 1fr 2fr; align-items: center; gap: 12px; }
+        .invoice-header { display: grid; grid-template-columns: 60mm 1fr; align-items: center; gap: 8mm; }
         .invoice-logo { text-align: center; border: 2px solid #000; padding: 14px; font-size: 26px; font-weight: 700; }
         .invoice-meta h2 { margin: 0 0 6px; font-size: 18px; }
-        .info-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 12px 0; }
+        .info-row { display: grid; grid-template-columns: 1fr 1fr 1fr 40mm; gap: 6mm; margin: 8mm 0; }
         .info-block strong { display: block; font-size: 11px; text-transform: uppercase; }
-        table.invoice-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+        table.invoice-table { width: 100%; border-collapse: collapse; margin-top: 6mm; table-layout: fixed; }
         table.invoice-table th, table.invoice-table td { border-bottom: 1px solid #000; padding: 6px 4px; }
         table.invoice-table th { text-align: left; font-size: 11px; text-transform: uppercase; }
         table.invoice-table td.num { text-align: right; }
         .invoice-body { flex: 1 1 auto; }
-        .totals { margin-top: auto; border-top: 1px solid #000; padding-top: 8px; }
-        .totals-row { display: grid; grid-template-columns: 1fr 1fr 1fr; }
+        .totals { margin-top: auto; border-top: 1px solid #000; padding-top: 6mm; }
+        .totals-row { display: grid; grid-template-columns: 1fr 1fr 40mm; }
         .totals-row div { text-align: right; padding: 4px 0; }
         .totals-row .label { text-align: left; }
         .right { text-align: right; }
@@ -60,11 +60,11 @@
             <table class="invoice-table">
                 <thead>
                     <tr>
-                        <th>Descripción</th>
-                        <th class="num">Cantidad</th>
-                        <th class="num">Precio</th>
-                        <th class="num">Dto</th>
-                        <th class="num">Importe</th>
+                        <th style="width: 45%;">Descripción</th>
+                        <th class="num" style="width: 12%;">Cantidad</th>
+                        <th class="num" style="width: 13%;">Precio</th>
+                        <th class="num" style="width: 10%;">Dto</th>
+                        <th class="num" style="width: 20%;">Importe</th>
                     </tr>
                 </thead>
                 <tbody>
