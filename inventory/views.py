@@ -395,14 +395,13 @@ def sale_receipt_pdf(request, sale_id: int):
     from django.template.loader import render_to_string
 
     html = render_to_string(
-        "inventory/sale_receipt.html",
+        "inventory/sale_receipt_pdf.html",
         {
             "sale": sale,
             "items": items,
             "subtotal": subtotal,
             "discount_total": discount_total,
             "total": total,
-            "is_pdf": True,
             "invoice_number": sale.ml_order_id or sale.invoice_number,
         },
         request=request,
