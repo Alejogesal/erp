@@ -6,31 +6,6 @@
 <p class="subtitle">Registrá ventas y consultá comprobantes emitidos.</p>
 
 <div class="card" style="margin-bottom:16px;">
-    <div class="card-title">Buscar en historial</div>
-    <form method="get">
-        <div class="cards" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
-            <div>
-                <label for="q">Buscar</label>
-                <input id="q" name="q" type="text" value="{{ search_query }}" placeholder="Cliente o producto">
-            </div>
-            <div style="display:flex; align-items:center; gap:12px; padding-top:22px;">
-                <label style="display:flex; gap:6px; align-items:center;">
-                    <input type="checkbox" name="wh_comun" value="1" {% if include_comun %}checked{% endif %}>
-                    Depósito Común
-                </label>
-                <label style="display:flex; gap:6px; align-items:center;">
-                    <input type="checkbox" name="wh_ml" value="1" {% if include_ml %}checked{% endif %}>
-                    MercadoLibre
-                </label>
-            </div>
-        </div>
-        <div style="margin-top:12px;">
-            <button type="submit">Aplicar filtro</button>
-        </div>
-    </form>
-</div>
-
-<div class="card" style="margin-bottom:16px;">
     <div class="card-title">Importar ventas Google Sheets</div>
     <form method="post" action="{% url 'inventory_sales_list' %}">
         {% csrf_token %}
@@ -121,6 +96,27 @@
             <label>Hasta <input id="bulk-select-end" type="date" style="margin-left:6px;"></label>
         </div>
     </div>
+    <form method="get" style="margin:10px 0 12px;">
+        <div class="cards" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
+            <div>
+                <label for="q">Buscar</label>
+                <input id="q" name="q" type="text" value="{{ search_query }}" placeholder="Cliente o producto">
+            </div>
+            <div style="display:flex; align-items:center; gap:12px; padding-top:22px;">
+                <label style="display:flex; gap:6px; align-items:center;">
+                    <input type="checkbox" name="wh_comun" value="1" {% if include_comun %}checked{% endif %}>
+                    Depósito Común
+                </label>
+                <label style="display:flex; gap:6px; align-items:center;">
+                    <input type="checkbox" name="wh_ml" value="1" {% if include_ml %}checked{% endif %}>
+                    MercadoLibre
+                </label>
+            </div>
+        </div>
+        <div style="margin-top:12px;">
+            <button type="submit">Aplicar filtro</button>
+        </div>
+    </form>
     <form method="post" action="{% url 'inventory_sales_list' %}">
         {% csrf_token %}
         <input type="hidden" name="action" value="bulk_delete_selected">
