@@ -428,6 +428,176 @@ def sale_receipt_pdf(request, sale_id: int):
 
 
 @login_required
+def sale_edit(request, sale_id: int):
+    sale = get_object_or_404(
+        Sale.objects.select_related("customer", "warehouse").prefetch_related("items__product", "movements"),
+        pk=sale_id,
+    )
+    SaleItemFormSet = formset_factory(SaleItemForm, extra=0, can_delete=True)
+    customer_audiences = {str(customer.id): customer.audience for customer in Customer.objects.only("id", "audience")}
+
+    if request.method == "POST":
+        header_form = SaleHeaderForm(request.POST)
+        formset = SaleItemFormSet(request.POST)
+        for form in formset.forms:
+            prefix = form.prefix
+            if not (request.POST.get(f"{prefix}-product") or request.POST.get(f"{prefix}-quantity")):
+                form.empty_permitted = True
+            elif not form.has_changed():
+                form.empty_permitted = True
+        if header_form.is_valid() and formset.is_valid():
+            items = []
+            for form in formset:
+                if form.cleaned_data.get("DELETE"):
+                    continue
+                if not form.cleaned_data.get("product"):
+                    continue
+                items.append(form.cleaned_data)
+            if not items:
+                messages.error(request, "Agregá al menos un producto.")
+                return redirect("inventory_sale_edit", sale_id=sale.id)
+            warehouse = header_form.cleaned_data["warehouse"]
+            audience = header_form.cleaned_data.get("audiencia") or Customer.Audience.CONSUMER
+            customer = header_form.cleaned_data.get("cliente")
+            total_venta = header_form.cleaned_data.get("total_venta")
+            extra_discount = header_form.cleaned_data.get("descuento_total") or Decimal("0.00")
+            comision_ml = header_form.cleaned_data.get("comision_ml") or Decimal("0.00")
+            impuestos_ml = header_form.cleaned_data.get("impuestos_ml") or Decimal("0.00")
+            if customer:
+                audience = customer.audience
+            try:
+                with transaction.atomic():
+                    is_ml_sale = (
+                        sale.ml_order_id
+                        or sale.reference.startswith("ML ORDER")
+                        or sale.reference.startswith("GS ORDER")
+                        or warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE
+                    )
+                    for movement in sale.movements.select_for_update():
+                        if not is_ml_sale and movement.movement_type == StockMovement.MovementType.EXIT and movement.from_warehouse:
+                            stock, _ = Stock.objects.select_for_update().get_or_create(
+                                product=movement.product,
+                                warehouse=movement.from_warehouse,
+                                defaults={"quantity": Decimal("0.00")},
+                            )
+                            stock.quantity = (stock.quantity + movement.quantity).quantize(Decimal("0.01"))
+                            stock.save(update_fields=["quantity"])
+                        movement.delete()
+                    sale.items.all().delete()
+
+                    sale.customer = customer
+                    sale.warehouse = warehouse
+                    sale.audience = audience
+                    sale.ml_commission_total = (
+                        comision_ml if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE else Decimal("0.00")
+                    )
+                    sale.ml_tax_total = (
+                        impuestos_ml if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE else Decimal("0.00")
+                    )
+                    sale.save(update_fields=["customer", "warehouse", "audience", "ml_commission_total", "ml_tax_total"])
+
+                    total = Decimal("0.00")
+                    discount_total = Decimal("0.00")
+                    for data in items:
+                        base_price = {
+                            Customer.Audience.CONSUMER: data["product"].consumer_price,
+                            Customer.Audience.BARBER: data["product"].barber_price,
+                            Customer.Audience.DISTRIBUTOR: data["product"].distributor_price,
+                        }.get(audience, data["product"].consumer_price)
+                        discount = Decimal("0.00")
+                        if customer:
+                            discount_obj = CustomerProductDiscount.objects.filter(
+                                customer=customer, product=data["product"]
+                            ).first()
+                            if discount_obj:
+                                discount = discount_obj.discount_percent
+                            elif data["product"].group:
+                                group_discount = CustomerGroupDiscount.objects.filter(
+                                    customer=customer, group=data["product"].group
+                                ).first()
+                                if group_discount:
+                                    discount = group_discount.discount_percent
+                        final_price = base_price * (Decimal("1.00") - discount / Decimal("100.00"))
+                        qty = Decimal(data["quantity"])
+                        line_total = (qty * final_price).quantize(Decimal("0.01"))
+                        discount_amount = (qty * (base_price - final_price)).quantize(Decimal("0.01"))
+                        SaleItem.objects.create(
+                            sale=sale,
+                            product=data["product"],
+                            quantity=qty,
+                            unit_price=base_price,
+                            discount_percent=discount,
+                            final_unit_price=final_price,
+                            line_total=line_total,
+                            vat_percent=data.get("vat_percent") or Decimal("0.00"),
+                        )
+                        total += line_total
+                        discount_total += discount_amount
+                        if warehouse.type != Warehouse.WarehouseType.MERCADOLIBRE:
+                            services.register_exit(
+                                product=data["product"],
+                                warehouse=warehouse,
+                                quantity=data["quantity"],
+                                user=request.user,
+                                reference=f"Venta {audience} #{sale.id}",
+                                sale_price=final_price,
+                                vat_percent=data.get("vat_percent") or Decimal("0.00"),
+                                sale=sale,
+                            )
+                    gross_total = (
+                        total_venta
+                        if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE and total_venta is not None
+                        else total
+                    )
+                    sale.total = (gross_total - extra_discount).quantize(Decimal("0.01"))
+                    sale.discount_total = (discount_total + extra_discount).quantize(Decimal("0.01"))
+                    sale.save(update_fields=["total", "discount_total"])
+                messages.success(request, "Venta actualizada.")
+                return redirect("inventory_sale_receipt", sale_id=sale.id)
+            except services.NegativeStockError:
+                messages.error(request, "No se puede actualizar: el stock quedaría negativo.")
+            except services.InvalidMovementError as exc:
+                messages.error(request, str(exc))
+            except Exception as exc:
+                messages.error(request, f"No se pudo actualizar la venta: {exc}")
+        else:
+            messages.error(request, "Revisá los campos de la venta.")
+        return redirect("inventory_sale_edit", sale_id=sale.id)
+    else:
+        header_form = SaleHeaderForm(
+            initial={
+                "warehouse": sale.warehouse,
+                "audiencia": sale.audience,
+                "cliente": sale.customer,
+                "total_venta": sale.total if sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE else None,
+                "descuento_total": sale.discount_total or Decimal("0.00"),
+                "comision_ml": sale.ml_commission_total or Decimal("0.00"),
+                "impuestos_ml": sale.ml_tax_total or Decimal("0.00"),
+            }
+        )
+        initial = [
+            {
+                "product": item.product,
+                "quantity": int(item.quantity),
+                "vat_percent": item.vat_percent,
+            }
+            for item in sale.items.all()
+        ]
+        formset = SaleItemFormSet(initial=initial)
+
+    return render(
+        request,
+        "inventory/sale_edit.html",
+        {
+            "sale": sale,
+            "form": header_form,
+            "formset": formset,
+            "customer_audiences": customer_audiences,
+        },
+    )
+
+
+@login_required
 def purchase_receipt(request, purchase_id: int):
     purchase = get_object_or_404(
         Purchase.objects.select_related("supplier", "warehouse").prefetch_related("items__product"), pk=purchase_id

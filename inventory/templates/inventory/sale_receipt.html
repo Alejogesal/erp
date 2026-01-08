@@ -114,6 +114,7 @@
 
 {% if not is_pdf %}
 <div class="actions" style="margin-top:12px;">
+    <a class="pill" href="{% url 'inventory_sale_edit' sale.id %}">Editar venta</a>
     <a class="pill" href="{% url 'inventory_sale_receipt_pdf' sale.id %}">Descargar PDF</a>
     <a class="pill" href="{% url 'inventory_dashboard' %}">Volver al dashboard</a>
 </div>

@@ -1,0 +1,187 @@
+{% extends "inventory/base.html" %}
+{% block title %}Editar venta{% endblock %}
+{% block content %}
+<h1>Editar venta</h1>
+<p class="subtitle">Actualizá productos y cantidades.</p>
+
+<div class="card" style="margin-bottom:16px;">
+    <div class="card-title">Comprobante Nº {{ sale.invoice_number }}</div>
+    <form method="post">
+        {% csrf_token %}
+        <h3>Datos de la venta</h3>
+        {{ form.as_p }}
+        {{ formset.non_form_errors }}
+        <h3>Productos</h3>
+        {{ formset.management_form }}
+        <table>
+            <thead>
+                <tr>
+                    <th>Producto</th>
+                    <th>Cantidad</th>
+                    <th>IVA %</th>
+                    <th>Eliminar</th>
+                </tr>
+            </thead>
+            <tbody id="items-body">
+                {% for item_form in formset.forms %}
+                <tr>
+                    <td>{{ item_form.product }}</td>
+                    <td>{{ item_form.quantity }}</td>
+                    <td>{{ item_form.vat_percent }}</td>
+                    <td>{% if formset.can_delete %}{{ item_form.DELETE }}{% endif %}</td>
+                </tr>
+                {% if item_form.errors %}
+                <tr>
+                    <td colspan="4">{{ item_form.errors }}</td>
+                </tr>
+                {% endif %}
+                {% endfor %}
+            </tbody>
+        </table>
+        <button type="button" id="add-item">Agregar producto</button>
+        <button type="submit">Guardar cambios</button>
+    </form>
+</div>
+
+<div class="actions">
+    <a class="pill" href="{% url 'inventory_sale_receipt' sale.id %}">Volver al comprobante</a>
+</div>
+
+{{ customer_audiences|json_script:"customer-audiences" }}
+<script>
+    (function() {
+        const addBtn = document.getElementById("add-item");
+        const body = document.getElementById("items-body");
+        const totalForms = document.getElementById("id_form-TOTAL_FORMS");
+        const customerSelect = document.getElementById("id_cliente");
+        const audienceSelect = document.getElementById("id_audiencia");
+        const warehouseSelect = document.getElementById("id_warehouse");
+        const totalVenta = document.getElementById("id_total_venta");
+        const comisionMl = document.getElementById("id_comision_ml");
+        const impuestosMl = document.getElementById("id_impuestos_ml");
+        const audiences = JSON.parse(document.getElementById("customer-audiences").textContent || "{}");
+
+        function syncAudience() {
+            if (!customerSelect || !audienceSelect) return;
+            const customerId = customerSelect.value;
+            if (customerId && audiences[customerId]) {
+                audienceSelect.value = audiences[customerId];
+                audienceSelect.disabled = true;
+            } else {
+                audienceSelect.disabled = false;
+            }
+        }
+
+        if (customerSelect) {
+            customerSelect.addEventListener("change", syncAudience);
+            syncAudience();
+        }
+
+        const syncMlFields = () => {
+            if (!warehouseSelect) return;
+            const isMl = warehouseSelect.options[warehouseSelect.selectedIndex]?.textContent?.toLowerCase().includes("mercadolibre");
+            [totalVenta, comisionMl, impuestosMl].forEach((field) => {
+                if (!field) return;
+                const wrapper = field.closest("p") || field.parentElement;
+                if (wrapper) wrapper.style.display = isMl ? "" : "none";
+            });
+        };
+        if (warehouseSelect) {
+            warehouseSelect.addEventListener("change", syncMlFields);
+            syncMlFields();
+        }
+
+        if (!addBtn || !body || !totalForms) return;
+        const updateSearchFromSelect = (selectEl) => {
+            const searchInput = selectEl?._searchInput;
+            if (!searchInput) return;
+            const selectedText = selectEl.options[selectEl.selectedIndex]?.textContent || "";
+            searchInput.value = selectedText;
+        };
+
+        const setupProductSearch = (selectEl) => {
+            if (!selectEl) return;
+            if (selectEl.dataset.searchReady === "1") return;
+            selectEl.dataset.searchReady = "1";
+            selectEl.style.display = "none";
+            const wrapper = document.createElement("div");
+            wrapper.style.display = "flex";
+            wrapper.style.flexDirection = "column";
+            wrapper.style.gap = "6px";
+            const search = document.createElement("input");
+            search.type = "text";
+            search.placeholder = "Buscar producto...";
+            const datalist = document.createElement("datalist");
+            const listId = `product-options-${Math.random().toString(36).slice(2)}`;
+            datalist.id = listId;
+            search.setAttribute("list", listId);
+            selectEl._searchInput = search;
+            selectEl._searchList = datalist;
+            Array.from(selectEl.options).forEach((opt) => {
+                const option = document.createElement("option");
+                option.value = opt.textContent || "";
+                option.dataset.value = opt.value;
+                datalist.appendChild(option);
+            });
+            selectEl.parentElement.insertBefore(wrapper, selectEl);
+            wrapper.appendChild(search);
+            wrapper.appendChild(datalist);
+            wrapper.appendChild(selectEl);
+            const initialLabel = selectEl.options[selectEl.selectedIndex]?.textContent || "";
+            if (initialLabel) {
+                search.value = initialLabel;
+            }
+
+            const syncSelection = () => {
+                const match = Array.from(datalist.options).find((opt) => opt.value === search.value);
+                if (match) {
+                    selectEl.value = match.dataset.value || "";
+                    updateSearchFromSelect(selectEl);
+                }
+            };
+            selectEl._syncSelection = syncSelection;
+            search.addEventListener("change", syncSelection);
+            search.addEventListener("keydown", (event) => {
+                if (event.key === "Enter") {
+                    syncSelection();
+                }
+            });
+            requestAnimationFrame(() => updateSearchFromSelect(selectEl));
+        };
+
+        document.querySelectorAll("select[name$='-product']").forEach(setupProductSearch);
+
+        addBtn.addEventListener("click", () => {
+            const idx = parseInt(totalForms.value, 10);
+            const emptyHtml = `{{ formset.empty_form.as_p|escapejs }}`.replace(/__prefix__/g, `form-${idx}`);
+            const container = document.createElement("div");
+            container.innerHTML = emptyHtml;
+
+            const tr = document.createElement("tr");
+            const product = container.querySelector("[name$='-product']");
+            const qty = container.querySelector("[name$='-quantity']");
+            const vat = container.querySelector("[name$='-vat_percent']");
+            const deleteField = container.querySelector("[name$='-DELETE']");
+
+            [product, qty, vat, deleteField].forEach(field => {
+                const td = document.createElement("td");
+                if (field) td.appendChild(field);
+                tr.appendChild(td);
+            });
+
+            totalForms.value = idx + 1;
+            body.appendChild(tr);
+            setupProductSearch(tr.querySelector("select[name$='-product']"));
+        });
+
+        const formEl = addBtn.closest("form");
+        formEl?.addEventListener("submit", () => {
+            document.querySelectorAll("select[name$='-product']").forEach((selectEl) => {
+                if (typeof selectEl._syncSelection === "function") {
+                    selectEl._syncSelection();
+                }
+            });
+        });
+    })();
+</script>
+{% endblock %}

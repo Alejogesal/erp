@@ -153,6 +153,7 @@
                 <td>
                     <a class="pill" href="{% url 'inventory_sale_receipt' sale.id %}" style="font-size:12px; padding:4px 8px;">Ver</a>
                     <a class="pill" href="{% url 'inventory_sale_receipt_pdf' sale.id %}" style="font-size:12px; padding:4px 8px;">PDF</a>
+                    <a class="pill" href="{% url 'inventory_sale_edit' sale.id %}" style="font-size:12px; padding:4px 8px;">Editar</a>
                     <input type="checkbox" name="sale_ids" value="{{ sale.id }}" style="margin-left:8px;">
                 </td>
             </tr>
