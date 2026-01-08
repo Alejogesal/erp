@@ -2670,6 +2670,39 @@ def mercadolibre_dashboard(request):
                     f"{result['total']}, nuevas: {result['created']}, "
                     f"actualizadas: {result.get('updated', 0)}.{reason_text}",
                 )
+        elif action == "sync_item":
+            item_id = (request.POST.get("ml_item_id") or "").strip()
+            if not item_id:
+                messages.error(request, "Ingresá el ID de la publicación.")
+            elif not connection or not connection.access_token:
+                messages.error(request, "Primero conectá la cuenta de MercadoLibre.")
+            else:
+                try:
+                    item = ml.get_item(item_id, connection.access_token)
+                    title = item.get("title", "") or ""
+                    available = int(item.get("available_quantity", 0) or 0)
+                    status = item.get("status", "") or ""
+                    shipping = item.get("shipping") or {}
+                    logistic_type = item.get("logistic_type", "") or shipping.get("logistic_type", "") or ""
+                    permalink = item.get("permalink", "") or ""
+                    existing = MercadoLibreItem.objects.filter(item_id=item_id).first()
+                    product = existing.product if existing else None
+                    matched_name = existing.matched_name if existing else ""
+                    MercadoLibreItem.objects.update_or_create(
+                        item_id=item_id,
+                        defaults={
+                            "title": title,
+                            "available_quantity": available,
+                            "status": status,
+                            "logistic_type": logistic_type,
+                            "permalink": permalink,
+                            "product": product,
+                            "matched_name": matched_name,
+                        },
+                    )
+                    messages.success(request, "Publicación sincronizada.")
+                except Exception as exc:
+                    messages.error(request, f"No se pudo sincronizar: {exc}")
         elif action == "link_item":
             item_id = request.POST.get("item_id")
             product_id = request.POST.get("product_id")
