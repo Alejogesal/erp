@@ -364,6 +364,7 @@ class SaleItem(models.Model):
     product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="sale_items")
     quantity = models.DecimalField(max_digits=12, decimal_places=2)
     unit_price = models.DecimalField(max_digits=12, decimal_places=2)  # price before discount
+    cost_unit = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     discount_percent = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0.00"))
     final_unit_price = models.DecimalField(max_digits=12, decimal_places=2)
     line_total = models.DecimalField(max_digits=12, decimal_places=2)
