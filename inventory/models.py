@@ -134,7 +134,7 @@ class Customer(models.Model):
         DISTRIBUTOR = "DISTRIBUTOR", "Distribuidor"
 
     name = models.CharField(max_length=255)
-    email = models.EmailField(blank=True)
+    email = models.CharField(max_length=255, blank=True)
     audience = models.CharField(max_length=20, choices=Audience.choices, default=Audience.CONSUMER)
 
     class Meta:
