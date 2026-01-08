@@ -548,6 +548,7 @@ def sale_edit(request, sale_id: int):
                             product=data["product"],
                             quantity=qty,
                             unit_price=base_price,
+                            cost_unit=data["product"].cost_with_vat(),
                             discount_percent=discount,
                             final_unit_price=final_price,
                             line_total=line_total,
@@ -854,6 +855,7 @@ def sales_list(request):
                         product=item["product"],
                         quantity=qty,
                         unit_price=unit_price,
+                        cost_unit=item["product"].cost_with_vat(),
                         discount_percent=Decimal("0.00"),
                         final_unit_price=unit_price,
                         line_total=line_total,
@@ -998,6 +1000,7 @@ def sales_list(request):
                                 product=data["product"],
                                 quantity=qty,
                                 unit_price=base_price,
+                                cost_unit=data["product"].cost_with_vat(),
                                 discount_percent=discount,
                                 final_unit_price=final_price,
                                 line_total=line_total,
@@ -1045,10 +1048,12 @@ def sales_list(request):
     if customer_query:
         sales = sales.filter(customer__name__icontains=customer_query)
     for sale in sales:
-        cost_total = sum(
-            (item.quantity * (item.product.avg_cost or Decimal("0.00")) for item in sale.items.all()),
-            Decimal("0.00"),
-        )
+        cost_total = Decimal("0.00")
+        for item in sale.items.all():
+            cost_unit = item.cost_unit
+            if cost_unit is None or cost_unit <= 0:
+                cost_unit = item.product.cost_with_vat()
+            cost_total += item.quantity * cost_unit
         commission_total = sale.ml_commission_total or Decimal("0.00")
         tax_total = sale.ml_tax_total or Decimal("0.00")
         is_ml_sale = (
