@@ -107,40 +107,60 @@
             {% endfor %}
         </tbody>
     </table>
+    {% if page_obj and page_obj.paginator.num_pages > 1 %}
+    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px;">
+        {% if page_obj.has_previous %}
+        <a class="pill" href="?page={{ page_obj.previous_page_number }}">Anterior</a>
+        {% endif %}
+        <span style="align-self:center; color:var(--muted); font-size:12px;">
+            Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}
+        </span>
+        {% if page_obj.has_next %}
+        <a class="pill" href="?page={{ page_obj.next_page_number }}">Siguiente</a>
+        {% endif %}
+    </div>
+    {% endif %}
 </div>
 
-{{ supplier_autofill|json_script:"supplier-autofill" }}
-{{ cost_autofill|json_script:"cost-autofill" }}
 <script>
     (function() {
         const addBtn = document.getElementById("add-item");
         const toggleVat = document.getElementById("toggle-vat");
         const body = document.getElementById("items-body");
         const totalForms = document.getElementById("id_form-TOTAL_FORMS");
-        const supplierMap = JSON.parse(document.getElementById("supplier-autofill")?.textContent || "{}");
-        const costMap = JSON.parse(document.getElementById("cost-autofill")?.textContent || "{}");
+        const productInfoUrl = "{% url 'inventory_product_info' %}";
+        const productInfoCache = new Map();
         if (!addBtn || !body || !totalForms) return;
 
-        const setSupplierIfAvailable = (productSelect) => {
-            if (!productSelect) return;
-            const row = productSelect.closest("tr");
-            const supplierSelect = row?.querySelector("select[name$='-supplier']");
-            if (!supplierSelect) return;
-            const productId = productSelect.value;
-            const supplierId = supplierMap[productId];
-            if (supplierId) {
-                supplierSelect.value = String(supplierId);
+        const fetchProductInfo = async (productId) => {
+            if (!productId) return null;
+            if (productInfoCache.has(productId)) return productInfoCache.get(productId);
+            try {
+                const resp = await fetch(`${productInfoUrl}?product_id=${encodeURIComponent(productId)}`, {
+                    credentials: "same-origin",
+                });
+                if (!resp.ok) return null;
+                const data = await resp.json();
+                productInfoCache.set(productId, data);
+                return data;
+            } catch (err) {
+                return null;
             }
         };
-        const setCostIfAvailable = (productSelect) => {
+        const applyProductDefaults = async (productSelect) => {
             if (!productSelect) return;
             const row = productSelect.closest("tr");
-            const costInput = row?.querySelector("input[name$='-unit_cost']");
-            if (!costInput) return;
+            if (!row) return;
+            const supplierSelect = row.querySelector("select[name$='-supplier']");
+            const costInput = row.querySelector("input[name$='-unit_cost']");
             const productId = productSelect.value;
-            const cost = costMap[productId];
-            if (cost) {
-                costInput.value = cost;
+            const info = await fetchProductInfo(productId);
+            if (!info) return;
+            if (supplierSelect && info.default_supplier_id) {
+                supplierSelect.value = String(info.default_supplier_id);
+            }
+            if (costInput && info.cost_with_vat) {
+                costInput.value = info.cost_with_vat;
             }
         };
 
@@ -203,8 +223,7 @@
                 }
                 if (match) {
                     selectEl.value = match.dataset.value || "";
-                    setSupplierIfAvailable(selectEl);
-                    setCostIfAvailable(selectEl);
+                    applyProductDefaults(selectEl);
                     updateSearchFromSelect(selectEl);
                 }
             };
@@ -219,8 +238,7 @@
         };
 
         document.querySelectorAll("select[name$='-product']").forEach(setupProductSearch);
-        document.querySelectorAll("select[name$='-product']").forEach(setSupplierIfAvailable);
-        document.querySelectorAll("select[name$='-product']").forEach(setCostIfAvailable);
+        document.querySelectorAll("select[name$='-product']").forEach(applyProductDefaults);
         document.querySelectorAll("input[type='checkbox'][name$='-DELETE']").forEach((checkbox) => {
             checkbox.style.display = "none";
         });

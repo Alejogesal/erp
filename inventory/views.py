@@ -12,6 +12,7 @@ from django.db.models import Case, DecimalField, Sum, Value, When, Q, Count
 from django.db.models.deletion import ProtectedError
 from django.db.models.functions import Coalesce
 from django.forms import formset_factory
+from django.core.paginator import Paginator
 from django.http import HttpResponse, JsonResponse
 from urllib.request import urlopen
 import csv
@@ -1090,30 +1091,22 @@ def purchases_list(request):
         header_form = PurchaseHeaderForm()
         formset = PurchaseItemFormSet()
 
-    supplier_autofill = {
-        row["id"]: row["default_supplier_id"]
-        for row in Product.objects.annotate(supplier_count=Count("supplier_products"))
-        .values("id", "default_supplier_id", "supplier_count")
-        .filter(supplier_count__lte=1, default_supplier_id__isnull=False)
-    }
-    cost_autofill = {
-        str(product.id): f"{product.cost_with_vat():.2f}"
-        for product in Product.objects.all()
-    }
     purchases = (
         Purchase.objects.select_related("supplier", "warehouse", "user")
         .prefetch_related("items__product")
         .order_by("-created_at", "-id")
     )
+    paginator = Paginator(purchases, 25)
+    page_number = request.GET.get("page")
+    page_obj = paginator.get_page(page_number)
     return render(
         request,
         "inventory/purchases_list.html",
         {
-            "purchases": purchases,
+            "purchases": page_obj.object_list,
+            "page_obj": page_obj,
             "form": header_form,
             "formset": formset,
-            "supplier_autofill": supplier_autofill,
-            "cost_autofill": cost_autofill,
         },
     )
 
@@ -1126,16 +1119,6 @@ def purchase_edit(request, purchase_id: int):
         pk=purchase_id,
     )
     PurchaseItemFormSet = formset_factory(PurchaseItemForm, extra=0, can_delete=True)
-    supplier_autofill = {
-        row["id"]: row["default_supplier_id"]
-        for row in Product.objects.annotate(supplier_count=Count("supplier_products"))
-        .values("id", "default_supplier_id", "supplier_count")
-        .filter(supplier_count__lte=1, default_supplier_id__isnull=False)
-    }
-    cost_autofill = {
-        str(product.id): f"{product.cost_with_vat():.2f}"
-        for product in Product.objects.all()
-    }
     if request.method == "POST":
         header_form = PurchaseHeaderForm(request.POST)
         formset = PurchaseItemFormSet(request.POST)
@@ -1321,8 +1304,6 @@ def purchase_edit(request, purchase_id: int):
             "purchase": purchase,
             "form": header_form,
             "formset": formset,
-            "supplier_autofill": supplier_autofill,
-            "cost_autofill": cost_autofill,
         },
     )
 
@@ -1917,6 +1898,23 @@ def product_costs(request):
             "bulk_form": bulk_form,
             "group_options": group_options,
         },
+    )
+
+
+@login_required
+def product_info(request):
+    product_id = request.GET.get("product_id")
+    if not product_id:
+        return JsonResponse({"ok": False, "error": "missing_product_id"}, status=400)
+    product = Product.objects.select_related("default_supplier").filter(id=product_id).first()
+    if not product:
+        return JsonResponse({"ok": False, "error": "product_not_found"}, status=404)
+    return JsonResponse(
+        {
+            "ok": True,
+            "default_supplier_id": product.default_supplier_id,
+            "cost_with_vat": f"{product.cost_with_vat():.2f}",
+        }
     )
 
 
