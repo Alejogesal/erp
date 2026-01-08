@@ -45,20 +45,6 @@
 </div>
 
 <div class="card" style="margin-bottom:16px;">
-    <div class="card-title">Importar ventas MercadoLibre (XLSX)</div>
-    <form method="post" action="{% url 'inventory_sales_list' %}" enctype="multipart/form-data">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="import_ml_sales_xlsx">
-        <p style="color: var(--muted); margin: 0 0 10px;">
-            Columnas requeridas: Producto, Cantidad, Precio Bruto Venta (o Precio Unitario), Comisión, IIBB.
-            Opcionales: Fecha, ID Venta/Orden. El precio bruto debe ser total por fila.
-        </p>
-        <input type="file" name="file" accept=".xlsx" required>
-        <button type="submit" style="margin-top:10px;">Importar ventas</button>
-    </form>
-</div>
-
-<div class="card" style="margin-bottom:16px;">
     <div class="card-title">Eliminar ventas en lote</div>
     <form method="post" action="{% url 'inventory_sales_list' %}">
         {% csrf_token %}
