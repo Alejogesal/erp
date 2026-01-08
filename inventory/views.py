@@ -2591,6 +2591,14 @@ def customers_view(request):
                 messages.success(request, "Tipo de cliente actualizado.")
                 return redirect("inventory_customers")
             messages.error(request, "Revisá el tipo de cliente.")
+        elif action == "update_customer_phone":
+            customer_id = request.POST.get("customer_id")
+            phone = (request.POST.get("phone") or "").strip()
+            if customer_id:
+                Customer.objects.filter(id=customer_id).update(email=phone)
+                messages.success(request, "Teléfono actualizado.")
+                return redirect("inventory_customers")
+            messages.error(request, "No se pudo actualizar el teléfono.")
 
     customers = Customer.objects.prefetch_related("discounts__product", "group_discounts").order_by("name")
     group_options = list(
