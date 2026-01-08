@@ -2618,17 +2618,25 @@ def mercadolibre_dashboard(request):
     missing_credentials = not settings.ML_CLIENT_ID or not settings.ML_CLIENT_SECRET or not settings.ML_REDIRECT_URI
     try:
         connection = MercadoLibreConnection.objects.filter(user=request.user).first()
-        items = MercadoLibreItem.objects.select_related("product").order_by("-available_quantity", "title")[:200]
+        items_qs = MercadoLibreItem.objects.select_related("product")
     except OperationalError:
         messages.error(request, "Faltan tablas de MercadoLibre. Ejecutá migrate y recargá.")
         connection = None
-        items = []
+        items_qs = MercadoLibreItem.objects.none()
     metrics = {}
     if connection and connection.last_metrics:
         try:
             metrics = json.loads(connection.last_metrics)
         except json.JSONDecodeError:
             metrics = {}
+    search_query = (request.GET.get("q") or "").strip()
+    if search_query:
+        items_qs = items_qs.filter(title__icontains=search_query)
+    items_qs = items_qs.order_by("-available_quantity", "title")
+    paginator = Paginator(items_qs, 50)
+    page_number = request.GET.get("page")
+    page_obj = paginator.get_page(page_number)
+    items = page_obj.object_list
 
     if request.method == "POST":
         action = request.POST.get("action")
@@ -2694,6 +2702,8 @@ def mercadolibre_dashboard(request):
             "items": items,
             "metrics": metrics,
             "missing_credentials": missing_credentials,
+            "page_obj": page_obj,
+            "search_query": search_query,
             "recent_cutoff": recent_cutoff,
             "products": products,
         },
