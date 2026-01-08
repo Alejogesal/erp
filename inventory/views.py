@@ -421,11 +421,14 @@ def purchase_receipt(request, purchase_id: int):
     for item in items:
         item.line_total = item.quantity * item.unit_cost
     subtotal = sum((item.line_total for item in items), Decimal("0.00"))
+    if purchase.total != subtotal:
+        purchase.total = subtotal
+        purchase.save(update_fields=["total"])
     context = {
         "purchase": purchase,
         "items": items,
         "subtotal": subtotal,
-        "total": purchase.total,
+        "total": subtotal,
         "invoice_number": purchase.invoice_number,
     }
     return render(request, "inventory/purchase_receipt.html", context)
