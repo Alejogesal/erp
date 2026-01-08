@@ -135,6 +135,13 @@ class SaleHeaderForm(forms.Form):
         decimal_places=2,
         required=False,
     )
+    descuento_total = forms.DecimalField(
+        label="Descuento total",
+        min_value=Decimal("0.00"),
+        decimal_places=2,
+        required=False,
+        initial=Decimal("0.00"),
+    )
     comision_ml = forms.DecimalField(
         label="Comisión ML",
         min_value=Decimal("0.00"),
@@ -731,6 +738,7 @@ def sales_list(request):
             audience = header_form.cleaned_data.get("audiencia") or Customer.Audience.CONSUMER
             customer = header_form.cleaned_data.get("cliente")
             total_venta = header_form.cleaned_data.get("total_venta")
+            extra_discount = header_form.cleaned_data.get("descuento_total") or Decimal("0.00")
             comision_ml = header_form.cleaned_data.get("comision_ml") or Decimal("0.00")
             impuestos_ml = header_form.cleaned_data.get("impuestos_ml") or Decimal("0.00")
             if customer:
@@ -798,8 +806,13 @@ def sales_list(request):
                                     vat_percent=data.get("vat_percent") or Decimal("0.00"),
                                     sale=sale,
                                 )
-                        sale.total = total_venta if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE and total_venta is not None else total
-                        sale.discount_total = discount_total
+                        gross_total = (
+                            total_venta
+                            if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE and total_venta is not None
+                            else total
+                        )
+                        sale.total = (gross_total - extra_discount).quantize(Decimal("0.01"))
+                        sale.discount_total = (discount_total + extra_discount).quantize(Decimal("0.01"))
                         sale.save(update_fields=["total", "discount_total"])
                     messages.success(request, "Venta registrada.")
                     return redirect("inventory_sale_receipt", sale_id=sale.id)

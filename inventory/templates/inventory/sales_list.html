@@ -313,7 +313,7 @@
             if (suppressDraftSave) return;
             if (!formEl) return;
             const header = {};
-            ["warehouse", "audiencia", "cliente", "total_venta", "comision_ml", "impuestos_ml"].forEach((name) => {
+            ["warehouse", "audiencia", "cliente", "total_venta", "descuento_total", "comision_ml", "impuestos_ml"].forEach((name) => {
                 const field = formEl.querySelector(`[name='${name}']`);
                 if (field) header[name] = field.value || "";
             });
