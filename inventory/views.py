@@ -665,7 +665,9 @@ def sales_list(request):
         str(customer.id): customer.audience
         for customer in Customer.objects.only("id", "audience")
     }
-    customer_query = (request.GET.get("customer") or "").strip()
+    search_query = (request.GET.get("q") or "").strip()
+    include_comun = request.GET.get("wh_comun") == "1"
+    include_ml = request.GET.get("wh_ml") == "1"
     customers = Customer.objects.order_by("name")
     action = request.POST.get("action") if request.method == "POST" else ""
     if action in {"sync_google_sales", "reset_google_sales"}:
@@ -1061,9 +1063,18 @@ def sales_list(request):
         .prefetch_related("items__product")
         .order_by("-created_at", "-id")
     )
-    if customer_query:
-        sales = sales.filter(customer__name__icontains=customer_query)
-    for sale in sales:
+    if search_query:
+        sales = sales.filter(
+            Q(customer__name__icontains=search_query)
+            | Q(items__product__name__icontains=search_query)
+            | Q(items__product__sku__icontains=search_query)
+        ).distinct()
+    if include_comun and not include_ml:
+        sales = sales.filter(warehouse__type=Warehouse.WarehouseType.COMUN)
+    elif include_ml and not include_comun:
+        sales = sales.filter(warehouse__type=Warehouse.WarehouseType.MERCADOLIBRE)
+    sales_list = list(sales)
+    for sale in sales_list:
         cost_total = Decimal("0.00")
         for item in sale.items.all():
             cost_unit = item.cost_unit
@@ -1083,12 +1094,18 @@ def sales_list(request):
             sale.margin_total = net_total - cost_total
         else:
             sale.margin_total = (sale.total or Decimal("0.00")) - cost_total
+    sales_comun = [sale for sale in sales_list if sale.warehouse.type == Warehouse.WarehouseType.COMUN]
+    sales_ml = [sale for sale in sales_list if sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE]
     return render(
         request,
         "inventory/sales_list.html",
         {
-            "sales": sales,
-            "customer_query": customer_query,
+            "sales": sales_list,
+            "sales_comun": sales_comun,
+            "sales_ml": sales_ml,
+            "search_query": search_query,
+            "include_comun": include_comun,
+            "include_ml": include_ml,
             "customers": customers,
             "form": header_form,
             "formset": formset,

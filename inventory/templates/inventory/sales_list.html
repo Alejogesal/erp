@@ -6,17 +6,22 @@
 <p class="subtitle">Registrá ventas y consultá comprobantes emitidos.</p>
 
 <div class="card" style="margin-bottom:16px;">
-    <div class="card-title">Filtrar por cliente</div>
+    <div class="card-title">Buscar en historial</div>
     <form method="get">
         <div class="cards" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
             <div>
-                <label for="customer">Cliente</label>
-                <input id="customer" name="customer" type="text" value="{{ customer_query }}" placeholder="Buscar por coincidencias" list="customer-options">
-                <datalist id="customer-options">
-                    {% for customer in customers %}
-                    <option value="{{ customer.name }}"></option>
-                    {% endfor %}
-                </datalist>
+                <label for="q">Buscar</label>
+                <input id="q" name="q" type="text" value="{{ search_query }}" placeholder="Cliente o producto">
+            </div>
+            <div style="display:flex; align-items:center; gap:12px; padding-top:22px;">
+                <label style="display:flex; gap:6px; align-items:center;">
+                    <input type="checkbox" name="wh_comun" value="1" {% if include_comun %}checked{% endif %}>
+                    Depósito Común
+                </label>
+                <label style="display:flex; gap:6px; align-items:center;">
+                    <input type="checkbox" name="wh_ml" value="1" {% if include_ml %}checked{% endif %}>
+                    MercadoLibre
+                </label>
             </div>
         </div>
         <div style="margin-top:12px;">
@@ -125,6 +130,7 @@
                 <button type="submit" class="pill" onclick="return confirm('¿Eliminar ventas seleccionadas?');" style="font-size:12px; padding:4px 8px;">Eliminar seleccionadas</button>
             </div>
         </div>
+        <h4 style="margin:10px 0 6px;">Depósito Común</h4>
         <table>
         <thead>
             <tr>
@@ -140,7 +146,7 @@
             </tr>
         </thead>
         <tbody>
-            {% for sale in sales %}
+            {% for sale in sales_comun %}
             <tr data-created="{{ sale.created_at|date:'c' }}">
                 <td>{{ sale.ml_order_id|default:sale.invoice_number }}</td>
                 <td>{{ sale.created_at|date:"d/m/Y H:i" }}</td>
@@ -158,7 +164,45 @@
                 </td>
             </tr>
             {% empty %}
-            <tr><td colspan="9">Aún no hay ventas registradas.</td></tr>
+            <tr><td colspan="9">No hay ventas en Depósito Común.</td></tr>
+            {% endfor %}
+        </tbody>
+        </table>
+        <h4 style="margin:16px 0 6px;">MercadoLibre</h4>
+        <table>
+        <thead>
+            <tr>
+                <th>Comprobante</th>
+                <th>Fecha</th>
+                <th>Cliente</th>
+                <th>Depósito</th>
+                <th>Total</th>
+                <th>Comisión ML</th>
+                <th>Impuestos ML</th>
+                <th>Margen</th>
+                <th>Acciones</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for sale in sales_ml %}
+            <tr data-created="{{ sale.created_at|date:'c' }}">
+                <td>{{ sale.ml_order_id|default:sale.invoice_number }}</td>
+                <td>{{ sale.created_at|date:"d/m/Y H:i" }}</td>
+                <td>{{ sale.customer|default:"Consumidor final" }}</td>
+                <td>{{ sale.warehouse.name }}</td>
+                <td>${{ sale.total|latam_number:2 }}</td>
+                <td>${{ sale.ml_commission_total|latam_number:2 }}</td>
+                <td>${{ sale.ml_tax_total|latam_number:2 }}</td>
+                <td>${{ sale.margin_total|latam_number:2 }}</td>
+                <td>
+                    <a class="pill" href="{% url 'inventory_sale_receipt' sale.id %}" style="font-size:12px; padding:4px 8px;">Ver</a>
+                    <a class="pill" href="{% url 'inventory_sale_receipt_pdf' sale.id %}" style="font-size:12px; padding:4px 8px;">PDF</a>
+                    <a class="pill" href="{% url 'inventory_sale_edit' sale.id %}" style="font-size:12px; padding:4px 8px;">Editar</a>
+                    <input type="checkbox" name="sale_ids" value="{{ sale.id }}" style="margin-left:8px;">
+                </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="9">No hay ventas de MercadoLibre.</td></tr>
             {% endfor %}
         </tbody>
         </table>
