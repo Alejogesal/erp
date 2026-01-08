@@ -768,8 +768,12 @@ def sales_list(request):
             )
             return redirect("inventory_sales_list")
 
-        products = list(Product.objects.all())
-        product_index = ml._build_product_index(products)
+        ml_items = list(MercadoLibreItem.objects.select_related("product"))
+        ml_title_index = {}
+        for ml_item in ml_items:
+            key = ml._normalize(ml_item.title or "")
+            if key:
+                ml_title_index.setdefault(key, []).append(ml_item)
         orders: dict[str, dict[str, object]] = {}
         unmatched = 0
 
@@ -791,7 +795,19 @@ def sales_list(request):
             iibb = parse_decimal(row[iibb_idx])
             created_at = parse_datetime(row[fecha_idx])
 
-            product, _ = ml._match_product(title, product_index)
+            product = None
+            title_norm = ml._normalize(title)
+            if title_norm in ml_title_index:
+                product = ml_title_index[title_norm][0].product
+            if not product and title_norm:
+                for ml_item in ml_items:
+                    item_norm = ml._normalize(ml_item.title or "")
+                    if not item_norm:
+                        continue
+                    if title_norm in item_norm or item_norm in title_norm:
+                        product = ml_item.product
+                        if product:
+                            break
             if not product:
                 unmatched += 1
                 continue
@@ -2677,6 +2693,9 @@ def mercadolibre_dashboard(request):
             elif not connection or not connection.access_token:
                 messages.error(request, "Primero conectá la cuenta de MercadoLibre.")
             else:
+                if item_id.isdigit():
+                    site_id = (getattr(settings, "ML_SITE_ID", "") or "MLA").upper()
+                    item_id = f"{site_id}{item_id}"
                 try:
                     item = ml.get_item(item_id, connection.access_token)
                     title = item.get("title", "") or ""
