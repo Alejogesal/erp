@@ -670,6 +670,117 @@ def sales_list(request):
     include_ml = request.GET.get("wh_ml") == "1"
     customers = Customer.objects.order_by("name")
     action = request.POST.get("action") if request.method == "POST" else ""
+    if action == "import_ml_sales_xlsx":
+        upload = request.FILES.get("file")
+        if not upload:
+            messages.error(request, "Subí el archivo XLSX con las ventas.")
+            return redirect("inventory_sales_list")
+        rows, error = _read_ml_sales_xlsx_rows(upload)
+        if error:
+            messages.error(request, error)
+            return redirect("inventory_sales_list")
+        if not rows:
+            messages.error(request, "El archivo no tiene filas válidas.")
+            return redirect("inventory_sales_list")
+
+        def parse_datetime(value: object) -> datetime | None:
+            if value is None or value == "":
+                return None
+            if isinstance(value, datetime):
+                parsed = value
+            elif hasattr(value, "year") and hasattr(value, "month") and hasattr(value, "day"):
+                parsed = datetime(value.year, value.month, value.day)
+            else:
+                raw = str(value).strip()
+                for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%d/%m/%Y %H:%M", "%d/%m/%Y"):
+                    try:
+                        parsed = datetime.strptime(raw, fmt)
+                        break
+                    except ValueError:
+                        parsed = None
+                if parsed is None:
+                    return None
+            if timezone.is_naive(parsed):
+                return timezone.make_aware(parsed)
+            return parsed
+
+        ml_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.MERCADOLIBRE).first()
+        if not ml_wh:
+            messages.error(request, "Falta el depósito MercadoLibre.")
+            return redirect("inventory_sales_list")
+
+        ml_items = list(MercadoLibreItem.objects.select_related("product"))
+        ml_title_index = {}
+        for ml_item in ml_items:
+            key = ml._normalize(ml_item.title or "")
+            if key:
+                ml_title_index.setdefault(key, []).append(ml_item)
+
+        created_sales = 0
+        skipped = 0
+        unmatched = 0
+        for idx, row in enumerate(rows, start=1):
+            title = row["title"]
+            qty = row["quantity"]
+            price_total = row["price_total"]
+            commission = row["commission"]
+            taxes = row["taxes"]
+            created_at = parse_datetime(row.get("created_at"))
+
+            product = None
+            title_norm = ml._normalize(title)
+            if title_norm in ml_title_index:
+                product = ml_title_index[title_norm][0].product
+            if not product and title_norm:
+                for ml_item in ml_items:
+                    item_norm = ml._normalize(ml_item.title or "")
+                    if not item_norm:
+                        continue
+                    if title_norm in item_norm or item_norm in title_norm:
+                        product = ml_item.product
+                        if product:
+                            break
+            if not product:
+                unmatched += 1
+                continue
+
+            reference = f"XLSX ML {created_at.date() if created_at else 'SIN-FECHA'} #{idx}"
+            if Sale.objects.filter(reference=reference).exists():
+                skipped += 1
+                continue
+
+            with transaction.atomic():
+                sale = Sale.objects.create(
+                    warehouse=ml_wh,
+                    audience=Customer.Audience.CONSUMER,
+                    total=price_total.quantize(Decimal("0.01")),
+                    reference=reference,
+                    ml_commission_total=commission.quantize(Decimal("0.01")),
+                    ml_tax_total=taxes.quantize(Decimal("0.01")),
+                    user=request.user,
+                )
+                if created_at:
+                    Sale.objects.filter(pk=sale.pk).update(created_at=created_at)
+                unit_price = (price_total / qty).quantize(Decimal("0.01"))
+                line_total = (unit_price * qty).quantize(Decimal("0.01"))
+                SaleItem.objects.create(
+                    sale=sale,
+                    product=product,
+                    quantity=qty,
+                    unit_price=unit_price,
+                    cost_unit=product.cost_with_vat(),
+                    discount_percent=Decimal("0.00"),
+                    final_unit_price=unit_price,
+                    line_total=line_total,
+                    vat_percent=product.vat_percent or Decimal("0.00"),
+                )
+                created_sales += 1
+
+        messages.success(
+            request,
+            f"Ventas importadas: {created_sales}, omitidas: {skipped}, sin match: {unmatched}.",
+        )
+        return redirect("inventory_sales_list")
     if action in {"sync_google_sales", "reset_google_sales"}:
         if action == "reset_google_sales":
             ml_sales = Sale.objects.filter(
@@ -2419,6 +2530,68 @@ def _read_costs_xlsx_rows(upload) -> tuple[list[tuple[str, str, Decimal]], str |
         if not description:
             continue
         rows.append((group, description, cost))
+    return rows, None
+
+
+def _read_ml_sales_xlsx_rows(upload) -> tuple[list[dict], str | None]:
+    try:
+        from openpyxl import load_workbook
+    except Exception:
+        return [], "Falta la dependencia openpyxl. Instalá openpyxl en el entorno."
+
+    try:
+        wb = load_workbook(upload, data_only=True)
+        ws = wb.active
+    except Exception:
+        return [], "No se pudo leer el archivo XLSX."
+
+    header_cells = next(ws.iter_rows(min_row=1, max_row=1))
+    headers = [
+        str(cell.value).strip() if cell.value is not None else ""
+        for cell in header_cells
+    ]
+    header_map = {_normalize_header(h): idx for idx, h in enumerate(headers)}
+
+    def _pick_index(keys: list[str]) -> int | None:
+        for key in keys:
+            normalized = _normalize_header(key)
+            if normalized in header_map:
+                return header_map[normalized]
+        return None
+
+    date_idx = _pick_index(["fecha", "fecha venta"])
+    product_idx = _pick_index(["producto", "publicacion", "publicación", "titulo", "título", "nombre"])
+    qty_idx = _pick_index(["cantidad", "cant"])
+    price_total_idx = _pick_index(["precio bruto venta", "precio bruto", "precio"])
+    commission_idx = _pick_index(["comision", "comisión"])
+    tax_idx = _pick_index(["impuestos", "impuesto", "iibb"])
+
+    required = [date_idx, product_idx, qty_idx, price_total_idx, commission_idx, tax_idx]
+    if any(idx is None for idx in required):
+        return [], "Faltan columnas obligatorias: Fecha, Producto, Cantidad, Precio Bruto Venta, Comision, Impuestos."
+
+    rows: list[dict] = []
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        title = str(row[product_idx] or "").strip() if product_idx is not None else ""
+        if not title:
+            continue
+        qty = _parse_decimal(row[qty_idx])
+        if qty <= 0:
+            continue
+        price_total = _parse_decimal(row[price_total_idx])
+        commission = _parse_decimal(row[commission_idx])
+        taxes = _parse_decimal(row[tax_idx])
+        created_at = row[date_idx] if date_idx is not None else None
+        rows.append(
+            {
+                "title": title,
+                "quantity": qty,
+                "price_total": price_total,
+                "commission": commission,
+                "taxes": taxes,
+                "created_at": created_at,
+            }
+        )
     return rows, None
 
 
