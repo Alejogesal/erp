@@ -16,7 +16,19 @@
         {% csrf_token %}
         <input type="hidden" name="items_payload" id="items-payload">
         <h3>Depósito</h3>
-        {{ form.as_p }}
+        <p>
+            {{ form.warehouse.label_tag }}
+            {{ form.warehouse }}
+            {{ form.warehouse.errors }}
+        </p>
+        <p>
+            {{ form.purchase_date.label_tag }}
+            <div style="display:flex; gap:8px; align-items:center;">
+                {{ form.purchase_date }}
+                <button type="button" class="pill date-picker-btn" style="font-size:12px; padding:4px 8px;">📅</button>
+            </div>
+            {{ form.purchase_date.errors }}
+        </p>
         {{ formset.non_form_errors }}
         <h3>Productos</h3>
         {{ formset.management_form }}
@@ -439,6 +451,21 @@
             localStorage.removeItem(storageKey);
         });
         restoreDraft();
+    })();
+
+    (function() {
+        const buttons = document.querySelectorAll(".date-picker-btn");
+        buttons.forEach((btn) => {
+            const input = btn.closest("p")?.querySelector("input[type='date']");
+            if (!input) return;
+            btn.addEventListener("click", () => {
+                if (typeof input.showPicker === "function") {
+                    input.showPicker();
+                } else {
+                    input.focus();
+                }
+            });
+        });
     })();
 </script>
 {% endblock %}
