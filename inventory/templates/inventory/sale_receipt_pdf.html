@@ -17,14 +17,15 @@
             display: flex;
             flex-direction: column;
         }
-        .invoice-header { display: grid; grid-template-columns: 50mm 1fr; align-items: center; gap: 6mm; }
+        .invoice-header { display: grid; grid-template-columns: 70mm 1fr; align-items: center; gap: 8mm; }
         .invoice-logo { text-align: center; border: 2px solid #000; padding: 14px; font-size: 26px; font-weight: 700; }
         .invoice-meta h2 { margin: 0 0 6px; font-size: 18px; }
-        .info-row { display: grid; grid-template-columns: 1fr 1fr 1fr 35mm; gap: 6mm; margin: 8mm 0; }
+        .info-row { display: grid; grid-template-columns: 1.2fr 1fr 1fr 0.8fr; gap: 6mm; margin: 6mm 0; }
         .info-block strong { display: block; font-size: 11px; text-transform: uppercase; }
         table.invoice-table { width: 100%; border-collapse: collapse; margin-top: 6mm; table-layout: fixed; }
-        table.invoice-table th, table.invoice-table td { border-bottom: 1px solid #000; padding: 4px 3px; white-space: nowrap; }
+        table.invoice-table th, table.invoice-table td { border-bottom: 1px solid #000; padding: 6px 4px; overflow: hidden; text-overflow: ellipsis; }
         table.invoice-table th.desc, table.invoice-table td.desc { white-space: normal; }
+        table.invoice-table th.num, table.invoice-table td.num { white-space: nowrap; }
         table.invoice-table th { text-align: left; font-size: 11px; text-transform: uppercase; }
         table.invoice-table td.num { text-align: right; }
         .invoice-body { flex: 1 1 auto; width: 100%; }
@@ -60,11 +61,11 @@
         <div class="invoice-body">
             <table class="invoice-table">
                 <colgroup>
-                    <col style="width:52%;">
-                    <col style="width:11%;">
-                    <col style="width:12%;">
-                    <col style="width:7%;">
-                    <col style="width:18%;">
+                    <col style="width:45%;">
+                    <col style="width:15%;">
+                    <col style="width:15%;">
+                    <col style="width:10%;">
+                    <col style="width:15%;">
                 </colgroup>
                 <thead>
                     <tr>
