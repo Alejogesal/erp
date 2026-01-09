@@ -122,6 +122,11 @@ class PurchaseItemForm(forms.Form):
 
 class SaleHeaderForm(forms.Form):
     warehouse = forms.ModelChoiceField(queryset=Warehouse.objects.all())
+    sale_date = forms.DateField(
+        label="Fecha",
+        required=False,
+        widget=forms.DateInput(attrs={"type": "date"}),
+    )
     audiencia = forms.ChoiceField(
         choices=Customer.Audience.choices,
         label="Tipo de venta",
@@ -480,6 +485,8 @@ def sale_edit(request, sale_id: int):
             audience = header_form.cleaned_data.get("audiencia") or Customer.Audience.CONSUMER
             customer = header_form.cleaned_data.get("cliente")
             total_venta = header_form.cleaned_data.get("total_venta")
+            sale_date = header_form.cleaned_data.get("sale_date")
+            sale_date = header_form.cleaned_data.get("sale_date")
             extra_discount_percent = header_form.cleaned_data.get("descuento_total") or Decimal("0.00")
             comision_ml = header_form.cleaned_data.get("comision_ml") or Decimal("0.00")
             impuestos_ml = header_form.cleaned_data.get("impuestos_ml") or Decimal("0.00")
@@ -514,7 +521,14 @@ def sale_edit(request, sale_id: int):
                     sale.ml_tax_total = (
                         impuestos_ml if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE else Decimal("0.00")
                     )
-                    sale.save(update_fields=["customer", "warehouse", "audience", "ml_commission_total", "ml_tax_total"])
+                    update_fields = ["customer", "warehouse", "audience", "ml_commission_total", "ml_tax_total"]
+                    if sale_date:
+                        created_at = datetime.combine(sale_date, time(12, 0))
+                        if timezone.is_naive(created_at):
+                            created_at = timezone.make_aware(created_at)
+                        sale.created_at = created_at
+                        update_fields.append("created_at")
+                    sale.save(update_fields=update_fields)
 
                     total = Decimal("0.00")
                     discount_total = Decimal("0.00")
@@ -606,6 +620,7 @@ def sale_edit(request, sale_id: int):
         header_form = SaleHeaderForm(
             initial={
                 "warehouse": sale.warehouse,
+                "sale_date": timezone.localtime(sale.created_at).date() if sale.created_at else None,
                 "audiencia": sale.audience,
                 "cliente": sale.customer,
                 "total_venta": sale.total if sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE else None,
@@ -1099,6 +1114,11 @@ def sales_list(request):
                             ml_commission_total=comision_ml if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE else Decimal("0.00"),
                             ml_tax_total=impuestos_ml if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE else Decimal("0.00"),
                         )
+                        if sale_date:
+                            created_at = datetime.combine(sale_date, time(12, 0))
+                            if timezone.is_naive(created_at):
+                                created_at = timezone.make_aware(created_at)
+                            Sale.objects.filter(pk=sale.pk).update(created_at=created_at)
                         total = Decimal("0.00")
                         discount_total = Decimal("0.00")
                         base_subtotal = Decimal("0.00")
@@ -1169,7 +1189,7 @@ def sales_list(request):
         else:
             messages.error(request, "Revisá los campos de la venta.")
     else:
-        header_form = SaleHeaderForm()
+        header_form = SaleHeaderForm(initial={"sale_date": timezone.localdate()})
         formset = SaleItemFormSet()
     sales = (
         Sale.objects.select_related("customer", "warehouse", "user")
