@@ -285,6 +285,33 @@
         }
 
         if (!addBtn || !body || !totalForms) return;
+        const saleDateInput = document.querySelector("input[type='date'][name='sale_date']");
+        if (saleDateInput && !saleDateInput.dataset.pickerReady) {
+            saleDateInput.dataset.pickerReady = "1";
+            const wrapper = document.createElement("div");
+            wrapper.style.display = "flex";
+            wrapper.style.alignItems = "center";
+            wrapper.style.gap = "8px";
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "pill";
+            btn.textContent = "📅";
+            btn.style.fontSize = "12px";
+            btn.style.padding = "4px 8px";
+            const parent = saleDateInput.parentElement;
+            if (parent) {
+                parent.insertBefore(wrapper, saleDateInput);
+                wrapper.appendChild(saleDateInput);
+                wrapper.appendChild(btn);
+            }
+            btn.addEventListener("click", () => {
+                if (typeof saleDateInput.showPicker === "function") {
+                    saleDateInput.showPicker();
+                } else {
+                    saleDateInput.focus();
+                }
+            });
+        }
         const updateSearchFromSelect = (selectEl) => {
             const searchInput = selectEl?._searchInput;
             if (!searchInput) return;
