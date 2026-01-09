@@ -268,18 +268,18 @@ def dashboard(request):
 
     purchase_qs = Purchase.objects.all()
     sale_item_qs = SaleItem.objects.all()
-    movement_qs = StockMovement.objects.filter(movement_type=StockMovement.MovementType.EXIT)
+    sales_qs = Sale.objects.select_related("warehouse").prefetch_related("items__product")
     tax_qs = TaxExpense.objects.all()
     if start_dt:
         purchase_qs = purchase_qs.filter(created_at__gte=start_dt)
         sale_item_qs = sale_item_qs.filter(sale__created_at__gte=start_dt)
-        movement_qs = movement_qs.filter(created_at__gte=start_dt)
+        sales_qs = sales_qs.filter(created_at__gte=start_dt)
     if start_date_obj:
         tax_qs = tax_qs.filter(paid_at__gte=start_date_obj)
     if end_dt:
         purchase_qs = purchase_qs.filter(created_at__lte=end_dt)
         sale_item_qs = sale_item_qs.filter(sale__created_at__lte=end_dt)
-        movement_qs = movement_qs.filter(created_at__lte=end_dt)
+        sales_qs = sales_qs.filter(created_at__lte=end_dt)
     if end_date_obj:
         tax_qs = tax_qs.filter(paid_at__lte=end_date_obj)
 
@@ -288,8 +288,25 @@ def dashboard(request):
     tax_total = tax_qs.aggregate(total=Sum("amount")).get("total") or Decimal("0.00")
     net_margin = sale_total - purchase_total - tax_total
 
+    margin_ml = Decimal("0.00")
+    margin_comun = Decimal("0.00")
+    for sale in sales_qs:
+        cost_total = Decimal("0.00")
+        for item in sale.items.all():
+            cost_unit = item.cost_unit
+            if cost_unit is None or cost_unit <= 0:
+                cost_unit = item.product.cost_with_vat()
+            cost_total += item.quantity * cost_unit
+        if sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE:
+            net_total = (sale.total or Decimal("0.00")) - (sale.ml_commission_total or Decimal("0.00")) - (
+                sale.ml_tax_total or Decimal("0.00")
+            )
+            margin_ml += net_total - cost_total
+        else:
+            margin_comun += (sale.total or Decimal("0.00")) - cost_total
+
     ranking_qs = (
-        movement_qs.values("product__id", "product__sku", "product__name")
+        sale_item_qs.values("product__id", "product__sku", "product__name")
         .annotate(total_quantity=Sum("quantity"))
         .order_by("-total_quantity")[:10]
     )
@@ -309,6 +326,8 @@ def dashboard(request):
         "sale_total": sale_total,
         "gross_margin": net_margin,
         "gross_margin_pct": (net_margin / sale_total * Decimal("100.00")) if sale_total else None,
+        "margin_ml": margin_ml,
+        "margin_comun": margin_comun,
         "ranking": ranking,
         "start_date": start_date,
         "end_date": end_date,

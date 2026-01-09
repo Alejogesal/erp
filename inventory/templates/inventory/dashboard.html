@@ -87,6 +87,14 @@
             {% if gross_margin_pct %}{% if gross_margin >= 0 %}▲{% else %}▼{% endif %} {{ gross_margin_pct|latam_number:2 }}%{% else %}-{% endif %}
         </div>
     </div>
+    <div class="card">
+        <div class="card-title">Margen MercadoLibre</div>
+        <p class="value">${{ margin_ml|latam_number:2 }}</p>
+    </div>
+    <div class="card">
+        <div class="card-title">Margen Depósito Común</div>
+        <p class="value">${{ margin_comun|latam_number:2 }}</p>
+    </div>
     </div>
 
     <div class="card table-card">
