@@ -125,7 +125,8 @@ class SaleHeaderForm(forms.Form):
     sale_date = forms.DateField(
         label="Fecha",
         required=False,
-        widget=forms.DateInput(attrs={"type": "date"}),
+        input_formats=["%Y-%m-%d", "%d/%m/%Y"],
+        widget=forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}),
     )
     audiencia = forms.ChoiceField(
         choices=Customer.Audience.choices,
