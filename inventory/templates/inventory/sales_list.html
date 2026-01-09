@@ -33,7 +33,6 @@
                     <th>Producto</th>
                     <th>Cantidad</th>
                     <th>IVA %</th>
-                    <th>Eliminar</th>
                 </tr>
             </thead>
             <tbody id="items-body">
@@ -42,7 +41,6 @@
                     <td>{{ item_form.product }}</td>
                     <td>{{ item_form.quantity }}</td>
                     <td>{{ item_form.vat_percent }}</td>
-                    <td>{% if formset.can_delete %}{{ item_form.DELETE }}{% endif %}</td>
                 </tr>
                 {% if item_form.errors %}
                 <tr>
@@ -268,6 +266,18 @@
                 const wrapper = field.closest("p") || field.parentElement;
                 if (wrapper) wrapper.style.display = isMl ? "" : "none";
             });
+            if (customerSelect) {
+                customerSelect.value = isMl ? "" : customerSelect.value;
+                customerSelect.disabled = isMl;
+            }
+            if (audienceSelect) {
+                if (isMl) {
+                    audienceSelect.value = "CONSUMER";
+                    audienceSelect.disabled = true;
+                } else if (!customerSelect?.value) {
+                    audienceSelect.disabled = false;
+                }
+            }
         };
         if (warehouseSelect) {
             warehouseSelect.addEventListener("change", syncMlFields);
@@ -344,9 +354,7 @@
             const product = container.querySelector("[name$='-product']");
             const qty = container.querySelector("[name$='-quantity']");
             const vat = container.querySelector("[name$='-vat_percent']");
-            const deleteField = container.querySelector("[name$='-DELETE']");
-
-            [product, qty, vat, deleteField].forEach(field => {
+            [product, qty, vat].forEach(field => {
                 const td = document.createElement("td");
                 if (field) td.appendChild(field);
                 tr.appendChild(td);
@@ -358,113 +366,13 @@
         });
 
         const formEl = addBtn.closest("form");
-        const storageKey = "erp:sales_draft";
-
-        const serializeRow = (row) => {
-            const productSelect = row.querySelector("select[name$='-product']");
-            const qtyInput = row.querySelector("input[name$='-quantity']");
-            const vatInput = row.querySelector("input[name$='-vat_percent']");
-            const searchInput = productSelect?._searchInput;
-            const data = {
-                product_id: productSelect?.value || "",
-                product_search: searchInput?.value || "",
-                quantity: qtyInput?.value || "",
-                vat_percent: vatInput?.value || "",
-            };
-            const hasValue = Object.values(data).some((value) => value);
-            return hasValue ? data : null;
-        };
-
-        let suppressDraftSave = false;
-        const saveDraft = () => {
-            if (suppressDraftSave) return;
-            if (!formEl) return;
-            const header = {};
-            ["warehouse", "audiencia", "cliente", "total_venta", "descuento_total", "comision_ml", "impuestos_ml"].forEach((name) => {
-                const field = formEl.querySelector(`[name='${name}']`);
-                if (field) header[name] = field.value || "";
-            });
-            const rows = Array.from(body.querySelectorAll("tr"));
-            const items = rows.map(serializeRow).filter(Boolean);
-            const payload = { header, items };
-            localStorage.setItem(storageKey, JSON.stringify(payload));
-        };
-
-        const fillRow = (row, data) => {
-            if (!data) return;
-            const productSelect = row.querySelector("select[name$='-product']");
-            const qtyInput = row.querySelector("input[name$='-quantity']");
-            const vatInput = row.querySelector("input[name$='-vat_percent']");
-            if (productSelect) {
-                if (data.product_id) {
-                    productSelect.value = data.product_id;
-                    updateSearchFromSelect(productSelect);
-                } else if (productSelect._searchInput) {
-                    productSelect._searchInput.value = data.product_search || "";
-                }
-            }
-            if (qtyInput && data.quantity) qtyInput.value = data.quantity;
-            if (vatInput && data.vat_percent) vatInput.value = data.vat_percent;
-        };
-
-        const restoreDraft = () => {
-            const navEntry = performance.getEntriesByType?.("navigation")?.[0];
-            const wasReload = navEntry ? navEntry.type === "reload" : performance.navigation?.type === 1;
-            if (!wasReload) {
-                localStorage.removeItem(storageKey);
-                return;
-            }
-            const raw = localStorage.getItem(storageKey);
-            if (!raw) return;
-            let draft = null;
-            try {
-                draft = JSON.parse(raw);
-            } catch (err) {
-                return;
-            }
-            const header = draft?.header || {};
-            Object.keys(header).forEach((name) => {
-                const field = formEl?.querySelector(`[name='${name}']`);
-                if (field && header[name]) field.value = header[name];
-            });
-            syncAudience();
-            syncMlFields();
-            const items = Array.isArray(draft?.items) ? draft.items : [];
-            if (!items.length) return;
-            while (body.querySelectorAll("tr").length < items.length) {
-                addBtn.click();
-            }
-            const rows = Array.from(body.querySelectorAll("tr"));
-            items.forEach((item, idx) => fillRow(rows[idx], item));
-        };
-
-        const pruneEmptyRows = () => {
-            const rows = Array.from(body.querySelectorAll("tr"));
-            rows.forEach((row) => {
-                const productSelect = row.querySelector("select[name$='-product']");
-                const qtyInput = row.querySelector("input[name$='-quantity']");
-                const deleteCheckbox = row.querySelector("input[type='checkbox'][name$='-DELETE']");
-                if (!productSelect || !qtyInput || !deleteCheckbox) return;
-                const isEmpty = !productSelect.value && !qtyInput.value;
-                if (isEmpty) {
-                    deleteCheckbox.checked = true;
-                }
-            });
-        };
-
-        formEl?.addEventListener("input", saveDraft);
-        formEl?.addEventListener("change", saveDraft);
         formEl?.addEventListener("submit", () => {
-            suppressDraftSave = true;
             document.querySelectorAll("select[name$='-product']").forEach((selectEl) => {
                 if (typeof selectEl._syncSelection === "function") {
                     selectEl._syncSelection();
                 }
             });
-            pruneEmptyRows();
-            localStorage.removeItem(storageKey);
         });
-        restoreDraft();
     })();
 
     (function() {

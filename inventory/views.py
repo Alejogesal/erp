@@ -486,11 +486,13 @@ def sale_edit(request, sale_id: int):
             customer = header_form.cleaned_data.get("cliente")
             total_venta = header_form.cleaned_data.get("total_venta")
             sale_date = header_form.cleaned_data.get("sale_date")
-            sale_date = header_form.cleaned_data.get("sale_date")
             extra_discount_percent = header_form.cleaned_data.get("descuento_total") or Decimal("0.00")
             comision_ml = header_form.cleaned_data.get("comision_ml") or Decimal("0.00")
             impuestos_ml = header_form.cleaned_data.get("impuestos_ml") or Decimal("0.00")
-            if customer:
+            if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE:
+                customer = None
+                audience = Customer.Audience.CONSUMER
+            elif customer:
                 audience = customer.audience
             try:
                 with transaction.atomic():
@@ -675,7 +677,7 @@ def purchase_receipt(request, purchase_id: int):
 
 @login_required
 def sales_list(request):
-    SaleItemFormSet = formset_factory(SaleItemForm, extra=1, can_delete=True)
+    SaleItemFormSet = formset_factory(SaleItemForm, extra=1, can_delete=False)
     customer_audiences = {
         str(customer.id): customer.audience
         for customer in Customer.objects.only("id", "audience")
@@ -1094,10 +1096,14 @@ def sales_list(request):
             audience = header_form.cleaned_data.get("audiencia") or Customer.Audience.CONSUMER
             customer = header_form.cleaned_data.get("cliente")
             total_venta = header_form.cleaned_data.get("total_venta")
+            sale_date = header_form.cleaned_data.get("sale_date")
             extra_discount_percent = header_form.cleaned_data.get("descuento_total") or Decimal("0.00")
             comision_ml = header_form.cleaned_data.get("comision_ml") or Decimal("0.00")
             impuestos_ml = header_form.cleaned_data.get("impuestos_ml") or Decimal("0.00")
-            if customer:
+            if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE:
+                customer = None
+                audience = Customer.Audience.CONSUMER
+            elif customer:
                 audience = customer.audience
             items = [f.cleaned_data for f in formset.forms if f.cleaned_data and not f.cleaned_data.get("DELETE")]
             if not items:
@@ -1114,6 +1120,11 @@ def sales_list(request):
                             ml_commission_total=comision_ml if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE else Decimal("0.00"),
                             ml_tax_total=impuestos_ml if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE else Decimal("0.00"),
                         )
+                        if sale_date:
+                            created_at = datetime.combine(sale_date, time(12, 0))
+                            if timezone.is_naive(created_at):
+                                created_at = timezone.make_aware(created_at)
+                            Sale.objects.filter(pk=sale.pk).update(created_at=created_at)
                         if sale_date:
                             created_at = datetime.combine(sale_date, time(12, 0))
                             if timezone.is_naive(created_at):
