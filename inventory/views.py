@@ -392,15 +392,24 @@ def sale_receipt(request, sale_id: int):
         if subtotal > 0
         else Decimal("0.00")
     )
-    total = subtotal - discount_total
+    is_ml = sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE
+    subtotal_display = sale.total if is_ml and sale.total is not None else subtotal
+    total_display = sale.total if is_ml and sale.total is not None else (subtotal - discount_total)
+    commission_total = sale.ml_commission_total or Decimal("0.00")
+    tax_total = sale.ml_tax_total or Decimal("0.00")
+    net_total = (total_display - commission_total - tax_total) if is_ml else None
     invoice_number = sale.ml_order_id or sale.invoice_number
     context = {
         "sale": sale,
         "items": items,
-        "subtotal": subtotal,
+        "subtotal": subtotal_display,
         "discount_total": discount_total,
         "extra_discount_percent": extra_discount_percent,
-        "total": total,
+        "total": total_display,
+        "is_ml": is_ml,
+        "commission_total": commission_total,
+        "tax_total": tax_total,
+        "net_total": net_total,
         "invoice_number": invoice_number,
     }
     return render(request, "inventory/sale_receipt.html", context)
@@ -423,7 +432,12 @@ def sale_receipt_pdf(request, sale_id: int):
         if subtotal > 0
         else Decimal("0.00")
     )
-    total = subtotal - discount_total
+    is_ml = sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE
+    subtotal_display = sale.total if is_ml and sale.total is not None else subtotal
+    total_display = sale.total if is_ml and sale.total is not None else (subtotal - discount_total)
+    commission_total = sale.ml_commission_total or Decimal("0.00")
+    tax_total = sale.ml_tax_total or Decimal("0.00")
+    net_total = (total_display - commission_total - tax_total) if is_ml else None
     from django.template.loader import render_to_string
 
     html = render_to_string(
@@ -431,10 +445,14 @@ def sale_receipt_pdf(request, sale_id: int):
         {
             "sale": sale,
             "items": items,
-            "subtotal": subtotal,
+            "subtotal": subtotal_display,
             "discount_total": discount_total,
             "extra_discount_percent": extra_discount_percent,
-            "total": total,
+            "total": total_display,
+            "is_ml": is_ml,
+            "commission_total": commission_total,
+            "tax_total": tax_total,
+            "net_total": net_total,
             "invoice_number": sale.ml_order_id or sale.invoice_number,
         },
         request=request,

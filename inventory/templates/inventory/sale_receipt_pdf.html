@@ -111,11 +111,30 @@
                 <div></div>
                 <div>${{ discount_total|latam_number:2 }}</div>
             </div>
+            {% if is_ml %}
+            <div class="totals-row">
+                <div class="label">Comisión ML</div>
+                <div></div>
+                <div>${{ commission_total|latam_number:2 }}</div>
+            </div>
+            <div class="totals-row">
+                <div class="label">Impuestos ML</div>
+                <div></div>
+                <div>${{ tax_total|latam_number:2 }}</div>
+            </div>
+            {% endif %}
             <div class="totals-row" style="font-weight:700;">
                 <div class="label">Total</div>
                 <div></div>
                 <div>${{ total|latam_number:2 }}</div>
             </div>
+            {% if is_ml %}
+            <div class="totals-row" style="font-weight:700;">
+                <div class="label">Neto ML</div>
+                <div></div>
+                <div>${{ net_total|latam_number:2 }}</div>
+            </div>
+            {% endif %}
         </div>
     </div>
 </body>
