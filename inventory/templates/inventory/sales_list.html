@@ -90,88 +90,9 @@
                 <button type="submit" class="pill" onclick="return confirm('¿Eliminar ventas seleccionadas?');" style="font-size:12px; padding:4px 8px;">Eliminar seleccionadas</button>
             </div>
         </div>
-        <h4 style="margin:10px 0 6px;">Depósito Común</h4>
-        <table>
-        <thead>
-            <tr>
-                <th>Comprobante</th>
-                <th>Fecha</th>
-                <th>Cliente</th>
-                <th>Depósito</th>
-                <th>Total</th>
-                <th>Comisión ML</th>
-                <th>Impuestos ML</th>
-                <th>Margen</th>
-                <th>Acciones</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for sale in sales_comun %}
-            <tr class="sale-row" data-created="{{ sale.created_at|date:'c' }}" data-search="{% if sale.customer %}{{ sale.customer.name }}{% endif %} {% for item in sale.items.all %}{{ item.product.name }} {{ item.product.sku }} {% endfor %}">
-                <td>{{ sale.ml_order_id|default:sale.invoice_number }}</td>
-                <td>{{ sale.created_at|date:"d/m/Y H:i" }}</td>
-                <td>{{ sale.customer|default:"Consumidor final" }}</td>
-                <td>{{ sale.warehouse.name }}</td>
-                <td>${{ sale.total|latam_number:2 }}</td>
-                <td>${{ sale.ml_commission_total|latam_number:2 }}</td>
-                <td>${{ sale.ml_tax_total|latam_number:2 }}</td>
-                <td>${{ sale.margin_total|latam_number:2 }}</td>
-                <td>
-                    <a class="pill" href="{% url 'inventory_sale_receipt' sale.id %}" style="font-size:12px; padding:4px 8px;">Ver</a>
-                    <a class="pill" href="{% url 'inventory_sale_receipt_pdf' sale.id %}" style="font-size:12px; padding:4px 8px;">PDF</a>
-                    <a class="pill" href="{% url 'inventory_sale_edit' sale.id %}" style="font-size:12px; padding:4px 8px;">Editar</a>
-                    <input type="checkbox" name="sale_ids" value="{{ sale.id }}" style="margin-left:8px;">
-                </td>
-            </tr>
-            {% empty %}
-            <tr class="empty-row"><td colspan="9">No hay ventas en Depósito Común.</td></tr>
-            {% endfor %}
-            {% if sales_comun %}
-            <tr class="empty-row" style="display:none;"><td colspan="9">No hay ventas en Depósito Común.</td></tr>
-            {% endif %}
-        </tbody>
-        </table>
-        <h4 style="margin:16px 0 6px;">MercadoLibre</h4>
-        <table>
-        <thead>
-            <tr>
-                <th>Comprobante</th>
-                <th>Fecha</th>
-                <th>Cliente</th>
-                <th>Depósito</th>
-                <th>Total</th>
-                <th>Comisión ML</th>
-                <th>Impuestos ML</th>
-                <th>Margen</th>
-                <th>Acciones</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for sale in sales_ml %}
-            <tr class="sale-row" data-created="{{ sale.created_at|date:'c' }}" data-search="{% if sale.customer %}{{ sale.customer.name }}{% endif %} {% for item in sale.items.all %}{{ item.product.name }} {{ item.product.sku }} {% endfor %}">
-                <td>{{ sale.ml_order_id|default:sale.invoice_number }}</td>
-                <td>{{ sale.created_at|date:"d/m/Y H:i" }}</td>
-                <td>{{ sale.customer|default:"Consumidor final" }}</td>
-                <td>{{ sale.warehouse.name }}</td>
-                <td>${{ sale.total|latam_number:2 }}</td>
-                <td>${{ sale.ml_commission_total|latam_number:2 }}</td>
-                <td>${{ sale.ml_tax_total|latam_number:2 }}</td>
-                <td>${{ sale.margin_total|latam_number:2 }}</td>
-                <td>
-                    <a class="pill" href="{% url 'inventory_sale_receipt' sale.id %}" style="font-size:12px; padding:4px 8px;">Ver</a>
-                    <a class="pill" href="{% url 'inventory_sale_receipt_pdf' sale.id %}" style="font-size:12px; padding:4px 8px;">PDF</a>
-                    <a class="pill" href="{% url 'inventory_sale_edit' sale.id %}" style="font-size:12px; padding:4px 8px;">Editar</a>
-                    <input type="checkbox" name="sale_ids" value="{{ sale.id }}" style="margin-left:8px;">
-                </td>
-            </tr>
-            {% empty %}
-            <tr class="empty-row"><td colspan="9">No hay ventas de MercadoLibre.</td></tr>
-            {% endfor %}
-            {% if sales_ml %}
-            <tr class="empty-row" style="display:none;"><td colspan="9">No hay ventas de MercadoLibre.</td></tr>
-            {% endif %}
-        </tbody>
-        </table>
+        <div id="sales-history">
+            {% include "inventory/_sales_history.html" %}
+        </div>
     </form>
 </div>
 {{ customer_audiences|json_script:"customer-audiences" }}
@@ -179,55 +100,67 @@
     (function() {
         const form = document.getElementById("history-filter");
         const queryInput = document.getElementById("q");
+        const historyEl = document.getElementById("sales-history");
         const whComun = form ? form.querySelector("input[name='wh_comun']") : null;
         const whMl = form ? form.querySelector("input[name='wh_ml']") : null;
-        const tables = Array.from(document.querySelectorAll(".card.table-card table"));
-        const comunTable = tables[0] || null;
-        const mlTable = tables[1] || null;
+        let debounceId = null;
 
-        const normalize = (value) => (value || "").toString().toLowerCase();
-
-        const filterTable = (table, enabled, hasFilters, query) => {
-            if (!table) return;
-            const rows = Array.from(table.querySelectorAll("tbody tr.sale-row"));
-            let visibleCount = 0;
-            rows.forEach((row) => {
-                const haystack = normalize(row.dataset.search);
-                const matches = !query || haystack.includes(query);
-                const shouldShow = enabled ? matches : (!hasFilters ? matches : false);
-                row.style.display = shouldShow ? "" : "none";
-                if (shouldShow) visibleCount += 1;
-            });
-            const emptyRow = table.querySelector("tbody tr.empty-row");
-            if (emptyRow) {
-                emptyRow.style.display = visibleCount === 0 ? "" : "none";
-            }
-            const heading = table.previousElementSibling;
-            if (heading && heading.tagName === "H4") {
-                heading.style.display = (enabled || !hasFilters) ? "" : "none";
-            }
-            table.style.display = (enabled || !hasFilters) ? "" : "none";
+        const buildParams = (page) => {
+            const params = new URLSearchParams();
+            if (queryInput?.value) params.set("q", queryInput.value);
+            if (whComun?.checked) params.set("wh_comun", "1");
+            if (whMl?.checked) params.set("wh_ml", "1");
+            if (page) params.set("page", String(page));
+            params.set("ajax", "1");
+            return params;
         };
 
-        const applyFilter = () => {
-            const query = normalize(queryInput ? queryInput.value : "");
-            const showComun = whComun ? whComun.checked : false;
-            const showMl = whMl ? whMl.checked : false;
-            const hasFilters = showComun || showMl;
-            filterTable(comunTable, showComun, hasFilters, query);
-            filterTable(mlTable, showMl, hasFilters, query);
+        const updateUrl = (page) => {
+            const params = new URLSearchParams();
+            if (queryInput?.value) params.set("q", queryInput.value);
+            if (whComun?.checked) params.set("wh_comun", "1");
+            if (whMl?.checked) params.set("wh_ml", "1");
+            if (page) params.set("page", String(page));
+            const qs = params.toString();
+            const url = qs ? `${location.pathname}?${qs}#history` : `${location.pathname}#history`;
+            history.replaceState(null, "", url);
+        };
+
+        const fetchHistory = (page) => {
+            if (!historyEl) return;
+            const params = buildParams(page);
+            fetch(`${location.pathname}?${params.toString()}`, { headers: { "X-Requested-With": "XMLHttpRequest" } })
+                .then((resp) => resp.json())
+                .then((data) => {
+                    if (!data?.html) return;
+                    historyEl.innerHTML = data.html;
+                    updateUrl(page || 1);
+                    initBulkSelect();
+                })
+                .catch(() => {});
         };
 
         if (form) {
             form.addEventListener("submit", (event) => event.preventDefault());
         }
         if (queryInput) {
-            queryInput.addEventListener("input", applyFilter);
+            queryInput.addEventListener("input", () => {
+                if (debounceId) clearTimeout(debounceId);
+                debounceId = setTimeout(() => fetchHistory(1), 250);
+            });
         }
         [whComun, whMl].forEach((checkbox) => {
-            if (checkbox) checkbox.addEventListener("change", applyFilter);
+            if (checkbox) checkbox.addEventListener("change", () => fetchHistory(1));
         });
-        applyFilter();
+        historyEl?.addEventListener("click", (event) => {
+            const target = event.target;
+            if (!(target instanceof HTMLAnchorElement)) return;
+            if (!target.classList.contains("history-page-link")) return;
+            event.preventDefault();
+            const url = new URL(target.href);
+            const page = url.searchParams.get("page") || "1";
+            fetchHistory(page);
+        });
     })();
 
     (function() {
@@ -386,11 +319,12 @@
         });
     })();
 
-    (function() {
+    function initBulkSelect() {
         const selectAllBtn = document.getElementById("bulk-select-all");
         const startInput = document.getElementById("bulk-select-start");
         const endInput = document.getElementById("bulk-select-end");
-        if (!selectAllBtn) return;
+        if (!selectAllBtn || selectAllBtn.dataset.bound === "1") return;
+        selectAllBtn.dataset.bound = "1";
 
         const toDate = (value) => {
             if (!value) return null;
@@ -415,6 +349,7 @@
                 checkbox.checked = true;
             });
         });
-    })();
+    }
+    initBulkSelect();
 </script>
 {% endblock %}

@@ -1,0 +1,106 @@
+{% load latam_numbers %}
+{% with show_comun=include_comun or not include_ml and not include_comun %}
+{% with show_ml=include_ml or not include_ml and not include_comun %}
+{% if show_comun %}
+<h4 style="margin:10px 0 6px;">Depósito Común</h4>
+<table>
+    <thead>
+        <tr>
+            <th>Comprobante</th>
+            <th>Fecha</th>
+            <th>Cliente</th>
+            <th>Depósito</th>
+            <th>Total</th>
+            <th>Comisión ML</th>
+            <th>Impuestos ML</th>
+            <th>Margen</th>
+            <th>Acciones</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for sale in sales_comun %}
+        <tr data-created="{{ sale.created_at|date:'c' }}">
+            <td>{{ sale.ml_order_id|default:sale.invoice_number }}</td>
+            <td>{{ sale.created_at|date:"d/m/Y H:i" }}</td>
+            <td>{{ sale.customer|default:"Consumidor final" }}</td>
+            <td>{{ sale.warehouse.name }}</td>
+            <td>${{ sale.total|latam_number:2 }}</td>
+            <td>${{ sale.ml_commission_total|latam_number:2 }}</td>
+            <td>${{ sale.ml_tax_total|latam_number:2 }}</td>
+            <td>${{ sale.margin_total|latam_number:2 }}</td>
+            <td>
+                <a class="pill" href="{% url 'inventory_sale_receipt' sale.id %}" style="font-size:12px; padding:4px 8px;">Ver</a>
+                <a class="pill" href="{% url 'inventory_sale_receipt_pdf' sale.id %}" style="font-size:12px; padding:4px 8px;">PDF</a>
+                <a class="pill" href="{% url 'inventory_sale_edit' sale.id %}" style="font-size:12px; padding:4px 8px;">Editar</a>
+                <input type="checkbox" name="sale_ids" value="{{ sale.id }}" style="margin-left:8px;">
+            </td>
+        </tr>
+        {% empty %}
+        <tr class="empty-row"><td colspan="9">No hay ventas en Depósito Común.</td></tr>
+        {% endfor %}
+        {% if sales_comun %}
+        <tr class="empty-row" style="display:none;"><td colspan="9">No hay ventas en Depósito Común.</td></tr>
+        {% endif %}
+    </tbody>
+</table>
+{% endif %}
+
+{% if show_ml %}
+<h4 style="margin:16px 0 6px;">MercadoLibre</h4>
+<table>
+    <thead>
+        <tr>
+            <th>Comprobante</th>
+            <th>Fecha</th>
+            <th>Cliente</th>
+            <th>Depósito</th>
+            <th>Total</th>
+            <th>Comisión ML</th>
+            <th>Impuestos ML</th>
+            <th>Margen</th>
+            <th>Acciones</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for sale in sales_ml %}
+        <tr data-created="{{ sale.created_at|date:'c' }}">
+            <td>{{ sale.ml_order_id|default:sale.invoice_number }}</td>
+            <td>{{ sale.created_at|date:"d/m/Y H:i" }}</td>
+            <td>{{ sale.customer|default:"Consumidor final" }}</td>
+            <td>{{ sale.warehouse.name }}</td>
+            <td>${{ sale.total|latam_number:2 }}</td>
+            <td>${{ sale.ml_commission_total|latam_number:2 }}</td>
+            <td>${{ sale.ml_tax_total|latam_number:2 }}</td>
+            <td>${{ sale.margin_total|latam_number:2 }}</td>
+            <td>
+                <a class="pill" href="{% url 'inventory_sale_receipt' sale.id %}" style="font-size:12px; padding:4px 8px;">Ver</a>
+                <a class="pill" href="{% url 'inventory_sale_receipt_pdf' sale.id %}" style="font-size:12px; padding:4px 8px;">PDF</a>
+                <a class="pill" href="{% url 'inventory_sale_edit' sale.id %}" style="font-size:12px; padding:4px 8px;">Editar</a>
+                <input type="checkbox" name="sale_ids" value="{{ sale.id }}" style="margin-left:8px;">
+            </td>
+        </tr>
+        {% empty %}
+        <tr class="empty-row"><td colspan="9">No hay ventas de MercadoLibre.</td></tr>
+        {% endfor %}
+        {% if sales_ml %}
+        <tr class="empty-row" style="display:none;"><td colspan="9">No hay ventas de MercadoLibre.</td></tr>
+        {% endif %}
+    </tbody>
+</table>
+{% endif %}
+
+{% if page_obj and page_obj.paginator.num_pages > 1 %}
+<div style="margin-top:12px; display:flex; gap:8px; align-items:center; justify-content:flex-end;">
+    {% if page_obj.has_previous %}
+    <a class="pill history-page-link" href="?q={{ search_query|urlencode }}{% if include_comun %}&wh_comun=1{% endif %}{% if include_ml %}&wh_ml=1{% endif %}&page={{ page_obj.previous_page_number }}#history">Anterior</a>
+    {% endif %}
+    <span style="font-size:12px; color:var(--muted);">
+        Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}
+    </span>
+    {% if page_obj.has_next %}
+    <a class="pill history-page-link" href="?q={{ search_query|urlencode }}{% if include_comun %}&wh_comun=1{% endif %}{% if include_ml %}&wh_ml=1{% endif %}&page={{ page_obj.next_page_number }}#history">Siguiente</a>
+    {% endif %}
+</div>
+{% endif %}
+{% endwith %}
+{% endwith %}

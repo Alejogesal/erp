@@ -1236,7 +1236,10 @@ def sales_list(request):
         sales = sales.filter(warehouse__type=Warehouse.WarehouseType.COMUN)
     elif include_ml and not include_comun:
         sales = sales.filter(warehouse__type=Warehouse.WarehouseType.MERCADOLIBRE)
-    sales_list = list(sales)
+    page_number = request.GET.get("page")
+    paginator = Paginator(sales, 50)
+    page_obj = paginator.get_page(page_number)
+    sales_list = list(page_obj.object_list)
     for sale in sales_list:
         cost_total = Decimal("0.00")
         for item in sale.items.all():
@@ -1259,6 +1262,22 @@ def sales_list(request):
             sale.margin_total = (sale.total or Decimal("0.00")) - cost_total
     sales_comun = [sale for sale in sales_list if sale.warehouse.type == Warehouse.WarehouseType.COMUN]
     sales_ml = [sale for sale in sales_list if sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE]
+    if request.GET.get("ajax") == "1":
+        from django.template.loader import render_to_string
+
+        html = render_to_string(
+            "inventory/_sales_history.html",
+            {
+                "sales_comun": sales_comun,
+                "sales_ml": sales_ml,
+                "page_obj": page_obj,
+                "search_query": search_query,
+                "include_comun": include_comun,
+                "include_ml": include_ml,
+            },
+            request=request,
+        )
+        return JsonResponse({"html": html})
     return render(
         request,
         "inventory/sales_list.html",
@@ -1266,6 +1285,7 @@ def sales_list(request):
             "sales": sales_list,
             "sales_comun": sales_comun,
             "sales_ml": sales_ml,
+            "page_obj": page_obj,
             "search_query": search_query,
             "include_comun": include_comun,
             "include_ml": include_ml,
