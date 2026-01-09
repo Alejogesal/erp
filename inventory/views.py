@@ -1256,7 +1256,7 @@ def sales_list(request):
     elif include_ml and not include_comun:
         sales = sales.filter(warehouse__type=Warehouse.WarehouseType.MERCADOLIBRE)
     page_number = request.GET.get("page")
-    paginator = Paginator(sales, 50)
+    paginator = Paginator(sales, 25)
     page_obj = paginator.get_page(page_number)
     sales_list = list(page_obj.object_list)
     for sale in sales_list:
@@ -1582,7 +1582,6 @@ def purchases_list(request):
 
     purchases = (
         Purchase.objects.select_related("supplier", "warehouse", "user")
-        .prefetch_related("items__product")
         .order_by("-created_at", "-id")
     )
     paginator = Paginator(purchases, 25)
