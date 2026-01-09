@@ -1262,6 +1262,8 @@ def sales_list(request):
             sale.margin_total = (sale.total or Decimal("0.00")) - cost_total
     sales_comun = [sale for sale in sales_list if sale.warehouse.type == Warehouse.WarehouseType.COMUN]
     sales_ml = [sale for sale in sales_list if sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE]
+    show_comun = include_comun or (not include_ml and not include_comun)
+    show_ml = include_ml or (not include_ml and not include_comun)
     if request.GET.get("ajax") == "1":
         from django.template.loader import render_to_string
 
@@ -1274,6 +1276,8 @@ def sales_list(request):
                 "search_query": search_query,
                 "include_comun": include_comun,
                 "include_ml": include_ml,
+                "show_comun": show_comun,
+                "show_ml": show_ml,
             },
             request=request,
         )
@@ -1289,6 +1293,8 @@ def sales_list(request):
             "search_query": search_query,
             "include_comun": include_comun,
             "include_ml": include_ml,
+            "show_comun": show_comun,
+            "show_ml": show_ml,
             "sales_sheet_url": os.environ.get("GOOGLE_SHEETS_SALES_URL", ""),
             "customers": customers,
             "form": header_form,

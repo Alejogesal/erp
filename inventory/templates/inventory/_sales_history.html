@@ -1,6 +1,4 @@
 {% load latam_numbers %}
-{% with show_comun=include_comun or not include_ml and not include_comun %}
-{% with show_ml=include_ml or not include_ml and not include_comun %}
 {% if show_comun %}
 <h4 style="margin:10px 0 6px;">Depósito Común</h4>
 <table>
@@ -102,5 +100,3 @@
     {% endif %}
 </div>
 {% endif %}
-{% endwith %}
-{% endwith %}
