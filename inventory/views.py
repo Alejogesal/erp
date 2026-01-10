@@ -723,6 +723,7 @@ def sales_list(request):
     search_query = (request.GET.get("q") or "").strip()
     include_comun = request.GET.get("wh_comun") == "1"
     include_ml = request.GET.get("wh_ml") == "1"
+    show_history = request.GET.get("show_history") == "1"
     customers = Customer.objects.order_by("name")
     action = request.POST.get("action") if request.method == "POST" else ""
     if action == "import_ml_sales_xlsx":
@@ -1240,49 +1241,55 @@ def sales_list(request):
     else:
         header_form = SaleHeaderForm(initial={"sale_date": timezone.localdate()})
         formset = SaleItemFormSet()
-    sales = (
-        Sale.objects.select_related("customer", "warehouse", "user")
-        .prefetch_related("items__product")
-        .order_by("-created_at", "-id")
-    )
-    if search_query:
-        sales = sales.filter(
-            Q(customer__name__icontains=search_query)
-            | Q(items__product__name__icontains=search_query)
-            | Q(items__product__sku__icontains=search_query)
-        ).distinct()
-    if include_comun and not include_ml:
-        sales = sales.filter(warehouse__type=Warehouse.WarehouseType.COMUN)
-    elif include_ml and not include_comun:
-        sales = sales.filter(warehouse__type=Warehouse.WarehouseType.MERCADOLIBRE)
-    page_number = request.GET.get("page")
-    paginator = Paginator(sales, 25)
-    page_obj = paginator.get_page(page_number)
-    sales_list = list(page_obj.object_list)
-    for sale in sales_list:
-        cost_total = Decimal("0.00")
-        for item in sale.items.all():
-            cost_unit = item.cost_unit
-            if cost_unit is None or cost_unit <= 0:
-                cost_unit = item.product.cost_with_vat()
-            cost_total += item.quantity * cost_unit
-        commission_total = sale.ml_commission_total or Decimal("0.00")
-        tax_total = sale.ml_tax_total or Decimal("0.00")
-        is_ml_sale = (
-            sale.ml_order_id
-            or sale.reference.startswith("ML ORDER")
-            or sale.reference.startswith("GS ORDER")
-            or sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE
+    if show_history:
+        sales = (
+            Sale.objects.select_related("customer", "warehouse", "user")
+            .prefetch_related("items__product")
+            .order_by("-created_at", "-id")
         )
-        if is_ml_sale:
-            net_total = (sale.total or Decimal("0.00")) - commission_total - tax_total
-            sale.margin_total = net_total - cost_total
-        else:
-            sale.margin_total = (sale.total or Decimal("0.00")) - cost_total
-    sales_comun = [sale for sale in sales_list if sale.warehouse.type == Warehouse.WarehouseType.COMUN]
-    sales_ml = [sale for sale in sales_list if sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE]
-    show_comun = include_comun or (not include_ml and not include_comun)
-    show_ml = include_ml or (not include_ml and not include_comun)
+        if search_query:
+            sales = sales.filter(
+                Q(customer__name__icontains=search_query)
+                | Q(items__product__name__icontains=search_query)
+                | Q(items__product__sku__icontains=search_query)
+            ).distinct()
+        if include_comun and not include_ml:
+            sales = sales.filter(warehouse__type=Warehouse.WarehouseType.COMUN)
+        elif include_ml and not include_comun:
+            sales = sales.filter(warehouse__type=Warehouse.WarehouseType.MERCADOLIBRE)
+        page_number = request.GET.get("page")
+        paginator = Paginator(sales, 25)
+        page_obj = paginator.get_page(page_number)
+        sales_list = list(page_obj.object_list)
+        for sale in sales_list:
+            cost_total = Decimal("0.00")
+            for item in sale.items.all():
+                cost_unit = item.cost_unit
+                if cost_unit is None or cost_unit <= 0:
+                    cost_unit = item.product.cost_with_vat()
+                cost_total += item.quantity * cost_unit
+            commission_total = sale.ml_commission_total or Decimal("0.00")
+            tax_total = sale.ml_tax_total or Decimal("0.00")
+            is_ml_sale = (
+                sale.ml_order_id
+                or sale.reference.startswith("ML ORDER")
+                or sale.reference.startswith("GS ORDER")
+                or sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE
+            )
+            if is_ml_sale:
+                net_total = (sale.total or Decimal("0.00")) - commission_total - tax_total
+                sale.margin_total = net_total - cost_total
+            else:
+                sale.margin_total = (sale.total or Decimal("0.00")) - cost_total
+        sales_comun = [sale for sale in sales_list if sale.warehouse.type == Warehouse.WarehouseType.COMUN]
+        sales_ml = [sale for sale in sales_list if sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE]
+    else:
+        sales_list = []
+        sales_comun = []
+        sales_ml = []
+        page_obj = None
+    show_comun = show_history and (include_comun or (not include_ml and not include_comun))
+    show_ml = show_history and (include_ml or (not include_ml and not include_comun))
     if request.GET.get("ajax") == "1":
         from django.template.loader import render_to_string
 
@@ -1295,6 +1302,7 @@ def sales_list(request):
                 "search_query": search_query,
                 "include_comun": include_comun,
                 "include_ml": include_ml,
+                "show_history": show_history,
                 "show_comun": show_comun,
                 "show_ml": show_ml,
             },
@@ -1312,6 +1320,7 @@ def sales_list(request):
             "search_query": search_query,
             "include_comun": include_comun,
             "include_ml": include_ml,
+            "show_history": show_history,
             "show_comun": show_comun,
             "show_ml": show_ml,
             "sales_sheet_url": os.environ.get("GOOGLE_SHEETS_SALES_URL", ""),
@@ -1354,6 +1363,7 @@ def sale_delete(request, sale_id: int):
 @login_required
 def purchases_list(request):
     PurchaseItemFormSet = formset_factory(PurchaseItemForm, extra=1, can_delete=True)
+    show_history = request.GET.get("show_history") == "1"
     if request.method == "POST":
         header_form = PurchaseHeaderForm(request.POST)
         formset = PurchaseItemFormSet(request.POST)
@@ -1580,21 +1590,27 @@ def purchases_list(request):
         header_form = PurchaseHeaderForm()
         formset = PurchaseItemFormSet()
 
-    purchases = (
-        Purchase.objects.select_related("supplier", "warehouse", "user")
-        .order_by("-created_at", "-id")
-    )
-    paginator = Paginator(purchases, 25)
-    page_number = request.GET.get("page")
-    page_obj = paginator.get_page(page_number)
+    if show_history:
+        purchases = (
+            Purchase.objects.select_related("supplier", "warehouse", "user")
+            .order_by("-created_at", "-id")
+        )
+        paginator = Paginator(purchases, 25)
+        page_number = request.GET.get("page")
+        page_obj = paginator.get_page(page_number)
+        purchase_list = page_obj.object_list
+    else:
+        page_obj = None
+        purchase_list = []
     return render(
         request,
         "inventory/purchases_list.html",
         {
-            "purchases": page_obj.object_list,
+            "purchases": purchase_list,
             "page_obj": page_obj,
             "form": header_form,
             "formset": formset,
+            "show_history": show_history,
         },
     )
 

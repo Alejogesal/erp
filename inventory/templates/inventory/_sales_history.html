@@ -1,5 +1,9 @@
 {% load latam_numbers %}
-{% if show_comun %}
+{% if not show_history %}
+<p class="subtitle">Historial oculto. Tocá "Cargar historial".</p>
+{% endif %}
+
+{% if show_history and show_comun %}
 <h4 style="margin:10px 0 6px;">Depósito Común</h4>
 <table>
     <thead>
@@ -43,7 +47,7 @@
 </table>
 {% endif %}
 
-{% if show_ml %}
+{% if show_history and show_ml %}
 <h4 style="margin:16px 0 6px;">MercadoLibre</h4>
 <table>
     <thead>
@@ -87,7 +91,7 @@
 </table>
 {% endif %}
 
-{% if page_obj and page_obj.paginator.num_pages > 1 %}
+{% if show_history and page_obj and page_obj.paginator.num_pages > 1 %}
 <div style="margin-top:12px; display:flex; gap:8px; align-items:center; justify-content:flex-end;">
     {% if page_obj.has_previous %}
     <a class="pill history-page-link" href="?q={{ search_query|urlencode }}{% if include_comun %}&wh_comun=1{% endif %}{% if include_ml %}&wh_ml=1{% endif %}&page={{ page_obj.previous_page_number }}#history">Anterior</a>

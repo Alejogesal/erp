@@ -63,6 +63,11 @@
             <label>Hasta <input id="bulk-select-end" type="date" style="margin-left:6px;"></label>
         </div>
     </div>
+    <div style="display:flex; justify-content:flex-end; margin:6px 0 0;">
+        <button type="button" id="history-load" class="pill" style="font-size:12px; padding:4px 8px; {% if show_history %}display:none;{% endif %}">
+            Cargar historial
+        </button>
+    </div>
     <form method="get" id="history-filter" style="margin:10px 0 12px;">
         <div class="cards" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
             <div>
@@ -90,7 +95,7 @@
                 <button type="submit" class="pill" onclick="return confirm('¿Eliminar ventas seleccionadas?');" style="font-size:12px; padding:4px 8px;">Eliminar seleccionadas</button>
             </div>
         </div>
-        <div id="sales-history">
+        <div id="sales-history" data-loaded="{% if show_history %}1{% else %}0{% endif %}">
             {% include "inventory/_sales_history.html" %}
         </div>
     </form>
@@ -103,6 +108,8 @@
         const historyEl = document.getElementById("sales-history");
         const whComun = form ? form.querySelector("input[name='wh_comun']") : null;
         const whMl = form ? form.querySelector("input[name='wh_ml']") : null;
+        const loadBtn = document.getElementById("history-load");
+        let historyEnabled = historyEl?.dataset.loaded === "1";
         let debounceId = null;
 
         const buildParams = (page) => {
@@ -111,6 +118,7 @@
             if (whComun?.checked) params.set("wh_comun", "1");
             if (whMl?.checked) params.set("wh_ml", "1");
             if (page) params.set("page", String(page));
+            if (historyEnabled) params.set("show_history", "1");
             params.set("ajax", "1");
             return params;
         };
@@ -121,6 +129,7 @@
             if (whComun?.checked) params.set("wh_comun", "1");
             if (whMl?.checked) params.set("wh_ml", "1");
             if (page) params.set("page", String(page));
+            if (historyEnabled) params.set("show_history", "1");
             const qs = params.toString();
             const url = qs ? `${location.pathname}?${qs}#history` : `${location.pathname}#history`;
             history.replaceState(null, "", url);
@@ -145,21 +154,30 @@
         }
         if (queryInput) {
             queryInput.addEventListener("input", () => {
+                if (!historyEnabled) return;
                 if (debounceId) clearTimeout(debounceId);
                 debounceId = setTimeout(() => fetchHistory(1), 250);
             });
         }
         [whComun, whMl].forEach((checkbox) => {
-            if (checkbox) checkbox.addEventListener("change", () => fetchHistory(1));
+            if (checkbox) checkbox.addEventListener("change", () => {
+                if (!historyEnabled) return;
+                fetchHistory(1);
+            });
         });
         historyEl?.addEventListener("click", (event) => {
             const target = event.target;
             if (!(target instanceof HTMLAnchorElement)) return;
             if (!target.classList.contains("history-page-link")) return;
+            if (!historyEnabled) return;
             event.preventDefault();
             const url = new URL(target.href);
             const page = url.searchParams.get("page") || "1";
             fetchHistory(page);
+        });
+        loadBtn?.addEventListener("click", () => {
+            historyEnabled = true;
+            fetchHistory(1);
         });
     })();
 

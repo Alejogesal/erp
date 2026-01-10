@@ -73,7 +73,13 @@
 </div>
 
 <div class="card table-card">
-    <div class="card-title">Historial de compras</div>
+    <div class="card-title" style="display:flex; align-items:center; justify-content:space-between;">
+        <span>Historial de compras</span>
+        {% if not show_history %}
+        <a class="pill" href="?show_history=1" style="font-size:12px; padding:4px 8px;">Cargar historial</a>
+        {% endif %}
+    </div>
+    {% if show_history %}
     <table>
         <thead>
             <tr>
@@ -110,15 +116,18 @@
     {% if page_obj and page_obj.paginator.num_pages > 1 %}
     <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px;">
         {% if page_obj.has_previous %}
-        <a class="pill" href="?page={{ page_obj.previous_page_number }}">Anterior</a>
+        <a class="pill" href="?show_history=1&page={{ page_obj.previous_page_number }}">Anterior</a>
         {% endif %}
         <span style="align-self:center; color:var(--muted); font-size:12px;">
             Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}
         </span>
         {% if page_obj.has_next %}
-        <a class="pill" href="?page={{ page_obj.next_page_number }}">Siguiente</a>
+        <a class="pill" href="?show_history=1&page={{ page_obj.next_page_number }}">Siguiente</a>
         {% endif %}
     </div>
+    {% endif %}
+    {% else %}
+    <p class="subtitle" style="margin-top:8px;">Historial oculto. Tocá "Cargar historial".</p>
     {% endif %}
 </div>
 
