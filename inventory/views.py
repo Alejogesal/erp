@@ -2267,7 +2267,15 @@ def _koda_allowed(user) -> bool:
     if not user or not user.is_authenticated:
         return False
     full_name = (user.get_full_name() or "").strip().lower()
-    return full_name == "alejo salmeron"
+    username = (getattr(user, "username", "") or "").strip().lower()
+    email = (getattr(user, "email", "") or "").strip().lower()
+    if full_name == "alejo salmeron":
+        return True
+    if username in {"alejo", "alejosalmeron", "alejo.salmeron"}:
+        return True
+    if email in {"alejo@stylmoda.site", "alejosalmeron@gmail.com"}:
+        return True
+    return bool(getattr(user, "is_superuser", False))
 
 
 def _koda_system_prompt() -> str:
