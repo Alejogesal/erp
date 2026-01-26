@@ -140,6 +140,8 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
 
 # MercadoLibre integration
 ML_CLIENT_ID = os.environ.get("ML_CLIENT_ID", "")

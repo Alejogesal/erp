@@ -1,5 +1,6 @@
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import os
+import base64
 
 from django import forms
 from django.conf import settings
@@ -14,7 +15,7 @@ from django.db.models.functions import Coalesce
 from django.forms import formset_factory
 from django.core.paginator import Paginator
 from django.http import HttpResponse, JsonResponse
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 import csv
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
@@ -28,6 +29,7 @@ import unicodedata
 import json
 import secrets
 from xml.sax.saxutils import escape
+from django.core.files.base import ContentFile
 
 from . import services
 from . import mercadolibre as ml
@@ -2259,6 +2261,458 @@ def product_variants(request, product_id: int):
             "add_form": add_form,
         },
     )
+
+
+def _koda_allowed(user) -> bool:
+    if not user or not user.is_authenticated:
+        return False
+    full_name = (user.get_full_name() or "").strip().lower()
+    return full_name == "alejo salmeron"
+
+
+def _koda_system_prompt() -> str:
+    return (
+        "Sos Koda, el asistente del ERP. Respondé SOLO en JSON válido con las claves: "
+        "reply (string), actions (array), needs_confirmation (boolean). "
+        "Cada acción debe ser un objeto con {type, data}. "
+        "Si falta información, hacé una pregunta y dejá actions vacío y needs_confirmation=false. "
+        "Acciones permitidas:\n"
+        "- create_product: {name, sku?, group?, avg_cost?, vat_percent?, price_consumer?, price_barber?, price_distributor?}\n"
+        "- add_stock_comun: {items:[{product, quantity, unit_cost?, variant?}]}\n"
+        "- transfer_to_ml: {items:[{product, quantity, variant?}]}\n"
+        "- register_sale: {warehouse, audience?, customer?, items:[{product, quantity, unit_price?, vat_percent?}]}\n"
+        "- register_purchase: {warehouse?, supplier, reference?, items:[{product, quantity, unit_cost, vat_percent?}], has_invoice_image?}\n"
+        "Usá identificadores de producto por SKU si es posible, sino por nombre exacto. "
+        "Si el producto tiene variedades, pedí o incluí la variedad."
+    )
+
+
+def _koda_call_openai(messages, image_data_url: str | None = None) -> dict:
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        return {"reply": "Falta configurar OPENAI_API_KEY.", "actions": [], "needs_confirmation": False}
+
+    user_content = [{"type": "text", "text": messages[-1]["content"]}]
+    if image_data_url:
+        user_content.append({"type": "image_url", "image_url": {"url": image_data_url}})
+
+    payload_messages = [{"role": "system", "content": _koda_system_prompt()}]
+    payload_messages.extend(messages[:-1])
+    payload_messages.append({"role": "user", "content": user_content})
+
+    payload = {
+        "model": "gpt-4.1-mini",
+        "temperature": 0.2,
+        "messages": payload_messages,
+    }
+    request = Request(
+        "https://api.openai.com/v1/chat/completions",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=30) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        content = data["choices"][0]["message"]["content"]
+    except Exception as exc:
+        return {"reply": f"No pude contactar a OpenAI: {exc}", "actions": [], "needs_confirmation": False}
+
+    try:
+        parsed = json.loads(content)
+        return {
+            "reply": parsed.get("reply", ""),
+            "actions": parsed.get("actions", []) or [],
+            "needs_confirmation": bool(parsed.get("needs_confirmation")),
+        }
+    except Exception:
+        return {"reply": content, "actions": [], "needs_confirmation": False}
+
+
+def _koda_actions_summary(actions: list[dict]) -> str:
+    summaries = []
+    for action in actions:
+        action_type = action.get("type")
+        data = action.get("data", {})
+        if action_type == "create_product":
+            summaries.append(f"Crear producto: {data.get('sku') or 'Sin SKU'} - {data.get('name')}")
+        elif action_type == "add_stock_comun":
+            items = data.get("items") or []
+            summaries.append(f"Agregar stock Común: {len(items)} ítems")
+        elif action_type == "transfer_to_ml":
+            items = data.get("items") or []
+            summaries.append(f"Transferir a MercadoLibre: {len(items)} ítems")
+        elif action_type == "register_sale":
+            items = data.get("items") or []
+            summaries.append(f"Registrar venta: {len(items)} ítems")
+        elif action_type == "register_purchase":
+            items = data.get("items") or []
+            summaries.append(f"Registrar compra: {len(items)} ítems")
+        else:
+            summaries.append(f"Acción: {action_type}")
+    return " | ".join(summaries)
+
+
+def _koda_resolve_product(identifier: str) -> Product | None:
+    if not identifier:
+        return None
+    product = Product.objects.filter(sku__iexact=identifier.strip()).first()
+    if product:
+        return product
+    return Product.objects.filter(name__iexact=identifier.strip()).first()
+
+
+def _koda_resolve_variant(product: Product, variant_name: str | None) -> ProductVariant | None:
+    if not variant_name:
+        return None
+    return ProductVariant.objects.filter(product=product, name__iexact=variant_name.strip()).first()
+
+
+def _koda_sync_common_with_variants(product: Product, comun_wh: Warehouse):
+    total = (
+        ProductVariant.objects.filter(product=product)
+        .aggregate(total=Sum("quantity"))
+        .get("total")
+    )
+    total = total if total is not None else Decimal("0.00")
+    stock = Stock.objects.select_for_update().get_or_create(
+        product=product,
+        warehouse=comun_wh,
+        defaults={"quantity": total},
+    )[0]
+    stock.quantity = total
+    stock.save(update_fields=["quantity"])
+
+
+def _koda_execute_actions(actions: list[dict], user, invoice_path: str | None) -> list[str]:
+    results = []
+    comun_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
+    ml_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.MERCADOLIBRE).first()
+    for action in actions:
+        action_type = action.get("type")
+        data = action.get("data", {})
+        if action_type == "create_product":
+            name = (data.get("name") or "").strip()
+            if not name:
+                raise ValueError("Falta el nombre del producto.")
+            sku = (data.get("sku") or "").strip()
+            group = (data.get("group") or "").strip()
+            if not sku:
+                prefix = _sku_prefix(group or "", name)
+                existing = Product.objects.filter(sku__startswith=prefix).values_list("sku", flat=True)
+                max_suffix = 0
+                for existing_sku in existing:
+                    suffix = existing_sku[len(prefix):]
+                    if suffix.isdigit():
+                        max_suffix = max(max_suffix, int(suffix))
+                sku = f"{prefix}{max_suffix + 1:04d}"
+            product = Product.objects.create(
+                sku=sku,
+                name=name,
+                group=group,
+                avg_cost=Decimal(str(data.get("avg_cost") or "0.00")),
+                vat_percent=Decimal(str(data.get("vat_percent") or "0.00")),
+                price_consumer=Decimal(str(data.get("price_consumer") or "0.00")),
+                price_barber=Decimal(str(data.get("price_barber") or "0.00")),
+                price_distributor=Decimal(str(data.get("price_distributor") or "0.00")),
+            )
+            results.append(f"Producto creado: {product.sku} - {product.name}")
+        elif action_type == "add_stock_comun":
+            if not comun_wh:
+                raise ValueError("No está configurado el depósito Común.")
+            items = data.get("items") or []
+            if not items:
+                raise ValueError("No hay ítems para agregar stock.")
+            with transaction.atomic():
+                for item in items:
+                    product = _koda_resolve_product(item.get("product", ""))
+                    if not product:
+                        raise ValueError("Producto no encontrado.")
+                    quantity = Decimal(str(item.get("quantity") or "0"))
+                    if quantity <= 0:
+                        raise ValueError("Cantidad inválida.")
+                    variant = _koda_resolve_variant(product, item.get("variant"))
+                    if not variant and ProductVariant.objects.filter(product=product).exists():
+                        raise ValueError(f"El producto {product.sku} requiere variedad.")
+                    unit_cost = item.get("unit_cost")
+                    services.register_adjustment(
+                        product=product,
+                        warehouse=comun_wh,
+                        quantity=quantity,
+                        user=user,
+                        unit_cost=Decimal(str(unit_cost)) if unit_cost is not None else None,
+                        reference="Koda: ajuste de stock Común",
+                    )
+                    if variant:
+                        variant.quantity = (variant.quantity + quantity).quantize(Decimal("0.01"))
+                        variant.save(update_fields=["quantity"])
+                        _koda_sync_common_with_variants(product, comun_wh)
+            results.append(f"Stock Común actualizado: {len(items)} ítems.")
+        elif action_type == "transfer_to_ml":
+            if not comun_wh or not ml_wh:
+                raise ValueError("Faltan depósitos configurados para transferencias.")
+            items = data.get("items") or []
+            if not items:
+                raise ValueError("No hay ítems para transferir.")
+            with transaction.atomic():
+                for item in items:
+                    product = _koda_resolve_product(item.get("product", ""))
+                    if not product:
+                        raise ValueError("Producto no encontrado.")
+                    quantity = Decimal(str(item.get("quantity") or "0"))
+                    if quantity <= 0:
+                        raise ValueError("Cantidad inválida.")
+                    variant = _koda_resolve_variant(product, item.get("variant"))
+                    if not variant and ProductVariant.objects.filter(product=product).exists():
+                        raise ValueError(f"El producto {product.sku} requiere variedad.")
+                    if variant:
+                        _koda_sync_common_with_variants(product, comun_wh)
+                        if variant.quantity - quantity < 0:
+                            raise services.NegativeStockError("Stock insuficiente en variedad.")
+                        variant.quantity = (variant.quantity - quantity).quantize(Decimal("0.01"))
+                        variant.save(update_fields=["quantity"])
+                        _koda_sync_common_with_variants(product, comun_wh)
+                    services.register_transfer(
+                        product=product,
+                        from_warehouse=comun_wh,
+                        to_warehouse=ml_wh,
+                        quantity=quantity,
+                        user=user,
+                        reference="Koda: transferencia Común -> MercadoLibre",
+                    )
+            results.append(f"Transferencias a ML: {len(items)} ítems.")
+        elif action_type == "register_sale":
+            warehouse_label = (data.get("warehouse") or "COMUN").upper()
+            warehouse = Warehouse.objects.filter(type=warehouse_label).first()
+            if not warehouse:
+                raise ValueError("Depósito no encontrado.")
+            customer = None
+            if data.get("customer"):
+                customer = Customer.objects.filter(name__iexact=data.get("customer")).first()
+            audience = data.get("audience") or Customer.Audience.CONSUMER
+            items = data.get("items") or []
+            if not items:
+                raise ValueError("No hay ítems para la venta.")
+            with transaction.atomic():
+                sale = Sale.objects.create(
+                    customer=customer,
+                    warehouse=warehouse,
+                    audience=audience,
+                    total=Decimal("0.00"),
+                    discount_total=Decimal("0.00"),
+                    reference="Koda: venta",
+                    user=user,
+                )
+                total = Decimal("0.00")
+                for item in items:
+                    product = _koda_resolve_product(item.get("product", ""))
+                    if not product:
+                        raise ValueError("Producto no encontrado.")
+                    quantity = Decimal(str(item.get("quantity") or "0"))
+                    if quantity <= 0:
+                        raise ValueError("Cantidad inválida.")
+                    unit_price = item.get("unit_price")
+                    if unit_price is None:
+                        if audience == Customer.Audience.BARBER:
+                            unit_price = product.barber_price
+                        elif audience == Customer.Audience.DISTRIBUTOR:
+                            unit_price = product.distributor_price
+                        else:
+                            unit_price = product.consumer_price
+                    unit_price = Decimal(str(unit_price))
+                    line_total = (unit_price * quantity).quantize(Decimal("0.01"))
+                    SaleItem.objects.create(
+                        sale=sale,
+                        product=product,
+                        quantity=quantity,
+                        unit_price=unit_price,
+                        cost_unit=product.cost_with_vat(),
+                        discount_percent=Decimal("0.00"),
+                        final_unit_price=unit_price,
+                        line_total=line_total,
+                        vat_percent=Decimal(str(item.get("vat_percent") or "0.00")),
+                    )
+                    total += line_total
+                    if warehouse.type != Warehouse.WarehouseType.MERCADOLIBRE:
+                        services.register_exit(
+                            product=product,
+                            warehouse=warehouse,
+                            quantity=quantity,
+                            user=user,
+                            reference=f"Koda: venta #{sale.id}",
+                            sale_price=unit_price,
+                            vat_percent=Decimal(str(item.get("vat_percent") or "0.00")),
+                            sale=sale,
+                        )
+                sale.total = total
+                sale.save(update_fields=["total"])
+            results.append(f"Venta registrada #{sale.id}.")
+        elif action_type == "register_purchase":
+            warehouse_label = (data.get("warehouse") or "COMUN").upper()
+            warehouse = Warehouse.objects.filter(type=warehouse_label).first()
+            if not warehouse:
+                raise ValueError("Depósito no encontrado.")
+            supplier_name = (data.get("supplier") or "").strip()
+            if not supplier_name:
+                raise ValueError("Falta proveedor.")
+            supplier = Supplier.objects.filter(name__iexact=supplier_name).first()
+            if not supplier:
+                supplier = Supplier.objects.create(name=supplier_name)
+            items = data.get("items") or []
+            if not items:
+                raise ValueError("No hay ítems para la compra.")
+            with transaction.atomic():
+                purchase = Purchase.objects.create(
+                    supplier=supplier,
+                    warehouse=warehouse,
+                    reference=data.get("reference") or "Koda: compra",
+                    user=user,
+                )
+                total = Decimal("0.00")
+                for item in items:
+                    product = _koda_resolve_product(item.get("product", ""))
+                    if not product:
+                        raise ValueError("Producto no encontrado.")
+                    quantity = Decimal(str(item.get("quantity") or "0"))
+                    if quantity <= 0:
+                        raise ValueError("Cantidad inválida.")
+                    unit_cost_raw = item.get("unit_cost")
+                    if unit_cost_raw is None:
+                        raise ValueError("Falta el costo unitario.")
+                    unit_cost = Decimal(str(unit_cost_raw))
+                    vat_percent = Decimal(str(item.get("vat_percent") or "0.00"))
+                    PurchaseItem.objects.create(
+                        purchase=purchase,
+                        product=product,
+                        quantity=quantity,
+                        unit_cost=unit_cost,
+                        vat_percent=vat_percent,
+                    )
+                    services.register_entry(
+                        product=product,
+                        warehouse=warehouse,
+                        quantity=quantity,
+                        unit_cost=unit_cost,
+                        user=user,
+                        reference=f"Koda: compra #{purchase.id}",
+                    )
+                    total += (quantity * unit_cost).quantize(Decimal("0.01"))
+                purchase.total = total
+                if invoice_path:
+                    with open(invoice_path, "rb") as handle:
+                        purchase.invoice_image.save(
+                            os.path.basename(invoice_path),
+                            ContentFile(handle.read()),
+                            save=False,
+                        )
+                purchase.save()
+            results.append(f"Compra registrada #{purchase.id}.")
+        else:
+            raise ValueError(f"Acción desconocida: {action_type}")
+    return results
+
+
+@login_required
+@require_http_methods(["POST"])
+def koda_chat(request):
+    if not _koda_allowed(request.user):
+        return JsonResponse({"reply": "No tenés permisos para usar Koda.", "actions": []})
+
+    message = ""
+    image_file = None
+    if request.content_type and request.content_type.startswith("multipart/form-data"):
+        message = (request.POST.get("message") or "").strip()
+        image_file = request.FILES.get("image")
+    else:
+        try:
+            payload = json.loads(request.body.decode("utf-8"))
+            message = (payload.get("message") or "").strip()
+        except Exception:
+            message = ""
+
+    if not message and not image_file:
+        return JsonResponse({"reply": "Decime qué necesitás.", "actions": []})
+
+    image_data_url = None
+    pending_image_path = None
+    if image_file:
+        raw = image_file.read()
+        encoded = base64.b64encode(raw).decode("utf-8")
+        image_data_url = f"data:{image_file.content_type};base64,{encoded}"
+        pending_dir = os.path.join(str(settings.MEDIA_ROOT), "koda_pending")
+        os.makedirs(pending_dir, exist_ok=True)
+        filename = f"{secrets.token_hex(8)}_{image_file.name}"
+        pending_image_path = os.path.join(pending_dir, filename)
+        with open(pending_image_path, "wb") as handle:
+            handle.write(raw)
+
+    history = request.session.get("koda_history", [])
+    history = history[-8:]
+    messages = history + [{"role": "user", "content": message}]
+    result = _koda_call_openai(messages, image_data_url=image_data_url)
+
+    actions = result.get("actions") or []
+    needs_confirmation = bool(result.get("needs_confirmation")) and bool(actions)
+    reply = result.get("reply") or ""
+
+    if needs_confirmation:
+        request.session["koda_pending"] = {
+            "actions": actions,
+            "image_path": pending_image_path,
+        }
+    else:
+        if pending_image_path:
+            os.remove(pending_image_path)
+
+    history.append({"role": "user", "content": message})
+    history.append({"role": "assistant", "content": reply})
+    request.session["koda_history"] = history[-10:]
+
+    return JsonResponse(
+        {
+            "reply": reply,
+            "needs_confirmation": needs_confirmation,
+            "summary": _koda_actions_summary(actions) if needs_confirmation else "",
+        }
+    )
+
+
+@login_required
+@require_http_methods(["POST"])
+def koda_confirm(request):
+    if not _koda_allowed(request.user):
+        return JsonResponse({"reply": "No tenés permisos para usar Koda."}, status=403)
+
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+    except Exception:
+        payload = {}
+    decision = payload.get("decision")
+    pending = request.session.get("koda_pending")
+    if not pending:
+        return JsonResponse({"reply": "No hay acciones pendientes."})
+
+    image_path = pending.get("image_path")
+    if decision == "cancel":
+        if image_path and os.path.exists(image_path):
+            os.remove(image_path)
+        request.session.pop("koda_pending", None)
+        return JsonResponse({"reply": "Acción cancelada."})
+
+    try:
+        results = _koda_execute_actions(pending.get("actions") or [], request.user, image_path)
+        reply = "Listo. " + " ".join(results)
+    except Exception as exc:
+        reply = f"No pude ejecutar la acción: {exc}"
+    finally:
+        if image_path and os.path.exists(image_path):
+            os.remove(image_path)
+        request.session.pop("koda_pending", None)
+
+    return JsonResponse({"reply": reply})
 
 
 @login_required
