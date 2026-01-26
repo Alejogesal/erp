@@ -247,6 +247,16 @@
             cursor: pointer;
         }
         .koda-attach:hover { border-color: var(--accent); }
+        .koda-attach-indicator {
+            min-width: 18px;
+            padding: 2px 6px;
+            border-radius: 999px;
+            background: rgba(47, 129, 247, 0.2);
+            border: 1px solid #2a313c;
+            font-size: 11px;
+            color: #fff;
+            display: none;
+        }
         .koda-input-row input[type="file"] { display: none; }
         .koda-confirm {
             display: flex;
@@ -300,6 +310,7 @@
                 <textarea id="koda-input" placeholder="Escribí tu pedido..."></textarea>
                 <input type="file" id="koda-image" accept="image/*,application/pdf">
                 <label class="koda-attach" for="koda-image">+</label>
+                <span class="koda-attach-indicator" id="koda-attach-indicator">Adjunto</span>
             </div>
             <button type="button" id="koda-send">Enviar</button>
             <div id="koda-pending" style="display:none;">
@@ -327,6 +338,7 @@
             const summaryEl = document.getElementById("koda-summary");
             const confirmBtn = document.getElementById("koda-confirm");
             const cancelBtn = document.getElementById("koda-cancel");
+            const attachIndicator = document.getElementById("koda-attach-indicator");
             if (!toggle || !panel) return;
             let pastedFile = null;
 
@@ -363,6 +375,7 @@
                 input.value = "";
                 imageInput.value = "";
                 pastedFile = null;
+                if (attachIndicator) attachIndicator.style.display = "none";
                 pendingWrap.style.display = "none";
 
                 const formData = new FormData();
@@ -409,10 +422,18 @@
                     const dataTransfer = new DataTransfer();
                     dataTransfer.items.add(file);
                     imageInput.files = dataTransfer.files;
+                    if (attachIndicator) attachIndicator.style.display = "inline-flex";
                 }
             };
             if (input) input.addEventListener("paste", handlePaste);
             document.addEventListener("paste", handlePaste);
+            if (imageInput) {
+                imageInput.addEventListener("change", () => {
+                    if (attachIndicator) {
+                        attachIndicator.style.display = imageInput.files.length ? "inline-flex" : "none";
+                    }
+                });
+            }
 
             const sendDecision = async (decision) => {
                 const response = await fetch("/koda/confirm/", {

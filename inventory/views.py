@@ -2507,8 +2507,15 @@ def _koda_execute_actions(actions: list[dict], user, invoice_path: str | None) -
                     )
             results.append(f"Transferencias a ML: {len(items)} ítems.")
         elif action_type == "register_sale":
-            warehouse_label = (data.get("warehouse") or "COMUN").upper()
-            warehouse = Warehouse.objects.filter(type=warehouse_label).first()
+            warehouse_label = (data.get("warehouse") or "COMUN").strip().lower()
+            warehouse_code = {
+                "comun": Warehouse.WarehouseType.COMUN,
+                "común": Warehouse.WarehouseType.COMUN,
+                "mercadolibre": Warehouse.WarehouseType.MERCADOLIBRE,
+                "mercado libre": Warehouse.WarehouseType.MERCADOLIBRE,
+                "ml": Warehouse.WarehouseType.MERCADOLIBRE,
+            }.get(warehouse_label, warehouse_label.upper())
+            warehouse = Warehouse.objects.filter(type=warehouse_code).first()
             if not warehouse:
                 raise ValueError("Depósito no encontrado.")
             customer = None
@@ -2573,8 +2580,15 @@ def _koda_execute_actions(actions: list[dict], user, invoice_path: str | None) -
                 sale.save(update_fields=["total"])
             results.append(f"Venta registrada #{sale.id}.")
         elif action_type == "register_purchase":
-            warehouse_label = (data.get("warehouse") or "COMUN").upper()
-            warehouse = Warehouse.objects.filter(type=warehouse_label).first()
+            warehouse_label = (data.get("warehouse") or "COMUN").strip().lower()
+            warehouse_code = {
+                "comun": Warehouse.WarehouseType.COMUN,
+                "común": Warehouse.WarehouseType.COMUN,
+                "mercadolibre": Warehouse.WarehouseType.MERCADOLIBRE,
+                "mercado libre": Warehouse.WarehouseType.MERCADOLIBRE,
+                "ml": Warehouse.WarehouseType.MERCADOLIBRE,
+            }.get(warehouse_label, warehouse_label.upper())
+            warehouse = Warehouse.objects.filter(type=warehouse_code).first()
             if not warehouse:
                 raise ValueError("Depósito no encontrado.")
             supplier_name = (data.get("supplier") or "").strip()
