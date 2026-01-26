@@ -2341,6 +2341,19 @@ def _koda_call_openai(messages, image_data_url: str | None = None) -> dict:
         return {"reply": content, "actions": [], "needs_confirmation": False}
 
 
+def _koda_extract_pdf_text(path: str) -> tuple[str | None, str | None]:
+    try:
+        from pdfminer.high_level import extract_text
+    except Exception:
+        return None, "Falta pdfminer.six para leer PDFs."
+    try:
+        text = extract_text(path) or ""
+        text = text.strip()
+        return text, None
+    except Exception as exc:
+        return None, f"No pude leer el PDF: {exc}"
+
+
 def _koda_actions_summary(actions: list[dict]) -> str:
     summaries = []
     for action in actions:
@@ -2649,15 +2662,27 @@ def koda_chat(request):
     pending_file_path = None
     if image_file:
         raw = image_file.read()
-        if image_file.content_type and image_file.content_type.startswith("image/"):
-            encoded = base64.b64encode(raw).decode("utf-8")
-            image_data_url = f"data:{image_file.content_type};base64,{encoded}"
         pending_dir = os.path.join(str(settings.MEDIA_ROOT), "koda_pending")
         os.makedirs(pending_dir, exist_ok=True)
         filename = f"{secrets.token_hex(8)}_{image_file.name}"
         pending_file_path = os.path.join(pending_dir, filename)
         with open(pending_file_path, "wb") as handle:
             handle.write(raw)
+
+        if image_file.content_type and image_file.content_type.startswith("image/"):
+            encoded = base64.b64encode(raw).decode("utf-8")
+            image_data_url = f"data:{image_file.content_type};base64,{encoded}"
+            if not message:
+                message = "Analizá la imagen adjunta y respondé."
+        elif image_file.content_type == "application/pdf":
+            pdf_text, pdf_error = _koda_extract_pdf_text(pending_file_path)
+            if pdf_error:
+                return JsonResponse({"reply": pdf_error, "actions": []})
+            if not pdf_text:
+                return JsonResponse(
+                    {"reply": "El PDF no tiene texto legible. Subí una imagen o pegá el contenido.", "actions": []}
+                )
+            message = f"{message}\n\nContenido del PDF:\n{pdf_text}".strip()
 
     history = request.session.get("koda_history", [])
     history = history[-8:]

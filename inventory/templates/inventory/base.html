@@ -391,18 +391,28 @@
                     sendMessage();
                 }
             });
-            document.addEventListener("paste", (event) => {
+            const handlePaste = (event) => {
                 if (!panel.classList.contains("open")) return;
-                const items = event.clipboardData ? Array.from(event.clipboardData.items) : [];
-                const fileItem = items.find((item) => item.type && item.type.startsWith("image/"));
-                if (!fileItem) return;
-                pastedFile = fileItem.getAsFile();
-                if (pastedFile && imageInput) {
+                const clipboard = event.clipboardData;
+                if (!clipboard) return;
+                const files = Array.from(clipboard.files || []);
+                let file = files.find((item) => item.type && item.type.startsWith("image/"));
+                if (!file) {
+                    const items = Array.from(clipboard.items || []);
+                    const fileItem = items.find((item) => item.type && item.type.startsWith("image/"));
+                    if (fileItem) file = fileItem.getAsFile();
+                }
+                if (!file) return;
+                event.preventDefault();
+                pastedFile = file;
+                if (imageInput) {
                     const dataTransfer = new DataTransfer();
-                    dataTransfer.items.add(pastedFile);
+                    dataTransfer.items.add(file);
                     imageInput.files = dataTransfer.files;
                 }
-            });
+            };
+            if (input) input.addEventListener("paste", handlePaste);
+            document.addEventListener("paste", handlePaste);
 
             const sendDecision = async (decision) => {
                 const response = await fetch("/koda/confirm/", {
