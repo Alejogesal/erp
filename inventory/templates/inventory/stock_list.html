@@ -40,6 +40,9 @@
     .stock-adjust input {
         width: 100%;
     }
+    .ml-product-search {
+        margin-bottom: 6px;
+    }
 </style>
 
 <div class="card" style="margin-bottom:16px;">
@@ -50,6 +53,7 @@
         <div class="cards" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
             <div>
                 {{ transfer_form.product.label_tag }}
+                <input id="ml-product-search" class="ml-product-search" type="text" placeholder="Buscar por coincidencias">
                 {{ transfer_form.product }}
             </div>
             <div>
@@ -144,6 +148,41 @@
             });
         };
         filterInput.addEventListener("input", applyFilter);
+    })();
+</script>
+<script>
+    (function() {
+        const productSelect = document.querySelector("select[name='product']");
+        const searchInput = document.getElementById("ml-product-search");
+        if (!productSelect || !searchInput) return;
+
+        const options = Array.from(productSelect.options);
+        const applySearch = () => {
+            const query = searchInput.value.trim().toLowerCase();
+            options.forEach((option) => {
+                if (!option.value) return;
+                const text = (option.textContent || "").toLowerCase();
+                option.hidden = query && !text.includes(query);
+            });
+            if (query) {
+                const firstVisible = options.find((option) => option.value && !option.hidden);
+                if (firstVisible) {
+                    productSelect.value = firstVisible.value;
+                }
+            }
+        };
+
+        searchInput.addEventListener("input", applySearch);
+        productSelect.addEventListener("change", () => {
+            const selected = productSelect.selectedOptions[0];
+            if (selected) {
+                searchInput.value = selected.textContent || "";
+            }
+        });
+        const initial = productSelect.selectedOptions[0];
+        if (initial) {
+            searchInput.value = initial.textContent || "";
+        }
     })();
 </script>
 {% endblock %}
