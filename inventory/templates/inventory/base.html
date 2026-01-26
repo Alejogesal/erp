@@ -154,7 +154,7 @@
             width: 54px;
             height: 54px;
             border-radius: 16px;
-            background: var(--accent);
+            background: linear-gradient(135deg, #2f81f7, #1f6feb);
             color: white;
             font-weight: 800;
             border: none;
@@ -168,8 +168,8 @@
             bottom: 90px;
             width: min(420px, calc(100vw - 32px));
             max-height: 70vh;
-            background: linear-gradient(160deg, #141b25, #0d121a);
-            border: 1px solid #1f2630;
+            background: linear-gradient(160deg, #151d29, #0d1117);
+            border: 1px solid #243041;
             border-radius: 16px;
             box-shadow: 0 24px 50px rgba(0, 0, 0, 0.45);
             display: none;
@@ -179,11 +179,12 @@
         .koda-panel.open { display: flex; }
         .koda-header {
             padding: 14px 16px;
-            border-bottom: 1px solid #1f2630;
+            border-bottom: 1px solid #243041;
             display: flex;
             align-items: center;
             justify-content: space-between;
             font-weight: 700;
+            letter-spacing: 0.3px;
         }
         .koda-body {
             padding: 14px 16px;
@@ -199,7 +200,7 @@
             line-height: 1.4;
         }
         .koda-msg.user {
-            background: rgba(47, 129, 247, 0.2);
+            background: rgba(47, 129, 247, 0.22);
             align-self: flex-end;
         }
         .koda-msg.assistant {
@@ -208,24 +209,39 @@
         }
         .koda-actions {
             padding: 12px 16px 16px;
-            border-top: 1px solid #1f2630;
+            border-top: 1px solid #243041;
             display: flex;
             flex-direction: column;
             gap: 10px;
         }
-        .koda-actions textarea {
-            resize: none;
-            min-height: 54px;
-        }
         .koda-input-row {
             display: flex;
             gap: 8px;
-            align-items: center;
-        }
-        .koda-input-row input[type="file"] {
-            width: auto;
+            align-items: stretch;
+            background: #0f1622;
+            border: 1px solid #2a313c;
+            border-radius: 12px;
             padding: 6px;
         }
+        .koda-actions textarea {
+            resize: none;
+            min-height: 44px;
+            border: none;
+            background: transparent;
+            padding: 8px 6px;
+        }
+        .koda-actions textarea:focus { outline: none; }
+        .koda-attach {
+            width: 40px;
+            border-radius: 10px;
+            border: 1px solid #2a313c;
+            background: rgba(47, 129, 247, 0.12);
+            color: var(--text);
+            font-weight: 800;
+            cursor: pointer;
+        }
+        .koda-attach:hover { border-color: var(--accent); }
+        .koda-input-row input[type="file"] { display: none; }
         .koda-confirm {
             display: flex;
             gap: 8px;
@@ -277,6 +293,7 @@
             <div class="koda-input-row">
                 <textarea id="koda-input" placeholder="Escribí tu pedido..."></textarea>
                 <input type="file" id="koda-image" accept="image/*">
+                <label class="koda-attach" for="koda-image">+</label>
             </div>
             <button type="button" id="koda-send">Enviar</button>
             <div id="koda-pending" style="display:none;">
