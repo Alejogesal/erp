@@ -328,6 +328,7 @@
             const confirmBtn = document.getElementById("koda-confirm");
             const cancelBtn = document.getElementById("koda-cancel");
             if (!toggle || !panel) return;
+            let pastedImageFile = null;
 
             const getCookie = (name) => {
                 const value = `; ${document.cookie}`;
@@ -354,11 +355,12 @@
 
             const sendMessage = async () => {
                 const text = input.value.trim();
-                const file = imageInput.files[0];
+                const file = imageInput.files[0] || pastedImageFile;
                 if (!text && !file) return;
                 addMessage("user", text || "Imagen adjunta");
                 input.value = "";
                 imageInput.value = "";
+                pastedImageFile = null;
                 pendingWrap.style.display = "none";
 
                 const formData = new FormData();
@@ -385,6 +387,16 @@
                 if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
                     sendMessage();
+                }
+            });
+            document.addEventListener("paste", (event) => {
+                if (!panel.classList.contains("open")) return;
+                const items = event.clipboardData ? Array.from(event.clipboardData.items) : [];
+                const imageItem = items.find((item) => item.type && item.type.startsWith("image/"));
+                if (!imageItem) return;
+                pastedImageFile = imageItem.getAsFile();
+                if (pastedImageFile) {
+                    addMessage("user", "Imagen pegada");
                 }
             });
 
