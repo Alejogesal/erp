@@ -357,7 +357,9 @@
                 const text = input.value.trim();
                 const file = imageInput.files[0] || pastedFile;
                 if (!text && !file) return;
-                addMessage("user", text || "Archivo adjunto");
+                if (text) {
+                    addMessage("user", text);
+                }
                 input.value = "";
                 imageInput.value = "";
                 pastedFile = null;
