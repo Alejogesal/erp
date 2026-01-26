@@ -355,6 +355,11 @@
         updateVariants("");
 
         if (addItemButton && bulkItems && bulkHidden && quantityInput) {
+            const updateBulkRequired = () => {
+                const hasItems = bulkItems.children.length > 0;
+                if (productSelect) productSelect.required = !hasItems;
+                if (quantityInput) quantityInput.required = !hasItems;
+            };
             const addBulkItem = () => {
                 const productId = productSelect.value;
                 const qtyRaw = quantityInput.value.trim();
@@ -408,6 +413,7 @@
                 if (variantSelect) variantSelect.value = "";
                 updateVariants("");
                 results.style.display = "none";
+                updateBulkRequired();
             };
 
             addItemButton.addEventListener("click", addBulkItem);
@@ -418,7 +424,9 @@
                 const itemId = row.dataset.id;
                 row.remove();
                 bulkHidden.querySelectorAll(`input[data-id="${itemId}"]`).forEach((input) => input.remove());
+                updateBulkRequired();
             });
+            updateBulkRequired();
         }
     })();
 </script>
