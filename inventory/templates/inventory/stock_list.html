@@ -75,6 +75,9 @@
     .ml-product-results button:hover {
         background: rgba(47, 129, 247, 0.12);
     }
+    .ml-product-results button.is-active {
+        background: rgba(47, 129, 247, 0.2);
+    }
     .ml-bulk-list {
         grid-column: 1 / -1;
         margin-top: 6px;
@@ -245,24 +248,32 @@
             label: option.textContent || "",
             labelLower: (option.textContent || "").toLowerCase(),
         }));
+        let activeIndex = -1;
 
         const renderResults = () => {
             const query = productInput.value.trim().toLowerCase();
             if (!query) {
                 results.style.display = "none";
                 results.innerHTML = "";
+                activeIndex = -1;
                 return;
             }
             const matches = optionData.filter((item) => item.labelLower.includes(query)).slice(0, 30);
             if (!matches.length) {
                 results.style.display = "none";
                 results.innerHTML = "";
+                activeIndex = -1;
                 return;
             }
             results.innerHTML = matches
                 .map((item) => `<button type="button" data-value="${item.value}">${item.label}</button>`)
                 .join("");
             results.style.display = "block";
+            activeIndex = matches.length ? 0 : -1;
+            const buttons = Array.from(results.querySelectorAll("button"));
+            if (buttons[activeIndex]) {
+                buttons[activeIndex].classList.add("is-active");
+            }
         };
 
         productInput.addEventListener("input", renderResults);
@@ -271,6 +282,30 @@
                 productInput.value = "";
             }
             renderResults();
+        });
+        productInput.addEventListener("keydown", (event) => {
+            if (results.style.display !== "block") return;
+            const buttons = Array.from(results.querySelectorAll("button"));
+            if (!buttons.length) return;
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                event.preventDefault();
+                buttons.forEach((button) => button.classList.remove("is-active"));
+                if (event.key === "ArrowDown") {
+                    activeIndex = (activeIndex + 1) % buttons.length;
+                } else {
+                    activeIndex = (activeIndex - 1 + buttons.length) % buttons.length;
+                }
+                buttons[activeIndex].classList.add("is-active");
+                buttons[activeIndex].scrollIntoView({ block: "nearest" });
+            } else if (event.key === "Enter") {
+                const active = buttons[activeIndex];
+                if (active) {
+                    active.click();
+                    event.preventDefault();
+                }
+            } else if (event.key === "Escape") {
+                results.style.display = "none";
+            }
         });
         document.addEventListener("click", (event) => {
             if (!results.contains(event.target) && event.target !== productInput) {
