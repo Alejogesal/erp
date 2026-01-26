@@ -1,4 +1,4 @@
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import os
 
 from django import forms
@@ -2022,16 +2022,33 @@ def stock_list(request):
             if not comun_wh or not ml_wh:
                 messages.error(request, "Faltan depósitos configurados para transferir stock.")
                 return redirect("inventory_stock_list")
+            def sync_common_with_variants(product):
+                total = (
+                    ProductVariant.objects.filter(product=product)
+                    .aggregate(total=Sum("quantity"))
+                    .get("total")
+                )
+                total = total if total is not None else Decimal("0.00")
+                stock = Stock.objects.select_for_update().get_or_create(
+                    product=product,
+                    warehouse=comun_wh,
+                    defaults={"quantity": total},
+                )[0]
+                stock.quantity = total
+                stock.save(update_fields=["quantity"])
             bulk_product_ids = request.POST.getlist("bulk_product")
             bulk_quantities = request.POST.getlist("bulk_quantity")
+            bulk_variant_ids = request.POST.getlist("bulk_variant")
             if bulk_product_ids or bulk_quantities:
-                if len(bulk_product_ids) != len(bulk_quantities):
+                if len(bulk_product_ids) != len(bulk_quantities) or len(bulk_product_ids) != len(bulk_variant_ids):
                     messages.error(request, "La lista de productos está incompleta.")
                     return redirect("inventory_stock_list")
 
                 bulk_items = []
                 errors = []
-                for index, (product_id, qty_raw) in enumerate(zip(bulk_product_ids, bulk_quantities), start=1):
+                for index, (product_id, qty_raw, variant_id) in enumerate(
+                    zip(bulk_product_ids, bulk_quantities, bulk_variant_ids), start=1
+                ):
                     try:
                         quantity = Decimal(qty_raw.replace(",", "."))
                     except (InvalidOperation, ValueError):
@@ -2044,7 +2061,17 @@ def stock_list(request):
                     if not product:
                         errors.append(f"Línea {index}: producto no encontrado.")
                         continue
-                    bulk_items.append({"product": product, "quantity": quantity})
+                    variant = None
+                    if variant_id:
+                        variant = ProductVariant.objects.filter(id=variant_id, product=product).first()
+                        if not variant:
+                            errors.append(f"Línea {index}: variedad no encontrada.")
+                            continue
+                    else:
+                        if ProductVariant.objects.filter(product=product).exists():
+                            errors.append(f"Línea {index}: seleccioná una variedad.")
+                            continue
+                    bulk_items.append({"product": product, "quantity": quantity, "variant": variant})
 
                 if errors:
                     messages.error(request, " ".join(errors))
@@ -2053,6 +2080,16 @@ def stock_list(request):
                 try:
                     with transaction.atomic():
                         for item in bulk_items:
+                            if item["variant"] is not None:
+                                sync_common_with_variants(item["product"])
+                                if item["variant"].quantity - item["quantity"] < 0:
+                                    raise services.NegativeStockError(
+                                        "No hay stock suficiente en depósito común."
+                                    )
+                                item["variant"].quantity = (item["variant"].quantity - item["quantity"]).quantize(
+                                    Decimal("0.01"), rounding=ROUND_HALF_UP
+                                )
+                                item["variant"].save(update_fields=["quantity"])
                             services.register_transfer(
                                 product=item["product"],
                                 from_warehouse=comun_wh,
@@ -2069,6 +2106,37 @@ def stock_list(request):
                     messages.error(request, str(exc))
             elif transfer_form.is_valid():
                 try:
+                    product = transfer_form.cleaned_data["product"]
+                    variant_id = (request.POST.get("variant_id") or "").strip()
+                    if variant_id:
+                        variant = ProductVariant.objects.filter(id=variant_id, product=product).first()
+                        if not variant:
+                            messages.error(request, "Variedad no encontrada.")
+                            return redirect("inventory_stock_list")
+                        with transaction.atomic():
+                            sync_common_with_variants(product)
+                            if variant.quantity - transfer_form.cleaned_data["quantity"] < 0:
+                                raise services.NegativeStockError(
+                                    "No hay stock suficiente en depósito común."
+                                )
+                            variant.quantity = (variant.quantity - transfer_form.cleaned_data["quantity"]).quantize(
+                                Decimal("0.01"), rounding=ROUND_HALF_UP
+                            )
+                            variant.save(update_fields=["quantity"])
+                            services.register_transfer(
+                                product=product,
+                                from_warehouse=comun_wh,
+                                to_warehouse=ml_wh,
+                                quantity=transfer_form.cleaned_data["quantity"],
+                                user=request.user,
+                                reference="Transferencia Comun -> MercadoLibre",
+                            )
+                        messages.success(request, "Transferencia registrada.")
+                        return redirect("inventory_stock_list")
+                    else:
+                        if ProductVariant.objects.filter(product=product).exists():
+                            messages.error(request, "Seleccioná una variedad.")
+                            return redirect("inventory_stock_list")
                     services.register_transfer(
                         product=transfer_form.cleaned_data["product"],
                         from_warehouse=comun_wh,
@@ -2113,6 +2181,9 @@ def stock_list(request):
             total_qty=Coalesce(Sum("quantity"), Value(0, output_field=decimal_field), output_field=decimal_field)
         )
     }
+    variant_data = {}
+    for row in ProductVariant.objects.values("id", "product_id", "name").order_by("name", "id"):
+        variant_data.setdefault(str(row["product_id"]), []).append({"id": row["id"], "name": row["name"]})
     if query:
         products = products.filter(
             Q(sku__icontains=query) | Q(name__icontains=query) | Q(group__icontains=query)
@@ -2132,6 +2203,7 @@ def stock_list(request):
             "transfer_form": transfer_form,
             "can_transfer": comun_wh is not None and ml_wh is not None,
             "query": query,
+            "variant_data": variant_data,
         },
     )
 

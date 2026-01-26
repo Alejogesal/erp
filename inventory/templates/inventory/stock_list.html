@@ -124,6 +124,10 @@
                     <div id="ml-product-results" class="ml-product-results"></div>
                 </div>
                 {{ transfer_form.product }}
+                <div id="ml-variant-wrap" style="display:none; margin-top:8px;">
+                    <label for="ml-variant-select">Variedad</label>
+                    <select id="ml-variant-select" name="variant_id" disabled></select>
+                </div>
             </div>
             <div>
                 {{ transfer_form.quantity.label_tag }}
@@ -229,6 +233,7 @@
         filterInput.addEventListener("input", applyFilter);
     })();
 </script>
+{{ variant_data|json_script:"ml-variant-data" }}
 <script>
     (function() {
         const productSelect = document.querySelector("select[name='product']");
@@ -238,6 +243,10 @@
         const addItemButton = document.getElementById("ml-add-item");
         const bulkItems = document.getElementById("ml-bulk-items");
         const bulkHidden = document.getElementById("ml-bulk-hidden");
+        const variantWrap = document.getElementById("ml-variant-wrap");
+        const variantSelect = document.getElementById("ml-variant-select");
+        const variantDataNode = document.getElementById("ml-variant-data");
+        const variantData = variantDataNode ? JSON.parse(variantDataNode.textContent) : {};
         if (!productSelect || !productInput || !results) return;
 
         productSelect.classList.add("ml-product-select");
@@ -249,6 +258,23 @@
             labelLower: (option.textContent || "").toLowerCase(),
         }));
         let activeIndex = -1;
+
+        const updateVariants = (productId) => {
+            const variants = variantData[productId] || [];
+            if (!variantWrap || !variantSelect || !variants.length) {
+                if (variantWrap) variantWrap.style.display = "none";
+                if (variantSelect) {
+                    variantSelect.innerHTML = "";
+                    variantSelect.disabled = true;
+                }
+                return;
+            }
+            variantSelect.innerHTML =
+                `<option value="">Seleccioná variedad</option>` +
+                variants.map((variant) => `<option value="${variant.id}">${variant.name}</option>`).join("");
+            variantSelect.disabled = false;
+            variantWrap.style.display = "block";
+        };
 
         const renderResults = () => {
             const query = productInput.value.trim().toLowerCase();
@@ -320,11 +346,13 @@
             if (match) {
                 productInput.value = match.label;
                 productSelect.value = match.value;
+                updateVariants(match.value);
             }
             results.style.display = "none";
         });
 
         productInput.value = "";
+        updateVariants("");
 
         if (addItemButton && bulkItems && bulkHidden && quantityInput) {
             const addBulkItem = () => {
@@ -333,15 +361,23 @@
                 if (!productId || !qtyRaw) return;
                 const qty = Number(qtyRaw.replace(",", "."));
                 if (!Number.isFinite(qty) || qty <= 0) return;
+                const requiresVariant = variantWrap && variantWrap.style.display !== "none";
+                const variantId = variantSelect && !variantSelect.disabled ? variantSelect.value : "";
+                if (requiresVariant && !variantId) {
+                    variantSelect.focus();
+                    return;
+                }
 
                 const selected = optionData.find((item) => item.value === productId);
                 if (!selected) return;
+                const variantLabel =
+                    variantId && variantSelect ? variantSelect.selectedOptions[0]?.textContent || "" : "";
 
                 const itemId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
                 const row = document.createElement("div");
                 row.className = "ml-bulk-item";
                 row.dataset.id = itemId;
-                row.innerHTML = `<span>${selected.label} · ${qtyRaw}</span><button type="button">Quitar</button>`;
+                row.innerHTML = `<span>${selected.label}${variantLabel ? ` · ${variantLabel}` : ""} · ${qtyRaw}</span><button type="button">Quitar</button>`;
                 bulkItems.appendChild(row);
 
                 const hiddenProduct = document.createElement("input");
@@ -356,11 +392,21 @@
                 hiddenQty.value = qtyRaw;
                 hiddenQty.dataset.id = itemId;
 
+                const hiddenVariant = document.createElement("input");
+                hiddenVariant.type = "hidden";
+                hiddenVariant.name = "bulk_variant";
+                hiddenVariant.value = variantId || "";
+                hiddenVariant.dataset.id = itemId;
+
                 bulkHidden.appendChild(hiddenProduct);
                 bulkHidden.appendChild(hiddenQty);
+                bulkHidden.appendChild(hiddenVariant);
 
                 productInput.value = "";
                 quantityInput.value = "";
+                productSelect.value = "";
+                if (variantSelect) variantSelect.value = "";
+                updateVariants("");
                 results.style.display = "none";
             };
 
