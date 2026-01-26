@@ -75,6 +75,37 @@
     .ml-product-results button:hover {
         background: rgba(47, 129, 247, 0.12);
     }
+    .ml-bulk-list {
+        grid-column: 1 / -1;
+        margin-top: 6px;
+    }
+    .ml-bulk-actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 8px;
+    }
+    .ml-bulk-items {
+        display: grid;
+        gap: 6px;
+    }
+    .ml-bulk-item {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+        padding: 8px 10px;
+        border-radius: 8px;
+        background: #0f1622;
+        border: 1px solid #2a313c;
+        font-size: 13px;
+    }
+    .ml-bulk-item button {
+        padding: 6px 10px;
+        font-size: 12px;
+        background: transparent;
+        border: 1px solid #2a313c;
+        color: var(--text);
+    }
 </style>
 
 <div class="card" style="margin-bottom:16px;">
@@ -95,12 +126,15 @@
                 {{ transfer_form.quantity.label_tag }}
                 {{ transfer_form.quantity }}
             </div>
-            <div style="grid-column: 1 / -1;">
-                {{ transfer_form.bulk_list.label_tag }}
-                {{ transfer_form.bulk_list }}
-                <div style="color: var(--muted); font-size: 12px; margin-top: 4px;">
-                    Formato sugerido: SKU; cantidad (una por línea). Ej: ABC123; 10
+            <div class="ml-bulk-list">
+                <div class="ml-bulk-actions">
+                    <button type="button" id="ml-add-item">Agregar a la lista</button>
+                    <div style="color: var(--muted); font-size: 12px;">
+                        Sumá varios productos y transferilos juntos.
+                    </div>
                 </div>
+                <div id="ml-bulk-items" class="ml-bulk-items"></div>
+                <div id="ml-bulk-hidden"></div>
             </div>
         </div>
         <div style="margin-top:12px;">
@@ -197,6 +231,10 @@
         const productSelect = document.querySelector("select[name='product']");
         const productInput = document.getElementById("ml-product-input");
         const results = document.getElementById("ml-product-results");
+        const quantityInput = document.querySelector("input[name='quantity']");
+        const addItemButton = document.getElementById("ml-add-item");
+        const bulkItems = document.getElementById("ml-bulk-items");
+        const bulkHidden = document.getElementById("ml-bulk-hidden");
         if (!productSelect || !productInput || !results) return;
 
         productSelect.classList.add("ml-product-select");
@@ -252,6 +290,55 @@
         });
 
         productInput.value = "";
+
+        if (addItemButton && bulkItems && bulkHidden && quantityInput) {
+            const addBulkItem = () => {
+                const productId = productSelect.value;
+                const qtyRaw = quantityInput.value.trim();
+                if (!productId || !qtyRaw) return;
+                const qty = Number(qtyRaw.replace(",", "."));
+                if (!Number.isFinite(qty) || qty <= 0) return;
+
+                const selected = optionData.find((item) => item.value === productId);
+                if (!selected) return;
+
+                const itemId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+                const row = document.createElement("div");
+                row.className = "ml-bulk-item";
+                row.dataset.id = itemId;
+                row.innerHTML = `<span>${selected.label} · ${qtyRaw}</span><button type="button">Quitar</button>`;
+                bulkItems.appendChild(row);
+
+                const hiddenProduct = document.createElement("input");
+                hiddenProduct.type = "hidden";
+                hiddenProduct.name = "bulk_product";
+                hiddenProduct.value = productId;
+                hiddenProduct.dataset.id = itemId;
+
+                const hiddenQty = document.createElement("input");
+                hiddenQty.type = "hidden";
+                hiddenQty.name = "bulk_quantity";
+                hiddenQty.value = qtyRaw;
+                hiddenQty.dataset.id = itemId;
+
+                bulkHidden.appendChild(hiddenProduct);
+                bulkHidden.appendChild(hiddenQty);
+
+                productInput.value = "";
+                quantityInput.value = "";
+                results.style.display = "none";
+            };
+
+            addItemButton.addEventListener("click", addBulkItem);
+            bulkItems.addEventListener("click", (event) => {
+                if (event.target.tagName !== "BUTTON") return;
+                const row = event.target.closest(".ml-bulk-item");
+                if (!row) return;
+                const itemId = row.dataset.id;
+                row.remove();
+                bulkHidden.querySelectorAll(`input[data-id="${itemId}"]`).forEach((input) => input.remove());
+            });
+        }
     })();
 </script>
 {% endblock %}

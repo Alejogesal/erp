@@ -183,80 +183,8 @@ class SaleItemForm(forms.Form):
 
 
 class StockTransferForm(forms.Form):
-    product = forms.ModelChoiceField(queryset=Product.objects.all(), label="Producto", required=False)
-    quantity = forms.DecimalField(min_value=Decimal("0.01"), decimal_places=2, label="Cantidad", required=False)
-    bulk_list = forms.CharField(
-        required=False,
-        label="Lista",
-        widget=forms.Textarea(attrs={"rows": 4}),
-        help_text="Formato sugerido: SKU; cantidad (una por línea).",
-    )
-
-    def clean(self):
-        cleaned_data = super().clean()
-        bulk_list = (cleaned_data.get("bulk_list") or "").strip()
-        product = cleaned_data.get("product")
-        quantity = cleaned_data.get("quantity")
-
-        if bulk_list:
-            cleaned_data["bulk_items"] = self._parse_bulk_list(bulk_list)
-            return cleaned_data
-
-        if not product or quantity is None:
-            raise forms.ValidationError("Seleccioná un producto y cantidad, o cargá una lista.")
-
-        return cleaned_data
-
-    def _parse_bulk_list(self, bulk_list):
-        items = []
-        errors = []
-        for line_number, raw_line in enumerate(bulk_list.splitlines(), start=1):
-            line = raw_line.strip()
-            if not line:
-                continue
-            parts = re.split(r"[;,\\t]", line, maxsplit=1)
-            if len(parts) == 1:
-                tokens = line.split()
-                if len(tokens) < 2:
-                    errors.append(f"Línea {line_number}: formato inválido.")
-                    continue
-                name_or_sku = " ".join(tokens[:-1]).strip()
-                qty_raw = tokens[-1]
-            else:
-                name_or_sku = parts[0].strip()
-                qty_raw = parts[1].strip()
-
-            if not name_or_sku:
-                errors.append(f"Línea {line_number}: falta SKU o nombre.")
-                continue
-
-            try:
-                qty = Decimal(qty_raw.replace(",", "."))
-            except (InvalidOperation, ValueError):
-                errors.append(f"Línea {line_number}: cantidad inválida.")
-                continue
-
-            if qty <= 0:
-                errors.append(f"Línea {line_number}: la cantidad debe ser mayor a 0.")
-                continue
-
-            product = (
-                Product.objects.filter(sku__iexact=name_or_sku).first()
-                or Product.objects.filter(name__iexact=name_or_sku).first()
-            )
-            if not product:
-                errors.append(f"Línea {line_number}: no se encontró '{name_or_sku}'.")
-                continue
-
-            items.append({"product": product, "quantity": qty, "raw": raw_line})
-
-        if errors:
-            raise forms.ValidationError(errors)
-
-        if not items:
-            raise forms.ValidationError("La lista está vacía o no tiene líneas válidas.")
-
-        return items
+    product = forms.ModelChoiceField(queryset=Product.objects.all(), label="Producto")
+    quantity = forms.DecimalField(min_value=Decimal("0.01"), decimal_places=2, label="Cantidad")
 
 
 class SupplierForm(forms.ModelForm):
@@ -2094,50 +2022,67 @@ def stock_list(request):
             if not comun_wh or not ml_wh:
                 messages.error(request, "Faltan depósitos configurados para transferir stock.")
                 return redirect("inventory_stock_list")
-            if transfer_form.is_valid():
-                bulk_items = transfer_form.cleaned_data.get("bulk_items")
-                if bulk_items:
+            bulk_product_ids = request.POST.getlist("bulk_product")
+            bulk_quantities = request.POST.getlist("bulk_quantity")
+            if bulk_product_ids or bulk_quantities:
+                if len(bulk_product_ids) != len(bulk_quantities):
+                    messages.error(request, "La lista de productos está incompleta.")
+                    return redirect("inventory_stock_list")
+
+                bulk_items = []
+                errors = []
+                for index, (product_id, qty_raw) in enumerate(zip(bulk_product_ids, bulk_quantities), start=1):
                     try:
-                        with transaction.atomic():
-                            for item in bulk_items:
-                                try:
-                                    services.register_transfer(
-                                        product=item["product"],
-                                        from_warehouse=comun_wh,
-                                        to_warehouse=ml_wh,
-                                        quantity=item["quantity"],
-                                        user=request.user,
-                                        reference="Transferencia Comun -> MercadoLibre",
-                                    )
-                                except services.NegativeStockError:
-                                    raise ValueError(
-                                        f"No hay stock suficiente para {item['product'].sku} - {item['product'].name}."
-                                    )
-                                except services.InvalidMovementError as exc:
-                                    raise ValueError(str(exc))
-                        messages.success(
-                            request,
-                            f"Transferencias registradas: {len(bulk_items)}.",
-                        )
-                        return redirect("inventory_stock_list")
-                    except ValueError as exc:
-                        messages.error(request, str(exc))
-                else:
-                    try:
-                        services.register_transfer(
-                            product=transfer_form.cleaned_data["product"],
-                            from_warehouse=comun_wh,
-                            to_warehouse=ml_wh,
-                            quantity=transfer_form.cleaned_data["quantity"],
-                            user=request.user,
-                            reference="Transferencia Comun -> MercadoLibre",
-                        )
-                        messages.success(request, "Transferencia registrada.")
-                        return redirect("inventory_stock_list")
-                    except services.NegativeStockError:
-                        messages.error(request, "No hay stock suficiente en depósito común.")
-                    except services.InvalidMovementError as exc:
-                        messages.error(request, str(exc))
+                        quantity = Decimal(qty_raw.replace(",", "."))
+                    except (InvalidOperation, ValueError):
+                        errors.append(f"Línea {index}: cantidad inválida.")
+                        continue
+                    if quantity <= 0:
+                        errors.append(f"Línea {index}: la cantidad debe ser mayor a 0.")
+                        continue
+                    product = Product.objects.filter(id=product_id).first()
+                    if not product:
+                        errors.append(f"Línea {index}: producto no encontrado.")
+                        continue
+                    bulk_items.append({"product": product, "quantity": quantity})
+
+                if errors:
+                    messages.error(request, " ".join(errors))
+                    return redirect("inventory_stock_list")
+
+                try:
+                    with transaction.atomic():
+                        for item in bulk_items:
+                            services.register_transfer(
+                                product=item["product"],
+                                from_warehouse=comun_wh,
+                                to_warehouse=ml_wh,
+                                quantity=item["quantity"],
+                                user=request.user,
+                                reference="Transferencia Comun -> MercadoLibre",
+                            )
+                    messages.success(request, f"Transferencias registradas: {len(bulk_items)}.")
+                    return redirect("inventory_stock_list")
+                except services.NegativeStockError:
+                    messages.error(request, "No hay stock suficiente en depósito común.")
+                except services.InvalidMovementError as exc:
+                    messages.error(request, str(exc))
+            elif transfer_form.is_valid():
+                try:
+                    services.register_transfer(
+                        product=transfer_form.cleaned_data["product"],
+                        from_warehouse=comun_wh,
+                        to_warehouse=ml_wh,
+                        quantity=transfer_form.cleaned_data["quantity"],
+                        user=request.user,
+                        reference="Transferencia Comun -> MercadoLibre",
+                    )
+                    messages.success(request, "Transferencia registrada.")
+                    return redirect("inventory_stock_list")
+                except services.NegativeStockError:
+                    messages.error(request, "No hay stock suficiente en depósito común.")
+                except services.InvalidMovementError as exc:
+                    messages.error(request, str(exc))
             else:
                 error_list = []
                 for field_errors in transfer_form.errors.values():
