@@ -46,6 +46,35 @@
     .ml-product-select {
         display: none;
     }
+    .ml-product-wrap {
+        position: relative;
+    }
+    .ml-product-results {
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 0;
+        right: 0;
+        max-height: 240px;
+        overflow-y: auto;
+        background: #0f1622;
+        border: 1px solid #2a313c;
+        border-radius: 10px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+        z-index: 5;
+        display: none;
+    }
+    .ml-product-results button {
+        width: 100%;
+        text-align: left;
+        background: transparent;
+        color: var(--text);
+        padding: 8px 10px;
+        border-radius: 8px;
+        font-weight: 500;
+    }
+    .ml-product-results button:hover {
+        background: rgba(47, 129, 247, 0.12);
+    }
 </style>
 
 <div class="card" style="margin-bottom:16px;">
@@ -56,9 +85,11 @@
         <div class="cards" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
             <div>
                 {{ transfer_form.product.label_tag }}
-                <input id="ml-product-input" class="ml-product-input" type="text" list="ml-product-list" placeholder="Buscar por coincidencias">
+                <div class="ml-product-wrap">
+                    <input id="ml-product-input" class="ml-product-input" type="text" placeholder="Buscar por coincidencias">
+                    <div id="ml-product-results" class="ml-product-results"></div>
+                </div>
                 {{ transfer_form.product }}
-                <datalist id="ml-product-list"></datalist>
             </div>
             <div>
                 {{ transfer_form.quantity.label_tag }}
@@ -158,36 +189,62 @@
     (function() {
         const productSelect = document.querySelector("select[name='product']");
         const productInput = document.getElementById("ml-product-input");
-        const dataList = document.getElementById("ml-product-list");
-        if (!productSelect || !productInput || !dataList) return;
+        const results = document.getElementById("ml-product-results");
+        if (!productSelect || !productInput || !results) return;
 
         productSelect.classList.add("ml-product-select");
 
         const options = Array.from(productSelect.options).filter((option) => option.value);
-        dataList.innerHTML = options
-            .map((option) => `<option value="${option.textContent || ""}"></option>`)
-            .join("");
+        const optionData = options.map((option) => ({
+            value: option.value,
+            label: option.textContent || "",
+            labelLower: (option.textContent || "").toLowerCase(),
+        }));
 
-        const syncSelection = () => {
+        const renderResults = () => {
             const query = productInput.value.trim().toLowerCase();
-            const match = options.find((option) => (option.textContent || "").toLowerCase() === query);
-            if (match) {
-                productSelect.value = match.value;
+            if (!query) {
+                results.style.display = "none";
+                results.innerHTML = "";
                 return;
             }
-            const partial = options.find((option) => (option.textContent || "").toLowerCase().includes(query));
-            if (partial) {
-                productSelect.value = partial.value;
+            const matches = optionData.filter((item) => item.labelLower.includes(query)).slice(0, 30);
+            if (!matches.length) {
+                results.style.display = "none";
+                results.innerHTML = "";
+                return;
             }
+            results.innerHTML = matches
+                .map((item) => `<button type="button" data-value="${item.value}">${item.label}</button>`)
+                .join("");
+            results.style.display = "block";
         };
 
-        productInput.addEventListener("input", syncSelection);
-        productInput.addEventListener("change", syncSelection);
+        productInput.addEventListener("input", renderResults);
+        productInput.addEventListener("focus", () => {
+            if (productInput.value.trim() === "-----") {
+                productInput.value = "";
+            }
+            renderResults();
+        });
+        document.addEventListener("click", (event) => {
+            if (!results.contains(event.target) && event.target !== productInput) {
+                results.style.display = "none";
+            }
+        });
+        results.addEventListener("click", (event) => {
+            const target = event.target;
+            if (target.tagName !== "BUTTON") return;
+            const value = target.getAttribute("data-value");
+            const match = optionData.find((item) => item.value === value);
+            if (match) {
+                productInput.value = match.label;
+                productSelect.value = match.value;
+            }
+            results.style.display = "none";
+        });
 
-        const initial = productSelect.selectedOptions[0];
-        if (initial) {
-            productInput.value = initial.textContent || "";
-        }
+        productInput.value = "";
     })();
 </script>
 {% endblock %}
