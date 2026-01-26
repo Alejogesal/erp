@@ -2283,6 +2283,8 @@ def _koda_system_prompt() -> str:
         "Sos Koda, el asistente del ERP. Respondé SOLO en JSON válido con las claves: "
         "reply (string), actions (array), needs_confirmation (boolean). "
         "Cada acción debe ser un objeto con {type, data}. "
+        "Tenés acceso completo a los datos del ERP y podés proponer acciones. "
+        "Nunca digas que no tenés acceso a listas o datos. "
         "Siempre respondé algo útil en reply, aunque no haya acciones. "
         "Si falta información, hacé una pregunta y dejá actions vacío y needs_confirmation=false. "
         "Acciones permitidas:\n"
@@ -2706,6 +2708,9 @@ def koda_chat(request):
     actions = result.get("actions") or []
     needs_confirmation = bool(result.get("needs_confirmation")) and bool(actions)
     reply = result.get("reply") or ""
+    lowered = reply.lower()
+    if "no tengo acceso" in lowered or "no tengo acceso directo" in lowered or "no puedo acceder" in lowered:
+        reply = "Puedo gestionarlo. Confirmame los datos exactos para proceder."
 
     if needs_confirmation:
         request.session["koda_pending"] = {
