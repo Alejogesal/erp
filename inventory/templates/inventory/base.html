@@ -298,7 +298,7 @@
         <div class="koda-actions">
             <div class="koda-input-row">
                 <textarea id="koda-input" placeholder="Escribí tu pedido..."></textarea>
-                <input type="file" id="koda-image" accept="image/*">
+                <input type="file" id="koda-image" accept="image/*,application/pdf">
                 <label class="koda-attach" for="koda-image">+</label>
             </div>
             <button type="button" id="koda-send">Enviar</button>
@@ -328,7 +328,7 @@
             const confirmBtn = document.getElementById("koda-confirm");
             const cancelBtn = document.getElementById("koda-cancel");
             if (!toggle || !panel) return;
-            let pastedImageFile = null;
+            let pastedFile = null;
 
             const getCookie = (name) => {
                 const value = `; ${document.cookie}`;
@@ -355,12 +355,12 @@
 
             const sendMessage = async () => {
                 const text = input.value.trim();
-                const file = imageInput.files[0] || pastedImageFile;
+                const file = imageInput.files[0] || pastedFile;
                 if (!text && !file) return;
-                addMessage("user", text || "Imagen adjunta");
+                addMessage("user", text || "Archivo adjunto");
                 input.value = "";
                 imageInput.value = "";
-                pastedImageFile = null;
+                pastedFile = null;
                 pendingWrap.style.display = "none";
 
                 const formData = new FormData();
@@ -392,11 +392,14 @@
             document.addEventListener("paste", (event) => {
                 if (!panel.classList.contains("open")) return;
                 const items = event.clipboardData ? Array.from(event.clipboardData.items) : [];
-                const imageItem = items.find((item) => item.type && item.type.startsWith("image/"));
-                if (!imageItem) return;
-                pastedImageFile = imageItem.getAsFile();
-                if (pastedImageFile) {
-                    addMessage("user", "Imagen pegada");
+                const fileItem = items.find((item) => item.type && item.type.startsWith("image/"));
+                if (!fileItem) return;
+                pastedFile = fileItem.getAsFile();
+                if (pastedFile && imageInput) {
+                    const dataTransfer = new DataTransfer();
+                    dataTransfer.items.add(pastedFile);
+                    imageInput.files = dataTransfer.files;
+                    addMessage("user", "Archivo pegado");
                 }
             });
 

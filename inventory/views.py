@@ -2646,16 +2646,17 @@ def koda_chat(request):
         return JsonResponse({"reply": "Decime qué necesitás.", "actions": []})
 
     image_data_url = None
-    pending_image_path = None
+    pending_file_path = None
     if image_file:
         raw = image_file.read()
-        encoded = base64.b64encode(raw).decode("utf-8")
-        image_data_url = f"data:{image_file.content_type};base64,{encoded}"
+        if image_file.content_type and image_file.content_type.startswith("image/"):
+            encoded = base64.b64encode(raw).decode("utf-8")
+            image_data_url = f"data:{image_file.content_type};base64,{encoded}"
         pending_dir = os.path.join(str(settings.MEDIA_ROOT), "koda_pending")
         os.makedirs(pending_dir, exist_ok=True)
         filename = f"{secrets.token_hex(8)}_{image_file.name}"
-        pending_image_path = os.path.join(pending_dir, filename)
-        with open(pending_image_path, "wb") as handle:
+        pending_file_path = os.path.join(pending_dir, filename)
+        with open(pending_file_path, "wb") as handle:
             handle.write(raw)
 
     history = request.session.get("koda_history", [])
@@ -2670,11 +2671,11 @@ def koda_chat(request):
     if needs_confirmation:
         request.session["koda_pending"] = {
             "actions": actions,
-            "image_path": pending_image_path,
+            "image_path": pending_file_path,
         }
     else:
-        if pending_image_path:
-            os.remove(pending_image_path)
+        if pending_file_path:
+            os.remove(pending_file_path)
 
     history.append({"role": "user", "content": message})
     history.append({"role": "assistant", "content": reply})
