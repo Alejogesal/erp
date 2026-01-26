@@ -95,6 +95,13 @@
                 {{ transfer_form.quantity.label_tag }}
                 {{ transfer_form.quantity }}
             </div>
+            <div style="grid-column: 1 / -1;">
+                {{ transfer_form.bulk_list.label_tag }}
+                {{ transfer_form.bulk_list }}
+                <div style="color: var(--muted); font-size: 12px; margin-top: 4px;">
+                    Formato sugerido: SKU; cantidad (una por línea). Ej: ABC123; 10
+                </div>
+            </div>
         </div>
         <div style="margin-top:12px;">
             <button type="submit">Transferir</button>
