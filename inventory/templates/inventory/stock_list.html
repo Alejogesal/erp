@@ -40,8 +40,11 @@
     .stock-adjust input {
         width: 100%;
     }
-    .ml-product-search {
-        margin-bottom: 6px;
+    .ml-product-input {
+        margin-bottom: 0;
+    }
+    .ml-product-select {
+        display: none;
     }
 </style>
 
@@ -53,8 +56,9 @@
         <div class="cards" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
             <div>
                 {{ transfer_form.product.label_tag }}
-                <input id="ml-product-search" class="ml-product-search" type="text" placeholder="Buscar por coincidencias">
+                <input id="ml-product-input" class="ml-product-input" type="text" list="ml-product-list" placeholder="Buscar por coincidencias">
                 {{ transfer_form.product }}
+                <datalist id="ml-product-list"></datalist>
             </div>
             <div>
                 {{ transfer_form.quantity.label_tag }}
@@ -153,35 +157,36 @@
 <script>
     (function() {
         const productSelect = document.querySelector("select[name='product']");
-        const searchInput = document.getElementById("ml-product-search");
-        if (!productSelect || !searchInput) return;
+        const productInput = document.getElementById("ml-product-input");
+        const dataList = document.getElementById("ml-product-list");
+        if (!productSelect || !productInput || !dataList) return;
 
-        const options = Array.from(productSelect.options);
-        const applySearch = () => {
-            const query = searchInput.value.trim().toLowerCase();
-            options.forEach((option) => {
-                if (!option.value) return;
-                const text = (option.textContent || "").toLowerCase();
-                option.hidden = query && !text.includes(query);
-            });
-            if (query) {
-                const firstVisible = options.find((option) => option.value && !option.hidden);
-                if (firstVisible) {
-                    productSelect.value = firstVisible.value;
-                }
+        productSelect.classList.add("ml-product-select");
+
+        const options = Array.from(productSelect.options).filter((option) => option.value);
+        dataList.innerHTML = options
+            .map((option) => `<option value="${option.textContent || ""}"></option>`)
+            .join("");
+
+        const syncSelection = () => {
+            const query = productInput.value.trim().toLowerCase();
+            const match = options.find((option) => (option.textContent || "").toLowerCase() === query);
+            if (match) {
+                productSelect.value = match.value;
+                return;
+            }
+            const partial = options.find((option) => (option.textContent || "").toLowerCase().includes(query));
+            if (partial) {
+                productSelect.value = partial.value;
             }
         };
 
-        searchInput.addEventListener("input", applySearch);
-        productSelect.addEventListener("change", () => {
-            const selected = productSelect.selectedOptions[0];
-            if (selected) {
-                searchInput.value = selected.textContent || "";
-            }
-        });
+        productInput.addEventListener("input", syncSelection);
+        productInput.addEventListener("change", syncSelection);
+
         const initial = productSelect.selectedOptions[0];
         if (initial) {
-            searchInput.value = initial.textContent || "";
+            productInput.value = initial.textContent || "";
         }
     })();
 </script>
