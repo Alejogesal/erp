@@ -2287,6 +2287,7 @@ def _koda_system_prompt() -> str:
         "Nunca digas que no tenés acceso a listas o datos. "
         "Siempre respondé algo útil en reply, aunque no haya acciones. "
         "Si falta información, hacé una pregunta y dejá actions vacío y needs_confirmation=false. "
+        "Si hay una imagen adjunta, extraé los datos relevantes de la imagen. "
         "Acciones permitidas:\n"
         "- create_product: {name, sku?, group?, avg_cost?, vat_percent?, price_consumer?, price_barber?, price_distributor?}\n"
         "- add_stock_comun: {items:[{product, quantity, unit_cost?, variant?}]}\n"
@@ -2690,6 +2691,8 @@ def koda_chat(request):
             image_data_url = f"data:{image_file.content_type};base64,{encoded}"
             if not message:
                 message = "Analizá la imagen adjunta y respondé."
+            elif "imagen" not in message.lower():
+                message = f"{message}\n\nUsá la imagen adjunta para extraer los datos."
         elif image_file.content_type == "application/pdf":
             pdf_text, pdf_error = _koda_extract_pdf_text(pending_file_path)
             if pdf_error:
