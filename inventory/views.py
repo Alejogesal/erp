@@ -2295,6 +2295,7 @@ def _koda_system_prompt() -> str:
         "- add_stock_comun: {items:[{product, quantity, unit_cost?, variant?}]}\n"
         "- transfer_to_ml: {items:[{product, quantity, variant?}]}\n"
         "- register_sale: {warehouse, audience?, customer?, items:[{product, quantity, unit_price?, vat_percent?}]}\n"
+        "- update_sale: {sale_id? or invoice_number?, sale_date?, total?, ml_commission_total?, ml_tax_total?}\n"
         "- register_purchase: {warehouse?, supplier, reference?, items:[{product, quantity, unit_cost?, vat_percent?}], has_invoice_image?}\n"
         "Para compras a proveedor, extraé items con {product: descripcion, quantity} y dejá unit_cost vacío.\n"
         "El backend completará el costo con el precio de lista/costo del ERP.\n"
@@ -2377,6 +2378,8 @@ def _koda_actions_summary(actions: list[dict]) -> str:
         elif action_type == "register_sale":
             items = data.get("items") or []
             summaries.append(f"Registrar venta: {len(items)} ítems")
+        elif action_type == "update_sale":
+            summaries.append("Actualizar venta")
         elif action_type == "register_purchase":
             items = data.get("items") or []
             summaries.append(f"Registrar compra: {len(items)} ítems")
@@ -2425,6 +2428,19 @@ def _koda_resolve_supplier(name: str | None) -> Supplier | None:
     if supplier:
         return supplier
     return Supplier.objects.filter(name__icontains=raw).first()
+
+
+def _koda_resolve_sale(data: dict) -> Sale | None:
+    sale_id = data.get("sale_id")
+    if sale_id:
+        return Sale.objects.filter(id=sale_id).first()
+    invoice_number = (data.get("invoice_number") or "").strip()
+    if invoice_number:
+        parts = invoice_number.split("-")
+        tail = parts[-1] if parts else invoice_number
+        if tail.isdigit():
+            return Sale.objects.filter(id=int(tail)).first()
+    return None
 
 
 def _koda_sync_common_with_variants(product: Product, comun_wh: Warehouse):
@@ -2613,6 +2629,33 @@ def _koda_execute_actions(actions: list[dict], user, invoice_path: str | None) -
                 sale.total = total
                 sale.save(update_fields=["total"])
             results.append(f"Venta registrada #{sale.id}.")
+        elif action_type == "update_sale":
+            sale = _koda_resolve_sale(data)
+            if not sale:
+                raise ValueError("Venta no encontrada.")
+            update_fields = []
+            sale_date = data.get("sale_date")
+            if sale_date:
+                try:
+                    created_at = datetime.fromisoformat(str(sale_date))
+                except Exception:
+                    created_at = datetime.combine(str(sale_date), time(12, 0))
+                if timezone.is_naive(created_at):
+                    created_at = timezone.make_aware(created_at)
+                sale.created_at = created_at
+                update_fields.append("created_at")
+            if data.get("total") is not None:
+                sale.total = Decimal(str(data.get("total")))
+                update_fields.append("total")
+            if data.get("ml_commission_total") is not None:
+                sale.ml_commission_total = Decimal(str(data.get("ml_commission_total")))
+                update_fields.append("ml_commission_total")
+            if data.get("ml_tax_total") is not None:
+                sale.ml_tax_total = Decimal(str(data.get("ml_tax_total")))
+                update_fields.append("ml_tax_total")
+            if update_fields:
+                sale.save(update_fields=update_fields)
+            results.append(f"Venta actualizada #{sale.id}.")
         elif action_type == "register_purchase":
             warehouse_label = (data.get("warehouse") or "COMUN").strip().lower()
             warehouse_code = {
