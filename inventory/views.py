@@ -2296,7 +2296,8 @@ def _koda_system_prompt() -> str:
         "- transfer_to_ml: {items:[{product, quantity, variant?}]}\n"
         "- register_sale: {warehouse, audience?, customer?, items:[{product, quantity, unit_price?, vat_percent?}]}\n"
         "- register_purchase: {warehouse?, supplier, reference?, items:[{product, quantity, unit_cost?, vat_percent?}], has_invoice_image?}\n"
-        "Si falta unit_cost en compras, usá el precio de lista del ERP (price_consumer).\n"
+        "Para compras a proveedor, extraé items con {product: descripcion, quantity} y dejá unit_cost vacío.\n"
+        "El backend completará el costo con el precio de lista/costo del ERP.\n"
         "Usá identificadores de producto por SKU si es posible, sino por nombre exacto. "
         "Si el producto tiene variedades, pedí o incluí la variedad."
     )
@@ -2387,16 +2388,43 @@ def _koda_actions_summary(actions: list[dict]) -> str:
 def _koda_resolve_product(identifier: str) -> Product | None:
     if not identifier:
         return None
-    product = Product.objects.filter(sku__iexact=identifier.strip()).first()
+    raw = identifier.strip()
+    product = Product.objects.filter(sku__iexact=raw).first()
     if product:
         return product
-    return Product.objects.filter(name__iexact=identifier.strip()).first()
+    product = Product.objects.filter(name__iexact=raw).first()
+    if product:
+        return product
+    normalized = _normalize_header(raw)
+    tokens = [token for token in normalized.split() if len(token) > 2]
+    if not tokens:
+        return None
+    candidates = Product.objects.filter(name__icontains=tokens[0])[:50]
+    best = None
+    best_score = 0
+    for candidate in candidates:
+        name_norm = _normalize_header(candidate.name)
+        score = sum(1 for token in tokens if token in name_norm)
+        if score > best_score:
+            best_score = score
+            best = candidate
+    return best
 
 
 def _koda_resolve_variant(product: Product, variant_name: str | None) -> ProductVariant | None:
     if not variant_name:
         return None
     return ProductVariant.objects.filter(product=product, name__iexact=variant_name.strip()).first()
+
+
+def _koda_resolve_supplier(name: str | None) -> Supplier | None:
+    if not name:
+        return None
+    raw = name.strip()
+    supplier = Supplier.objects.filter(name__iexact=raw).first()
+    if supplier:
+        return supplier
+    return Supplier.objects.filter(name__icontains=raw).first()
 
 
 def _koda_sync_common_with_variants(product: Product, comun_wh: Warehouse):
@@ -2600,7 +2628,7 @@ def _koda_execute_actions(actions: list[dict], user, invoice_path: str | None) -
             supplier_name = (data.get("supplier") or "").strip()
             if not supplier_name:
                 raise ValueError("Falta proveedor.")
-            supplier = Supplier.objects.filter(name__iexact=supplier_name).first()
+            supplier = _koda_resolve_supplier(supplier_name)
             if not supplier:
                 supplier = Supplier.objects.create(name=supplier_name)
             items = data.get("items") or []
@@ -2623,7 +2651,7 @@ def _koda_execute_actions(actions: list[dict], user, invoice_path: str | None) -
                         raise ValueError("Cantidad inválida.")
                     unit_cost_raw = item.get("unit_cost")
                     if unit_cost_raw is None:
-                        unit_cost = product.price_consumer
+                        unit_cost = product.cost_with_vat()
                     else:
                         unit_cost = Decimal(str(unit_cost_raw))
                     vat_percent = Decimal(str(item.get("vat_percent") or "0.00"))
