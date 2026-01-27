@@ -2293,7 +2293,8 @@ def _koda_system_prompt() -> str:
         "- add_stock_comun: {items:[{product, quantity, unit_cost?, variant?}]}\n"
         "- transfer_to_ml: {items:[{product, quantity, variant?}]}\n"
         "- register_sale: {warehouse, audience?, customer?, items:[{product, quantity, unit_price?, vat_percent?}]}\n"
-        "- register_purchase: {warehouse?, supplier, reference?, items:[{product, quantity, unit_cost, vat_percent?}], has_invoice_image?}\n"
+        "- register_purchase: {warehouse?, supplier, reference?, items:[{product, quantity, unit_cost?, vat_percent?}], has_invoice_image?}\n"
+        "Si falta unit_cost en compras, usá el precio de lista del ERP (price_consumer).\n"
         "Usá identificadores de producto por SKU si es posible, sino por nombre exacto. "
         "Si el producto tiene variedades, pedí o incluí la variedad."
     )
@@ -2620,8 +2621,9 @@ def _koda_execute_actions(actions: list[dict], user, invoice_path: str | None) -
                         raise ValueError("Cantidad inválida.")
                     unit_cost_raw = item.get("unit_cost")
                     if unit_cost_raw is None:
-                        raise ValueError("Falta el costo unitario.")
-                    unit_cost = Decimal(str(unit_cost_raw))
+                        unit_cost = product.price_consumer
+                    else:
+                        unit_cost = Decimal(str(unit_cost_raw))
                     vat_percent = Decimal(str(item.get("vat_percent") or "0.00"))
                     PurchaseItem.objects.create(
                         purchase=purchase,
