@@ -369,6 +369,22 @@
                 const text = input.value.trim();
                 const file = imageInput.files[0] || pastedFile;
                 if (!text && !file) return;
+                if (pendingWrap.style.display === "block") {
+                    const normalized = (text || "").trim().toLowerCase();
+                    if (["si", "sí", "confirmo", "confirmar", "ok", "dale"].includes(normalized)) {
+                        await sendDecision("confirm");
+                        input.value = "";
+                        return;
+                    }
+                    if (["no", "cancelar", "cancelo", "stop"].includes(normalized)) {
+                        await sendDecision("cancel");
+                        input.value = "";
+                        return;
+                    }
+                    addMessage("assistant", "Usá los botones Confirmar o Cancelar para ejecutar.");
+                    input.value = "";
+                    return;
+                }
                 if (text) {
                     addMessage("user", text);
                 }

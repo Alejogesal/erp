@@ -2720,7 +2720,7 @@ def koda_chat(request):
         reply = "Puedo gestionarlo. Confirmame los datos exactos para proceder."
     if actions and not needs_confirmation:
         needs_confirmation = True
-    if not actions and any(word in lowered for word in ("registr", "cre", "transfer", "actualic", "listo")):
+    if not actions and any(word in lowered for word in ("registr", "cre", "transfer", "actualic", "listo", "confirm")):
         reply = "Puedo hacerlo, pero necesito confirmación y los datos exactos para ejecutar."
 
     if needs_confirmation:
