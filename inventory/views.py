@@ -2288,6 +2288,8 @@ def _koda_system_prompt() -> str:
         "Siempre respondé algo útil en reply, aunque no haya acciones. "
         "Si falta información, hacé una pregunta y dejá actions vacío y needs_confirmation=false. "
         "Si hay una imagen adjunta, extraé los datos relevantes de la imagen. "
+        "Nunca digas que ejecutaste una acción si no envías actions. "
+        "Si el usuario pide ejecutar/registrar/crear/transferir, devolvé actions y needs_confirmation=true. "
         "Acciones permitidas:\n"
         "- create_product: {name, sku?, group?, avg_cost?, vat_percent?, price_consumer?, price_barber?, price_distributor?}\n"
         "- add_stock_comun: {items:[{product, quantity, unit_cost?, variant?}]}\n"
@@ -2716,6 +2718,10 @@ def koda_chat(request):
     lowered = reply.lower()
     if "no tengo acceso" in lowered or "no tengo acceso directo" in lowered or "no puedo acceder" in lowered:
         reply = "Puedo gestionarlo. Confirmame los datos exactos para proceder."
+    if actions and not needs_confirmation:
+        needs_confirmation = True
+    if not actions and any(word in lowered for word in ("registr", "cre", "transfer", "actualic", "listo")):
+        reply = "Puedo hacerlo, pero necesito confirmación y los datos exactos para ejecutar."
 
     if needs_confirmation:
         request.session["koda_pending"] = {
