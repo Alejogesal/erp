@@ -17,25 +17,48 @@
             <thead>
                 <tr>
                     <th>Producto</th>
+                    <th>Variedad</th>
                     <th>Cantidad</th>
                     <th>IVA %</th>
                     <th>Eliminar</th>
                 </tr>
             </thead>
             <tbody id="items-body">
+                {% if item_rows %}
+                {% for row in item_rows %}
+                <tr>
+                    <td>{{ row.form.product }}</td>
+                    <td>
+                        <select name="{{ row.form.prefix }}-variant_id" class="variant-select" data-selected="{{ row.variant_id|default_if_none:'' }}"></select>
+                    </td>
+                    <td>{{ row.form.quantity }}</td>
+                    <td>{{ row.form.vat_percent }}</td>
+                    <td>{% if formset.can_delete %}{{ row.form.DELETE }}{% endif %}</td>
+                </tr>
+                {% if row.form.errors %}
+                <tr>
+                    <td colspan="5">{{ row.form.errors }}</td>
+                </tr>
+                {% endif %}
+                {% endfor %}
+                {% else %}
                 {% for item_form in formset.forms %}
                 <tr>
                     <td>{{ item_form.product }}</td>
+                    <td>
+                        <select name="{{ item_form.prefix }}-variant_id" class="variant-select" data-selected=""></select>
+                    </td>
                     <td>{{ item_form.quantity }}</td>
                     <td>{{ item_form.vat_percent }}</td>
                     <td>{% if formset.can_delete %}{{ item_form.DELETE }}{% endif %}</td>
                 </tr>
                 {% if item_form.errors %}
                 <tr>
-                    <td colspan="4">{{ item_form.errors }}</td>
+                    <td colspan="5">{{ item_form.errors }}</td>
                 </tr>
                 {% endif %}
                 {% endfor %}
+                {% endif %}
             </tbody>
         </table>
         <button type="button" id="add-item">Agregar producto</button>
@@ -48,6 +71,7 @@
 </div>
 
 {{ customer_audiences|json_script:"customer-audiences" }}
+{{ variant_data|json_script:"sale-variant-data" }}
 <script>
     (function() {
         const addBtn = document.getElementById("add-item");
@@ -92,11 +116,46 @@
         }
 
         if (!addBtn || !body || !totalForms) return;
+        const variantDataNode = document.getElementById("sale-variant-data");
+        const variantData = variantDataNode ? JSON.parse(variantDataNode.textContent) : {};
+        const updateVariantSelect = (selectEl) => {
+            const row = selectEl?.closest("tr");
+            const variantSelect = row?.querySelector("select[name$='-variant_id']");
+            if (!variantSelect) return;
+            const productId = selectEl.value;
+            const variants = variantData[productId] || [];
+            variantSelect.innerHTML = "";
+            if (!variants.length) {
+                const option = document.createElement("option");
+                option.value = "";
+                option.textContent = "Sin variedades";
+                variantSelect.appendChild(option);
+                variantSelect.disabled = true;
+                return;
+            }
+            const empty = document.createElement("option");
+            empty.value = "";
+            empty.textContent = "Seleccioná variedad";
+            variantSelect.appendChild(empty);
+            variants.forEach((variant) => {
+                const option = document.createElement("option");
+                option.value = variant.id;
+                option.textContent = variant.name;
+                variantSelect.appendChild(option);
+            });
+            variantSelect.disabled = false;
+            const selected = variantSelect.dataset.selected || "";
+            if (selected) {
+                variantSelect.value = selected;
+            }
+        };
+
         const updateSearchFromSelect = (selectEl) => {
             const searchInput = selectEl?._searchInput;
             if (!searchInput) return;
             const selectedText = selectEl.options[selectEl.selectedIndex]?.textContent || "";
             searchInput.value = selectedText;
+            updateVariantSelect(selectEl);
         };
 
         const setupProductSearch = (selectEl) => {
@@ -165,6 +224,7 @@
         };
 
         document.querySelectorAll("select[name$='-product']").forEach(setupProductSearch);
+        document.querySelectorAll("select[name$='-product']").forEach(updateVariantSelect);
 
         addBtn.addEventListener("click", () => {
             const idx = parseInt(totalForms.value, 10);
@@ -174,11 +234,15 @@
 
             const tr = document.createElement("tr");
             const product = container.querySelector("[name$='-product']");
+            const variant = document.createElement("select");
+            variant.name = `form-${idx}-variant_id`;
+            variant.className = "variant-select";
+            variant.dataset.selected = "";
             const qty = container.querySelector("[name$='-quantity']");
             const vat = container.querySelector("[name$='-vat_percent']");
             const deleteField = container.querySelector("[name$='-DELETE']");
 
-            [product, qty, vat, deleteField].forEach(field => {
+            [product, variant, qty, vat, deleteField].forEach(field => {
                 const td = document.createElement("td");
                 if (field) td.appendChild(field);
                 tr.appendChild(td);
@@ -187,6 +251,7 @@
             totalForms.value = idx + 1;
             body.appendChild(tr);
             setupProductSearch(tr.querySelector("select[name$='-product']"));
+            updateVariantSelect(tr.querySelector("select[name$='-product']"));
         });
 
         const formEl = addBtn.closest("form");

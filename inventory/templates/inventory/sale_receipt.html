@@ -82,7 +82,7 @@
         <tbody>
             {% for item in items %}
             <tr>
-                <td>{{ item.product.name }}</td>
+                <td>{{ item.product.name }}{% if item.variant %} · {{ item.variant.name }}{% endif %}</td>
                 <td class="num">{{ item.quantity|latam_number:2 }}</td>
                 <td class="num">${{ item.unit_price|latam_number:2 }}</td>
                 <td class="num">

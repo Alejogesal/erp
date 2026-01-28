@@ -414,7 +414,8 @@ def register_sale(request):
 @login_required
 def sale_receipt(request, sale_id: int):
     sale = get_object_or_404(
-        Sale.objects.select_related("customer", "warehouse").prefetch_related("items__product"), pk=sale_id
+        Sale.objects.select_related("customer", "warehouse").prefetch_related("items__product", "items__variant"),
+        pk=sale_id,
     )
     items = list(sale.items.all())
     subtotal = sum((item.unit_price * item.quantity for item in items), Decimal("0.00"))
@@ -454,7 +455,8 @@ def sale_receipt(request, sale_id: int):
 @login_required
 def sale_receipt_pdf(request, sale_id: int):
     sale = get_object_or_404(
-        Sale.objects.select_related("customer", "warehouse").prefetch_related("items__product"), pk=sale_id
+        Sale.objects.select_related("customer", "warehouse").prefetch_related("items__product", "items__variant"),
+        pk=sale_id,
     )
     items = list(sale.items.all())
     subtotal = sum((item.unit_price * item.quantity for item in items), Decimal("0.00"))
@@ -510,7 +512,7 @@ def sale_receipt_pdf(request, sale_id: int):
 @login_required
 def sale_edit(request, sale_id: int):
     sale = get_object_or_404(
-        Sale.objects.select_related("customer", "warehouse").prefetch_related("items__product", "movements"),
+        Sale.objects.select_related("customer", "warehouse").prefetch_related("items__product", "items__variant", "movements"),
         pk=sale_id,
     )
     SaleItemFormSet = formset_factory(SaleItemForm, extra=0, can_delete=True)
@@ -562,17 +564,31 @@ def sale_edit(request, sale_id: int):
             elif not form.has_changed():
                 form.empty_permitted = True
         if header_form.is_valid() and formset.is_valid():
+            warehouse = header_form.cleaned_data["warehouse"]
+            require_variants = warehouse.type == Warehouse.WarehouseType.COMUN
             items = []
             for form in formset:
                 if form.cleaned_data.get("DELETE"):
                     continue
-                if not form.cleaned_data.get("product"):
+                product = form.cleaned_data.get("product")
+                if not product:
                     continue
-                items.append(form.cleaned_data)
+                variant_id_raw = (post_data.get(f"{form.prefix}-variant_id") or "").strip()
+                variant = None
+                if variant_id_raw:
+                    variant = ProductVariant.objects.filter(id=variant_id_raw, product=product).first()
+                    if not variant:
+                        form.add_error(None, "Variedad inválida.")
+                if require_variants and ProductVariant.objects.filter(product=product).exists() and not variant:
+                    form.add_error(None, "Seleccioná una variedad.")
+                items.append({**form.cleaned_data, "variant": variant})
+            if any(form.errors for form in formset):
+                messages.error(request, "Revisá los campos de la venta.")
+                return redirect("inventory_sale_edit", sale_id=sale.id)
             if not items:
                 messages.error(request, "Agregá al menos un producto.")
                 return redirect("inventory_sale_edit", sale_id=sale.id)
-            warehouse = header_form.cleaned_data["warehouse"]
+            comun_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
             audience = header_form.cleaned_data.get("audiencia") or Customer.Audience.CONSUMER
             customer = header_form.cleaned_data.get("cliente")
             total_venta = header_form.cleaned_data.get("total_venta")
@@ -593,6 +609,20 @@ def sale_edit(request, sale_id: int):
                         or sale.reference.startswith("GS ORDER")
                         or warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE
                     )
+                    previous_items = list(sale.items.select_related("variant", "product"))
+                    if sale.warehouse.type == Warehouse.WarehouseType.COMUN:
+                        for prev_item in previous_items:
+                            if prev_item.variant_id:
+                                variant = (
+                                    ProductVariant.objects.select_for_update()
+                                    .filter(id=prev_item.variant_id, product=prev_item.product)
+                                    .first()
+                                )
+                                if variant:
+                                    variant.quantity = (variant.quantity + prev_item.quantity).quantize(Decimal("0.01"))
+                                    variant.save(update_fields=["quantity"])
+                                    if comun_wh:
+                                        _koda_sync_common_with_variants(prev_item.product, comun_wh)
                     for movement in sale.movements.select_for_update():
                         if not is_ml_sale and movement.movement_type == StockMovement.MovementType.EXIT and movement.from_warehouse:
                             stock, _ = Stock.objects.select_for_update().get_or_create(
@@ -652,9 +682,24 @@ def sale_edit(request, sale_id: int):
                         line_total = (qty * final_price).quantize(Decimal("0.01"))
                         discount_amount = (qty * (base_price - final_price)).quantize(Decimal("0.01"))
                         base_subtotal += (qty * base_price).quantize(Decimal("0.01"))
+                        variant = data.get("variant")
+                        if warehouse.type == Warehouse.WarehouseType.COMUN and variant:
+                            variant = (
+                                ProductVariant.objects.select_for_update()
+                                .filter(id=variant.id, product=data["product"])
+                                .first()
+                            )
+                            if variant:
+                                if variant.quantity - qty < 0:
+                                    raise services.NegativeStockError("Stock insuficiente en variedad.")
+                                variant.quantity = (variant.quantity - qty).quantize(Decimal("0.01"))
+                                variant.save(update_fields=["quantity"])
+                                if comun_wh:
+                                    _koda_sync_common_with_variants(data["product"], comun_wh)
                         SaleItem.objects.create(
                             sale=sale,
                             product=data["product"],
+                            variant=variant,
                             quantity=qty,
                             unit_price=base_price,
                             cost_unit=data["product"].cost_with_vat(),
@@ -724,15 +769,24 @@ def sale_edit(request, sale_id: int):
                 "impuestos_ml": sale.ml_tax_total or Decimal("0.00"),
             }
         )
+        items = list(sale.items.select_related("variant", "product"))
         initial = [
             {
                 "product": item.product,
                 "quantity": int(item.quantity),
                 "vat_percent": item.vat_percent,
             }
-            for item in sale.items.all()
+            for item in items
         ]
         formset = SaleItemFormSet(initial=initial)
+        item_rows = [
+            {"form": form, "variant_id": item.variant_id}
+            for form, item in zip(formset.forms, items)
+        ]
+
+    variant_data = {}
+    for row in ProductVariant.objects.values("id", "product_id", "name").order_by("name", "id"):
+        variant_data.setdefault(str(row["product_id"]), []).append({"id": row["id"], "name": row["name"]})
 
     return render(
         request,
@@ -741,7 +795,9 @@ def sale_edit(request, sale_id: int):
             "sale": sale,
             "form": header_form,
             "formset": formset,
+            "item_rows": item_rows if request.method != "POST" else None,
             "customer_audiences": customer_audiences,
+            "variant_data": variant_data,
         },
     )
 
@@ -1162,6 +1218,20 @@ def sales_list(request):
         with transaction.atomic():
             for sale in sales:
                 is_ml_sale = sale.ml_order_id or sale.reference.startswith("ML ORDER") or sale.reference.startswith("GS ORDER")
+                comun_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
+                if sale.warehouse.type == Warehouse.WarehouseType.COMUN:
+                    for item in sale.items.select_related("variant", "product"):
+                        if item.variant_id:
+                            variant = (
+                                ProductVariant.objects.select_for_update()
+                                .filter(id=item.variant_id, product=item.product)
+                                .first()
+                            )
+                            if variant:
+                                variant.quantity = (variant.quantity + item.quantity).quantize(Decimal("0.01"))
+                                variant.save(update_fields=["quantity"])
+                                if comun_wh:
+                                    _koda_sync_common_with_variants(item.product, comun_wh)
                 for movement in sale.movements.select_for_update():
                     if not is_ml_sale and movement.movement_type == StockMovement.MovementType.EXIT and movement.from_warehouse:
                         stock, _ = Stock.objects.select_for_update().get_or_create(
@@ -1223,6 +1293,7 @@ def sales_list(request):
                 form.empty_permitted = True
         if header_form.is_valid() and formset.is_valid():
             warehouse = header_form.cleaned_data["warehouse"]
+            require_variants = warehouse.type == Warehouse.WarehouseType.COMUN
             audience = header_form.cleaned_data.get("audiencia") or Customer.Audience.CONSUMER
             customer = header_form.cleaned_data.get("cliente")
             total_venta = header_form.cleaned_data.get("total_venta")
@@ -1235,12 +1306,31 @@ def sales_list(request):
                 audience = Customer.Audience.CONSUMER
             elif customer:
                 audience = customer.audience
-            items = [f.cleaned_data for f in formset.forms if f.cleaned_data and not f.cleaned_data.get("DELETE")]
+            items = []
+            for form in formset.forms:
+                if form.cleaned_data and form.cleaned_data.get("DELETE"):
+                    continue
+                product = form.cleaned_data.get("product") if form.cleaned_data else None
+                if not product:
+                    continue
+                variant_id_raw = (post_data.get(f"{form.prefix}-variant_id") or "").strip()
+                variant = None
+                if variant_id_raw:
+                    variant = ProductVariant.objects.filter(id=variant_id_raw, product=product).first()
+                    if not variant:
+                        form.add_error(None, "Variedad inválida.")
+                if require_variants and ProductVariant.objects.filter(product=product).exists() and not variant:
+                    form.add_error(None, "Seleccioná una variedad.")
+                items.append({**form.cleaned_data, "variant": variant})
+            if any(form.errors for form in formset):
+                messages.error(request, "Revisá los campos de la venta.")
+                return redirect("inventory_sales_list")
             if not items:
                 messages.error(request, "Agregá al menos un producto.")
             else:
                 try:
                     with transaction.atomic():
+                        comun_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
                         sale = Sale.objects.create(
                             customer=customer,
                             warehouse=warehouse,
@@ -1289,9 +1379,24 @@ def sales_list(request):
                             line_total = (qty * final_price).quantize(Decimal("0.01"))
                             discount_amount = (qty * (base_price - final_price)).quantize(Decimal("0.01"))
                             base_subtotal += (qty * base_price).quantize(Decimal("0.01"))
+                            variant = data.get("variant")
+                            if warehouse.type == Warehouse.WarehouseType.COMUN and variant:
+                                variant = (
+                                    ProductVariant.objects.select_for_update()
+                                    .filter(id=variant.id, product=data["product"])
+                                    .first()
+                                )
+                                if variant:
+                                    if variant.quantity - qty < 0:
+                                        raise services.NegativeStockError("Stock insuficiente en variedad.")
+                                    variant.quantity = (variant.quantity - qty).quantize(Decimal("0.01"))
+                                    variant.save(update_fields=["quantity"])
+                                    if comun_wh:
+                                        _koda_sync_common_with_variants(data["product"], comun_wh)
                             SaleItem.objects.create(
                                 sale=sale,
                                 product=data["product"],
+                                variant=variant,
                                 quantity=qty,
                                 unit_price=base_price,
                                 cost_unit=data["product"].cost_with_vat(),
@@ -1402,6 +1507,9 @@ def sales_list(request):
             request=request,
         )
         return JsonResponse({"html": html})
+    variant_data = {}
+    for row in ProductVariant.objects.values("id", "product_id", "name").order_by("name", "id"):
+        variant_data.setdefault(str(row["product_id"]), []).append({"id": row["id"], "name": row["name"]})
     return render(
         request,
         "inventory/sales_list.html",
@@ -1421,6 +1529,7 @@ def sales_list(request):
             "form": header_form,
             "formset": formset,
             "customer_audiences": customer_audiences,
+            "variant_data": variant_data,
         },
     )
 
@@ -1432,6 +1541,20 @@ def sale_delete(request, sale_id: int):
     try:
         with transaction.atomic():
             is_ml_sale = sale.ml_order_id or sale.reference.startswith("ML ORDER") or sale.reference.startswith("GS ORDER")
+            comun_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
+            if sale.warehouse.type == Warehouse.WarehouseType.COMUN:
+                for item in sale.items.select_related("variant", "product"):
+                    if item.variant_id:
+                        variant = (
+                            ProductVariant.objects.select_for_update()
+                            .filter(id=item.variant_id, product=item.product)
+                            .first()
+                        )
+                        if variant:
+                            variant.quantity = (variant.quantity + item.quantity).quantize(Decimal("0.01"))
+                            variant.save(update_fields=["quantity"])
+                            if comun_wh:
+                                _koda_sync_common_with_variants(item.product, comun_wh)
             # Revert stock only for non-ML sales
             for movement in sale.movements.select_for_update():
                 if not is_ml_sale and movement.movement_type == StockMovement.MovementType.EXIT and movement.from_warehouse:
