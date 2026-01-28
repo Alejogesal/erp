@@ -533,9 +533,16 @@ def sale_edit(request, sale_id: int):
         for form in formset.forms:
             prefix = form.prefix
             product_raw = (post_data.get(f"{prefix}-product") or "").strip()
+            product_text = (post_data.get(f"{prefix}-product_text") or "").strip()
             qty_raw = (post_data.get(f"{prefix}-quantity") or "").strip()
-            qty_zeroish = qty_raw in {"", "0", "0.0", "0.00", "0,00"}
-            if not product_raw and qty_zeroish:
+            qty_value = None
+            if qty_raw:
+                try:
+                    qty_value = Decimal(str(qty_raw).replace(",", "."))
+                except Exception:
+                    qty_value = None
+            qty_zeroish = qty_raw in {"", "0", "0.0", "0.00", "0,00"} or (qty_value is not None and qty_value <= 0)
+            if not product_raw and not product_text and qty_zeroish:
                 form.empty_permitted = True
             elif not form.has_changed():
                 form.empty_permitted = True
@@ -1186,9 +1193,16 @@ def sales_list(request):
         for form in formset.forms:
             prefix = form.prefix
             product_raw = (post_data.get(f"{prefix}-product") or "").strip()
+            product_text = (post_data.get(f"{prefix}-product_text") or "").strip()
             qty_raw = (post_data.get(f"{prefix}-quantity") or "").strip()
-            qty_zeroish = qty_raw in {"", "0", "0.0", "0.00", "0,00"}
-            if not product_raw and qty_zeroish:
+            qty_value = None
+            if qty_raw:
+                try:
+                    qty_value = Decimal(str(qty_raw).replace(",", "."))
+                except Exception:
+                    qty_value = None
+            qty_zeroish = qty_raw in {"", "0", "0.0", "0.00", "0,00"} or (qty_value is not None and qty_value <= 0)
+            if not product_raw and not product_text and qty_zeroish:
                 form.empty_permitted = True
             elif not form.has_changed():
                 form.empty_permitted = True
