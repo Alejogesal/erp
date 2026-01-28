@@ -532,7 +532,10 @@ def sale_edit(request, sale_id: int):
         formset = SaleItemFormSet(post_data)
         for form in formset.forms:
             prefix = form.prefix
-            if not (post_data.get(f"{prefix}-product") or post_data.get(f"{prefix}-quantity")):
+            product_raw = (post_data.get(f"{prefix}-product") or "").strip()
+            qty_raw = (post_data.get(f"{prefix}-quantity") or "").strip()
+            qty_zeroish = qty_raw in {"", "0", "0.0", "0.00", "0,00"}
+            if not product_raw and qty_zeroish:
                 form.empty_permitted = True
             elif not form.has_changed():
                 form.empty_permitted = True
@@ -1182,7 +1185,10 @@ def sales_list(request):
         formset = SaleItemFormSet(post_data)
         for form in formset.forms:
             prefix = form.prefix
-            if not (post_data.get(f"{prefix}-product") or post_data.get(f"{prefix}-quantity")):
+            product_raw = (post_data.get(f"{prefix}-product") or "").strip()
+            qty_raw = (post_data.get(f"{prefix}-quantity") or "").strip()
+            qty_zeroish = qty_raw in {"", "0", "0.0", "0.00", "0,00"}
+            if not product_raw and qty_zeroish:
                 form.empty_permitted = True
             elif not form.has_changed():
                 form.empty_permitted = True
