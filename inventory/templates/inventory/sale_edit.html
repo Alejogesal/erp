@@ -168,7 +168,7 @@
 
         addBtn.addEventListener("click", () => {
             const idx = parseInt(totalForms.value, 10);
-            const emptyHtml = `{{ formset.empty_form.as_p|escapejs }}`.replace(/__prefix__/g, `form-${idx}`);
+            const emptyHtml = `{{ formset.empty_form.as_p|escapejs }}`.replace(/__prefix__/g, `${idx}`);
             const container = document.createElement("div");
             container.innerHTML = emptyHtml;
 
