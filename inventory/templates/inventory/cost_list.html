@@ -140,12 +140,7 @@
                 </details>
             </div>
         </div>
-        <div style="display:flex; gap:10px; align-items:center;">
-            <button type="submit" name="action" value="create_product">Guardar producto</button>
-            <button type="submit" name="action" value="bulk_update_margins" formnovalidate>
-                Aplicar márgenes a toda la lista
-            </button>
-        </div>
+        <button type="submit" name="action" value="create_product">Guardar producto</button>
     </form>
 </div>
 
@@ -172,45 +167,6 @@
             <input id="delete_file" name="file" type="file" accept=".xlsx">
         </p>
         <button type="submit">Eliminar importación</button>
-    </form>
-</div>
-
-<div class="card" style="margin-bottom:16px;">
-    <div class="card-title">Edición masiva</div>
-    {% if bulk_form.errors %}
-        {{ bulk_form.errors }}
-    {% endif %}
-    <form method="post">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="bulk_update">
-        <div class="product-form-grid">
-            <div>
-                {{ bulk_form.group.label_tag }}
-                {{ bulk_form.group }}
-            </div>
-            <div>
-                {{ bulk_form.supplier.label_tag }}
-                {{ bulk_form.supplier }}
-            </div>
-            <div>
-                {{ bulk_form.cost_percent.label_tag }}
-                {{ bulk_form.cost_percent }}
-                <div class="autosave-status">Si dejás Marca/Grupo vacío, aplica a toda la lista.</div>
-            </div>
-            <div>
-                {{ bulk_form.margin_consumer.label_tag }}
-                {{ bulk_form.margin_consumer }}
-            </div>
-            <div>
-                {{ bulk_form.margin_barber.label_tag }}
-                {{ bulk_form.margin_barber }}
-            </div>
-            <div>
-                {{ bulk_form.margin_distributor.label_tag }}
-                {{ bulk_form.margin_distributor }}
-            </div>
-        </div>
-        <button type="submit" style="margin-top:12px;">Aplicar cambios</button>
     </form>
 </div>
 
@@ -392,6 +348,27 @@
         };
         const csrfToken = getCookie("csrftoken");
         const timers = new Map();
+        const marginTimers = new Map();
+
+        const updateAllMargins = () => {
+            const consumerInput = document.querySelector("input[name='margin_consumer']");
+            const barberInput = document.querySelector("input[name='margin_barber']");
+            const distributorInput = document.querySelector("input[name='margin_distributor']");
+            if (!consumerInput && !barberInput && !distributorInput) return;
+            const payload = new FormData();
+            payload.append("action", "bulk_update_margins");
+            payload.append("margin_consumer", consumerInput?.value || "");
+            payload.append("margin_barber", barberInput?.value || "");
+            payload.append("margin_distributor", distributorInput?.value || "");
+            fetch(window.location.href, {
+                method: "POST",
+                headers: {
+                    "X-CSRFToken": csrfToken || "",
+                },
+                body: payload,
+                credentials: "same-origin",
+            }).catch(() => {});
+        };
         const autosave = (row) => {
             const productId = row.querySelector("input[name$='-product_id']")?.value;
             const avgCostInput = row.querySelector("input[name$='-avg_cost']");
@@ -425,6 +402,20 @@
             });
             avgCostInput.addEventListener("blur", () => autosave(row));
         });
+
+        const bindMarginAutoUpdate = (input) => {
+            if (!input) return;
+            input.addEventListener("input", () => {
+                const key = input.name || input;
+                clearTimeout(marginTimers.get(key));
+                marginTimers.set(key, setTimeout(updateAllMargins, 600));
+            });
+            input.addEventListener("blur", updateAllMargins);
+        };
+
+        bindMarginAutoUpdate(document.querySelector("input[name='margin_consumer']"));
+        bindMarginAutoUpdate(document.querySelector("input[name='margin_barber']"));
+        bindMarginAutoUpdate(document.querySelector("input[name='margin_distributor']"));
     })();
 </script>
 {% endblock %}
