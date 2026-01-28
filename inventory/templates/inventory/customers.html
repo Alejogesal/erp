@@ -91,17 +91,173 @@
         </tbody>
     </table>
 </div>
+<style>
+    .select-search {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+    .select-search-results {
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 0;
+        right: 0;
+        background: #0f1622;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 10px;
+        padding: 6px;
+        display: none;
+        max-height: 260px;
+        overflow: auto;
+        z-index: 20;
+        box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+    }
+    .select-search-results button {
+        width: 100%;
+        text-align: left;
+        background: transparent;
+        border: none;
+        color: inherit;
+        padding: 6px 8px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 13px;
+    }
+    .select-search-results button.is-active,
+    .select-search-results button:hover {
+        background: rgba(255, 255, 255, 0.08);
+    }
+</style>
 <script>
     (function() {
-        document.querySelectorAll(".customer-audience-select").forEach((select) => {
-            select.addEventListener("change", () => select.form?.submit());
-            select.addEventListener("keydown", (event) => {
+        var audienceSelects = document.querySelectorAll(".customer-audience-select");
+        Array.prototype.forEach.call(audienceSelects, function(select) {
+            select.addEventListener("change", function() {
+                if (select.form) select.form.submit();
+            });
+            select.addEventListener("keydown", function(event) {
                 if (event.key === "Enter") {
                     event.preventDefault();
-                    select.form?.submit();
+                    if (select.form) select.form.submit();
                 }
             });
         });
+
+        var setupSearchableSelect = function(selectEl, options) {
+            if (!selectEl) return;
+            if (selectEl.dataset.searchReady === "1") return;
+            selectEl.dataset.searchReady = "1";
+            var placeholder = (options && options.placeholder) || "Buscar...";
+            var maxResults = (options && options.maxResults) || 40;
+            var optionData = Array.prototype.map.call(selectEl.options, function(opt) {
+                var label = opt.textContent || "";
+                return {
+                    value: opt.value,
+                    label: label,
+                    labelLower: label.toLowerCase()
+                };
+            });
+
+            selectEl.style.display = "none";
+            var wrapper = document.createElement("div");
+            wrapper.className = "select-search";
+            var search = document.createElement("input");
+            search.type = "text";
+            search.placeholder = placeholder;
+            var results = document.createElement("div");
+            results.className = "select-search-results";
+            var activeIndex = -1;
+            var currentMatches = [];
+
+            var renderResults = function(query) {
+                var q = (query || "").trim().toLowerCase();
+                currentMatches = q
+                    ? optionData.filter(function(opt) { return opt.labelLower.indexOf(q) !== -1; })
+                    : optionData.slice();
+                currentMatches = currentMatches.slice(0, maxResults);
+                results.innerHTML = "";
+                if (!currentMatches.length) {
+                    results.style.display = "none";
+                    activeIndex = -1;
+                    return;
+                }
+                currentMatches.forEach(function(opt, idx) {
+                    var button = document.createElement("button");
+                    button.type = "button";
+                    button.textContent = opt.label;
+                    button.dataset.value = opt.value;
+                    if (idx === 0) {
+                        button.classList.add("is-active");
+                        activeIndex = 0;
+                    }
+                    button.addEventListener("click", function() {
+                        selectEl.value = opt.value || "";
+                        search.value = opt.label;
+                        results.style.display = "none";
+                    });
+                    results.appendChild(button);
+                });
+                results.style.display = "block";
+            };
+
+            var syncFromSelect = function() {
+                var selectedText = selectEl.options[selectEl.selectedIndex] ? selectEl.options[selectEl.selectedIndex].textContent : "";
+                if (selectedText) search.value = selectedText;
+            };
+
+            var pickActive = function() {
+                if (activeIndex < 0 || activeIndex >= currentMatches.length) return;
+                var match = currentMatches[activeIndex];
+                if (!match) return;
+                selectEl.value = match.value || "";
+                search.value = match.label;
+                results.style.display = "none";
+            };
+
+            selectEl.parentElement.insertBefore(wrapper, selectEl);
+            wrapper.appendChild(search);
+            wrapper.appendChild(results);
+            wrapper.appendChild(selectEl);
+            syncFromSelect();
+
+            search.addEventListener("input", function() { renderResults(search.value); });
+            search.addEventListener("focus", function() { renderResults(search.value); });
+            search.addEventListener("blur", function() {
+                setTimeout(function() { results.style.display = "none"; }, 150);
+            });
+            search.addEventListener("keydown", function(event) {
+                if (results.style.display !== "block") return;
+                if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                    event.preventDefault();
+                    var buttons = results.querySelectorAll("button");
+                    if (!buttons.length) return;
+                    buttons.forEach(function(btn) { btn.classList.remove("is-active"); });
+                    if (event.key === "ArrowDown") {
+                        activeIndex = (activeIndex + 1) % buttons.length;
+                    } else {
+                        activeIndex = (activeIndex - 1 + buttons.length) % buttons.length;
+                    }
+                    buttons[activeIndex].classList.add("is-active");
+                } else if (event.key === "Enter") {
+                    event.preventDefault();
+                    pickActive();
+                }
+            });
+        };
+
+        var discountAction = document.querySelector("input[name='action'][value='create_discount']");
+        var groupDiscountAction = document.querySelector("input[name='action'][value='create_group_discount']");
+        var discountForm = discountAction ? discountAction.form : null;
+        var groupDiscountForm = groupDiscountAction ? groupDiscountAction.form : null;
+
+        if (discountForm) {
+            setupSearchableSelect(discountForm.querySelector("select[name='customer']"), { placeholder: "Buscar cliente..." });
+            setupSearchableSelect(discountForm.querySelector("select[name='product']"), { placeholder: "Buscar producto..." });
+        }
+        if (groupDiscountForm) {
+            setupSearchableSelect(groupDiscountForm.querySelector("select[name='customer']"), { placeholder: "Buscar cliente..." });
+        }
     })();
 </script>
 {% endblock %}

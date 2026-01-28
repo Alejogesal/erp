@@ -209,6 +209,25 @@
             background: rgba(139, 148, 158, 0.15);
             align-self: flex-start;
         }
+        .koda-msg.assistant.koda-typing {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 46px;
+        }
+        .koda-typing .dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.7);
+            animation: koda-bounce 1s infinite ease-in-out;
+        }
+        .koda-typing .dot:nth-child(2) { animation-delay: 0.15s; }
+        .koda-typing .dot:nth-child(3) { animation-delay: 0.3s; }
+        @keyframes koda-bounce {
+            0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+            40% { transform: translateY(-4px); opacity: 1; }
+        }
         .koda-actions {
             padding: 12px 16px 16px;
             border-top: 1px solid #243041;
@@ -341,6 +360,7 @@
             const attachIndicator = document.getElementById("koda-attach-indicator");
             if (!toggle || !panel) return;
             let pastedFile = null;
+            let typingBubble = null;
 
             const getCookie = (name) => {
                 const value = `; ${document.cookie}`;
@@ -356,6 +376,19 @@
                 bubble.textContent = text;
                 messages.appendChild(bubble);
                 messages.scrollTop = messages.scrollHeight;
+            };
+            const showTyping = () => {
+                if (!messages || typingBubble) return;
+                typingBubble = document.createElement("div");
+                typingBubble.className = "koda-msg assistant koda-typing";
+                typingBubble.innerHTML = "<span class=\"dot\"></span><span class=\"dot\"></span><span class=\"dot\"></span>";
+                messages.appendChild(typingBubble);
+                messages.scrollTop = messages.scrollHeight;
+            };
+            const hideTyping = () => {
+                if (!typingBubble) return;
+                typingBubble.remove();
+                typingBubble = null;
             };
 
             const togglePanel = (open) => {
@@ -397,19 +430,25 @@
                 const formData = new FormData();
                 formData.append("message", text);
                 if (file) formData.append("image", file);
-
-                const response = await fetch("/koda/chat/", {
-                    method: "POST",
-                    headers: {
-                        "X-CSRFToken": getCookie("csrftoken"),
-                    },
-                    body: formData,
-                });
-                const data = await response.json();
-                if (data.reply) addMessage("assistant", data.reply);
-                if (data.needs_confirmation) {
-                    summaryEl.textContent = data.summary || "Acción pendiente";
-                    pendingWrap.style.display = "block";
+                showTyping();
+                try {
+                    const response = await fetch("/koda/chat/", {
+                        method: "POST",
+                        headers: {
+                            "X-CSRFToken": getCookie("csrftoken"),
+                        },
+                        body: formData,
+                    });
+                    const data = await response.json();
+                    hideTyping();
+                    if (data.reply) addMessage("assistant", data.reply);
+                    if (data.needs_confirmation) {
+                        summaryEl.textContent = data.summary || "Acción pendiente";
+                        pendingWrap.style.display = "block";
+                    }
+                } catch (err) {
+                    hideTyping();
+                    addMessage("assistant", "Tuve un problema para responder. Intentá de nuevo.");
                 }
             };
 
@@ -452,17 +491,24 @@
             }
 
             const sendDecision = async (decision) => {
-                const response = await fetch("/koda/confirm/", {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "X-CSRFToken": getCookie("csrftoken"),
-                    },
-                    body: JSON.stringify({ decision }),
-                });
-                const data = await response.json();
-                if (data.reply) addMessage("assistant", data.reply);
-                pendingWrap.style.display = "none";
+                showTyping();
+                try {
+                    const response = await fetch("/koda/confirm/", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "X-CSRFToken": getCookie("csrftoken"),
+                        },
+                        body: JSON.stringify({ decision }),
+                    });
+                    const data = await response.json();
+                    hideTyping();
+                    if (data.reply) addMessage("assistant", data.reply);
+                    pendingWrap.style.display = "none";
+                } catch (err) {
+                    hideTyping();
+                    addMessage("assistant", "No pude confirmar la acción. Probá de nuevo.");
+                }
             };
 
             if (confirmBtn) confirmBtn.addEventListener("click", () => sendDecision("confirm"));

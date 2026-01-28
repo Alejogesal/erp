@@ -2283,13 +2283,18 @@ def _koda_system_prompt() -> str:
         "Sos Koda, el asistente del ERP. Respondé SOLO en JSON válido con las claves: "
         "reply (string), actions (array), needs_confirmation (boolean). "
         "Cada acción debe ser un objeto con {type, data}. "
-        "Tenés acceso completo a los datos del ERP y podés proponer acciones. "
-        "Nunca digas que no tenés acceso a listas o datos. "
+        "Tu objetivo es ayudar con precisión, evitando suposiciones. "
+        "Nunca inventes cifras o resultados. Si el usuario pide reportes o totales "
+        "y no hay datos explícitos en el mensaje, pedí rango de fechas y filtros "
+        "(depósito, canal, cliente) y dejá actions vacío y needs_confirmation=false. "
+        "Para consultas informativas (márgenes, ventas, stock), NO uses actions. "
         "Siempre respondé algo útil en reply, aunque no haya acciones. "
-        "Si falta información, hacé una pregunta y dejá actions vacío y needs_confirmation=false. "
+        "Si falta información para ejecutar una acción, hacé preguntas concretas. "
         "Si hay una imagen adjunta, extraé los datos relevantes de la imagen. "
         "Nunca digas que ejecutaste una acción si no envías actions. "
         "Si el usuario pide ejecutar/registrar/crear/transferir, devolvé actions y needs_confirmation=true. "
+        "Si el usuario pide confirmación de lo que entendiste, resumí y pedí OK. "
+        "Respondé en español rioplatense, directo y claro. "
         "Acciones permitidas:\n"
         "- create_product: {name, sku?, group?, avg_cost?, vat_percent?, price_consumer?, price_barber?, price_distributor?}\n"
         "- add_stock_comun: {items:[{product, quantity, unit_cost?, variant?}]}\n"
@@ -2302,6 +2307,210 @@ def _koda_system_prompt() -> str:
         "Usá identificadores de producto por SKU si es posible, sino por nombre exacto. "
         "Si el producto tiene variedades, pedí o incluí la variedad."
     )
+
+
+def _koda_format_amount(value: Decimal, currency: bool = True) -> str:
+    try:
+        number = value if isinstance(value, Decimal) else Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        number = Decimal("0.00")
+    number = number.quantize(Decimal("1.00"), rounding=ROUND_HALF_UP)
+    formatted = f"{number:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"${formatted}" if currency else formatted
+
+
+def _koda_extract_percent(message: str) -> Decimal | None:
+    match = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:%|por\s*ciento)", message, re.IGNORECASE)
+    if not match:
+        return None
+    raw = match.group(1).replace(",", ".")
+    try:
+        return Decimal(raw)
+    except InvalidOperation:
+        return None
+
+
+def _koda_extract_warehouse(message: str) -> str | None:
+    lowered = message.lower()
+    if "mercadolibre" in lowered or "mercado libre" in lowered or re.search(r"\bml\b", lowered):
+        return Warehouse.WarehouseType.MERCADOLIBRE
+    if "comun" in lowered or "común" in lowered:
+        return Warehouse.WarehouseType.COMUN
+    return None
+
+
+def _koda_parse_date_range(message: str) -> tuple[datetime, datetime, datetime.date, datetime.date] | None:
+    lowered = message.lower()
+    today = timezone.localdate()
+    if "hoy" in lowered:
+        start_date = end_date = today
+    elif "ayer" in lowered:
+        day = today - timedelta(days=1)
+        start_date = end_date = day
+    else:
+        matches = list(re.finditer(r"(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?", lowered))
+        if not matches:
+            return None
+        def parse_match(match, fallback_year: int) -> datetime.date | None:
+            day = int(match.group(1))
+            month = int(match.group(2))
+            year_raw = match.group(3)
+            if year_raw:
+                year = int(year_raw)
+                if year < 100:
+                    year += 2000
+            else:
+                year = fallback_year
+            try:
+                return datetime(year, month, day).date()
+            except ValueError:
+                return None
+
+        first = matches[0]
+        fallback_year = today.year
+        first_date = parse_match(first, fallback_year)
+        if not first_date:
+            return None
+        if len(matches) >= 2:
+            second = matches[1]
+            second_date = parse_match(second, first_date.year)
+            if not second_date:
+                return None
+            start_date, end_date = first_date, second_date
+        else:
+            start_date = end_date = first_date
+    if end_date < start_date:
+        start_date, end_date = end_date, start_date
+    start_dt = timezone.make_aware(datetime.combine(start_date, time.min))
+    end_dt = timezone.make_aware(datetime.combine(end_date, time.max))
+    return start_dt, end_dt, start_date, end_date
+
+
+def _koda_safe_eval(expression: str) -> Decimal:
+    import ast
+    import operator
+
+    bin_ops = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+    }
+    unary_ops = {ast.UAdd: operator.pos, ast.USub: operator.neg}
+
+    def eval_node(node):
+        if isinstance(node, ast.Expression):
+            return eval_node(node.body)
+        if isinstance(node, ast.BinOp) and type(node.op) in bin_ops:
+            return bin_ops[type(node.op)](eval_node(node.left), eval_node(node.right))
+        if isinstance(node, ast.UnaryOp) and type(node.op) in unary_ops:
+            return unary_ops[type(node.op)](eval_node(node.operand))
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return Decimal(str(node.value))
+        raise ValueError("Expresión inválida")
+
+    tree = ast.parse(expression, mode="eval")
+    return eval_node(tree)
+
+
+def _koda_try_math(message: str) -> str | None:
+    lowered = message.lower()
+    if any(word in lowered for word in ("venta", "ventas", "compra", "compras", "ganancia", "margen", "stock", "producto", "cliente", "proveedor", "iva", "impuesto")):
+        return None
+    if not re.search(r"\d", message):
+        return None
+    expr = re.sub(r"[^0-9\.\,\+\-\*\/\(\)\s]", "", message)
+    if not re.search(r"[\+\-\*\/]", expr):
+        return None
+    expr = expr.replace(",", ".")
+    try:
+        result = _koda_safe_eval(expr)
+        return f"Resultado: {_koda_format_amount(result, currency=False)}"
+    except Exception:
+        return None
+
+
+def _koda_sales_profit(sales_qs) -> Decimal:
+    profit_total = Decimal("0.00")
+    for sale in sales_qs:
+        cost_total = Decimal("0.00")
+        for item in sale.items.all():
+            cost_unit = item.cost_unit if item.cost_unit and item.cost_unit > 0 else item.product.cost_with_vat()
+            cost_total += item.quantity * cost_unit
+        if sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE:
+            net_total = (sale.total or Decimal("0.00")) - (sale.ml_commission_total or Decimal("0.00")) - (
+                sale.ml_tax_total or Decimal("0.00")
+            )
+            profit_total += net_total - cost_total
+        else:
+            profit_total += (sale.total or Decimal("0.00")) - cost_total
+    return profit_total
+
+
+def _koda_try_local_response(message: str) -> str | None:
+    if not message:
+        return None
+    lowered = message.lower()
+    percent = _koda_extract_percent(lowered)
+    wants_profit = any(word in lowered for word in ("ganancia", "margen", "utilidad", "gané", "gane", "ganado", "ganar")) or bool(re.search(r"\bgan", lowered))
+    wants_sales = "venta" in lowered or "ventas" in lowered
+    wants_purchases = "compra" in lowered or "compras" in lowered
+    wants_tax = "impuesto" in lowered or "iva" in lowered
+
+    if percent and not (wants_sales or wants_purchases):
+        return "¿Querés ese % sobre compras, ventas o ambos?"
+
+    if wants_profit or wants_sales or wants_purchases or percent or wants_tax:
+        date_range = _koda_parse_date_range(lowered)
+        if not date_range:
+            return "¿De qué fechas? Indicame desde y hasta (ej: 01/01/2026 al 11/01/2026)."
+        start_dt, end_dt, start_date, end_date = date_range
+        warehouse = _koda_extract_warehouse(lowered)
+        range_label = f"{start_date.strftime('%d/%m/%Y')} al {end_date.strftime('%d/%m/%Y')}"
+        reply_lines = [f"Rango: {range_label}."]
+        if warehouse == Warehouse.WarehouseType.MERCADOLIBRE:
+            reply_lines.append("Depósito: MercadoLibre.")
+        elif warehouse == Warehouse.WarehouseType.COMUN:
+            reply_lines.append("Depósito: Común.")
+
+        sales_qs = Sale.objects.filter(created_at__gte=start_dt, created_at__lte=end_dt).select_related("warehouse").prefetch_related("items__product")
+        sale_item_qs = SaleItem.objects.filter(sale__created_at__gte=start_dt, sale__created_at__lte=end_dt)
+        purchase_qs = Purchase.objects.filter(created_at__gte=start_dt, created_at__lte=end_dt)
+        tax_qs = TaxExpense.objects.filter(paid_at__gte=start_date, paid_at__lte=end_date)
+        if warehouse:
+            sales_qs = sales_qs.filter(warehouse__type=warehouse)
+            sale_item_qs = sale_item_qs.filter(sale__warehouse__type=warehouse)
+            purchase_qs = purchase_qs.filter(warehouse__type=warehouse)
+
+        sales_total = sale_item_qs.aggregate(total=Sum("line_total")).get("total") or Decimal("0.00")
+        purchases_total = purchase_qs.aggregate(total=Sum("total")).get("total") or Decimal("0.00")
+        tax_total = tax_qs.aggregate(total=Sum("amount")).get("total") or Decimal("0.00")
+
+        if wants_sales:
+            reply_lines.append(f"Total ventas: {_koda_format_amount(sales_total)}.")
+        if wants_purchases:
+            reply_lines.append(f"Total compras: {_koda_format_amount(purchases_total)}.")
+        if wants_profit:
+            profit_sales = _koda_sales_profit(sales_qs)
+            reply_lines.append(f"Ganancia por ventas (neto ML - costo): {_koda_format_amount(profit_sales)}.")
+            if tax_total:
+                net_profit = profit_sales - tax_total
+                reply_lines.append(f"Impuestos registrados: {_koda_format_amount(tax_total)}.")
+                reply_lines.append(f"Ganancia neta después de impuestos: {_koda_format_amount(net_profit)}.")
+            else:
+                reply_lines.append("Impuestos registrados: $0,00.")
+        if wants_tax and not wants_profit:
+            reply_lines.append(f"Impuestos registrados: {_koda_format_amount(tax_total)}.")
+        if percent is not None and (wants_sales or wants_purchases):
+            if wants_sales:
+                sales_pct = (sales_total * percent / Decimal("100.00")).quantize(Decimal("1.00"))
+                reply_lines.append(f"{percent}% de ventas: {_koda_format_amount(sales_pct)}.")
+            if wants_purchases:
+                purchases_pct = (purchases_total * percent / Decimal("100.00")).quantize(Decimal("1.00"))
+                reply_lines.append(f"{percent}% de compras: {_koda_format_amount(purchases_pct)}.")
+        return " ".join(reply_lines)
+
+    return _koda_try_math(message)
 
 
 def _koda_call_openai(messages, image_data_url: str | None = None) -> dict:
@@ -2318,7 +2527,7 @@ def _koda_call_openai(messages, image_data_url: str | None = None) -> dict:
     payload_messages.append({"role": "user", "content": user_content})
 
     payload = {
-        "model": "gpt-4.1-mini",
+        "model": "gpt-4.1",
         "temperature": 0.2,
         "messages": payload_messages,
     }
@@ -2749,6 +2958,16 @@ def koda_chat(request):
 
     if not message and not image_file:
         return JsonResponse({"reply": "Decime qué necesitás.", "actions": []})
+
+    if not image_file:
+        local_reply = _koda_try_local_response(message)
+        if local_reply:
+            history = request.session.get("koda_history", [])
+            history = history[-8:]
+            history.append({"role": "user", "content": message})
+            history.append({"role": "assistant", "content": local_reply})
+            request.session["koda_history"] = history[-10:]
+            return JsonResponse({"reply": local_reply, "needs_confirmation": False, "summary": ""})
 
     image_data_url = None
     pending_file_path = None
@@ -3245,7 +3464,7 @@ def product_prices_download(request, audience: str):
         groups = [g.strip() for g in groups_raw.split(",") if g.strip()]
         if groups:
             products = products.filter(group__in=groups)
-    headers = ["SKU", "Producto", "Precio"]
+    headers = ["Producto", "Precio"]
     price_attr_map = {
         "consumer": "consumer_price",
         "barber": "barber_price",
@@ -3255,7 +3474,7 @@ def product_prices_download(request, audience: str):
         return redirect("inventory_product_prices")
 
     attr = price_attr_map[audience]
-    rows = [[p.sku, p.name, getattr(p, attr)] for p in products]
+    rows = [[p.name, getattr(p, attr)] for p in products]
     xlsx_bytes = _build_xlsx(headers, rows)
     filename = f"precios_{audience}.xlsx"
     response = HttpResponse(

@@ -181,6 +181,21 @@
                     selectEl._syncSelection();
                 }
             });
+            const rows = Array.from(body.querySelectorAll("tr"));
+            let total = parseInt(totalForms.value, 10);
+            const isEmptyRow = (row) => {
+                const product = row.querySelector("select[name$='-product']");
+                const qty = row.querySelector("input[name$='-quantity']");
+                const productValue = (product?.value || "").trim();
+                const qtyValue = (qty?.value || "").trim();
+                return !productValue && !qtyValue;
+            };
+            while (rows.length && isEmptyRow(rows[rows.length - 1])) {
+                rows[rows.length - 1].remove();
+                rows.pop();
+                total = Math.max(0, total - 1);
+            }
+            totalForms.value = total;
         });
     })();
 </script>
