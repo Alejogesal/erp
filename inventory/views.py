@@ -3438,7 +3438,13 @@ def _col_letter(idx: int) -> str:
     return result
 
 
-def _build_xlsx(headers: list[str], rows: list[list[str | Decimal]]) -> bytes:
+def _build_xlsx(
+    headers: list[str],
+    rows: list[list[str | Decimal]],
+    *,
+    blue_cols: set[int] | None = None,
+    number_cols: set[int] | None = None,
+) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         # Root relations
@@ -3450,6 +3456,7 @@ def _build_xlsx(headers: list[str], rows: list[list[str | Decimal]]) -> bytes:
             '<Default Extension="xml" ContentType="application/xml"/>'
             '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
             '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+            '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
             '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
             '<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>'
             "</Types>",
@@ -3487,6 +3494,7 @@ def _build_xlsx(headers: list[str], rows: list[list[str | Decimal]]) -> bytes:
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
             '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+            '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
             "</Relationships>",
         )
         zf.writestr(
@@ -3497,19 +3505,60 @@ def _build_xlsx(headers: list[str], rows: list[list[str | Decimal]]) -> bytes:
             '<sheets><sheet name="Precios" sheetId="1" r:id="rId1"/></sheets>'
             "</workbook>",
         )
+        zf.writestr(
+            "xl/styles.xml",
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            '<fonts count="3">'
+            '<font><sz val="11"/><color theme="1"/><name val="Calibri"/></font>'
+            '<font><b/><sz val="11"/><color theme="1"/><name val="Calibri"/></font>'
+            '<font><sz val="11"/><color rgb="FF1F4EAD"/><name val="Calibri"/></font>'
+            "</fonts>"
+            '<fills count="1"><fill><patternFill patternType="none"/></fill></fills>'
+            '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
+            '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+            '<cellXfs count="4">'
+            '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+            '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>'
+            '<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>'
+            '<xf numFmtId="2" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>'
+            "</cellXfs>"
+            '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
+            "</styleSheet>",
+        )
 
         cols = len(headers)
         rows_count = len(rows) + 1  # header row
         dimension = f"A1:{_col_letter(cols)}{rows_count}"
 
+        blue_cols = blue_cols or set()
+        number_cols = number_cols or set()
+
         def cell_xml(value, col_idx, row_idx, is_header=False):
             col = _col_letter(col_idx)
             ref = f"{col}{row_idx}"
-            if is_header or isinstance(value, str):
-                return (
-                    f'<c r="{ref}" t="inlineStr"><is><t>{escape(str(value))}</t></is></c>'
-                )
-            return f'<c r="{ref}"><v>{value}</v></c>'
+            if is_header:
+                return f'<c r="{ref}" t="inlineStr" s="1"><is><t>{escape(str(value))}</t></is></c>'
+            if isinstance(value, str):
+                style = "2" if col_idx in blue_cols else "0"
+                return f'<c r="{ref}" t="inlineStr" s="{style}"><is><t>{escape(str(value))}</t></is></c>'
+            style = "3" if col_idx in number_cols else "0"
+            return f'<c r="{ref}" s="{style}"><v>{value}</v></c>'
+
+        max_lengths = [len(str(h)) for h in headers]
+        for row in rows:
+            for idx, val in enumerate(row):
+                if idx >= len(max_lengths):
+                    continue
+                if isinstance(val, Decimal):
+                    text = f"{val:.2f}" if (idx + 1) in number_cols else str(val)
+                else:
+                    text = str(val)
+                if len(text) > max_lengths[idx]:
+                    max_lengths[idx] = len(text)
+        col_widths = []
+        for length in max_lengths:
+            col_widths.append(min(60, max(8, round(length * 1.1 + 2, 2))))
 
         rows_xml = []
         header_cells = "".join(cell_xml(h, i + 1, 1, is_header=True) for i, h in enumerate(headers))
@@ -3518,11 +3567,16 @@ def _build_xlsx(headers: list[str], rows: list[list[str | Decimal]]) -> bytes:
             cells = "".join(cell_xml(val, cidx + 1, ridx) for cidx, val in enumerate(row))
             rows_xml.append(f'<row r="{ridx}">{cells}</row>')
 
+        cols_xml = "".join(
+            f'<col min="{idx}" max="{idx}" width="{width}" customWidth="1"/>'
+            for idx, width in enumerate(col_widths, start=1)
+        )
         sheet_xml = (
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             f'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
             f' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
             f'<dimension ref="{dimension}"/>'
+            f"<cols>{cols_xml}</cols>"
             "<sheetData>"
             f'{"".join(rows_xml)}'
             "</sheetData>"
@@ -3540,7 +3594,7 @@ def product_prices_download(request, audience: str):
         groups = [g.strip() for g in groups_raw.split(",") if g.strip()]
         if groups:
             products = products.filter(group__in=groups)
-    headers = ["Producto", "Precio"]
+    headers = ["Marca", "Producto", "Precio"]
     price_attr_map = {
         "consumer": "consumer_price",
         "barber": "barber_price",
@@ -3550,8 +3604,8 @@ def product_prices_download(request, audience: str):
         return redirect("inventory_product_prices")
 
     attr = price_attr_map[audience]
-    rows = [[p.name, getattr(p, attr)] for p in products]
-    xlsx_bytes = _build_xlsx(headers, rows)
+    rows = [[p.group or "", p.name, getattr(p, attr)] for p in products]
+    xlsx_bytes = _build_xlsx(headers, rows, blue_cols={1}, number_cols={3})
     filename = f"precios_{audience}.xlsx"
     response = HttpResponse(
         xlsx_bytes,
