@@ -171,12 +171,44 @@
     </form>
 </div>
 
-{% if bulk_form.errors %}
 <div class="card" style="margin-bottom:16px;">
     <div class="card-title">Edición masiva</div>
-    {{ bulk_form.errors }}
+    {% if bulk_form.errors %}
+        {{ bulk_form.errors }}
+    {% endif %}
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="bulk_update">
+        <div class="product-form-grid">
+            <div>
+                {{ bulk_form.group.label_tag }}
+                {{ bulk_form.group }}
+            </div>
+            <div>
+                {{ bulk_form.supplier.label_tag }}
+                {{ bulk_form.supplier }}
+            </div>
+            <div>
+                {{ bulk_form.cost_percent.label_tag }}
+                {{ bulk_form.cost_percent }}
+                <div class="autosave-status">Si dejás Marca/Grupo vacío, aplica a toda la lista.</div>
+            </div>
+            <div>
+                {{ bulk_form.margin_consumer.label_tag }}
+                {{ bulk_form.margin_consumer }}
+            </div>
+            <div>
+                {{ bulk_form.margin_barber.label_tag }}
+                {{ bulk_form.margin_barber }}
+            </div>
+            <div>
+                {{ bulk_form.margin_distributor.label_tag }}
+                {{ bulk_form.margin_distributor }}
+            </div>
+        </div>
+        <button type="submit" style="margin-top:12px;">Aplicar cambios</button>
+    </form>
 </div>
-{% endif %}
 
 <div class="card table-card" id="productos">
     <div class="card-title">Productos</div>

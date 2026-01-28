@@ -243,6 +243,21 @@ class ProductBulkUpdateForm(forms.Form):
         label="Ajuste % costo",
         help_text="Ej: 10 para subir 10%, -5 para bajar 5%",
     )
+    margin_consumer = forms.DecimalField(
+        required=False,
+        decimal_places=2,
+        label="Margen % consumidor final",
+    )
+    margin_barber = forms.DecimalField(
+        required=False,
+        decimal_places=2,
+        label="Margen % peluquerías/barberías",
+    )
+    margin_distributor = forms.DecimalField(
+        required=False,
+        decimal_places=2,
+        label="Margen % distribuidores",
+    )
 
 
 @login_required
@@ -3302,7 +3317,17 @@ def product_costs(request):
                 group = (bulk_form.cleaned_data.get("group") or "").strip()
                 supplier = bulk_form.cleaned_data.get("supplier")
                 cost_percent = bulk_form.cleaned_data.get("cost_percent")
-                if not group and not supplier and cost_percent is None:
+                margin_consumer = bulk_form.cleaned_data.get("margin_consumer")
+                margin_barber = bulk_form.cleaned_data.get("margin_barber")
+                margin_distributor = bulk_form.cleaned_data.get("margin_distributor")
+                if (
+                    not group
+                    and not supplier
+                    and cost_percent is None
+                    and margin_consumer is None
+                    and margin_barber is None
+                    and margin_distributor is None
+                ):
                     messages.error(request, "Completá al menos un campo para aplicar cambios.")
                 else:
                     target_qs = Product.objects.select_related("default_supplier").order_by("sku")
@@ -3328,6 +3353,15 @@ def product_costs(request):
                             product.avg_cost = (product.avg_cost or Decimal("0.00")) * multiplier
                             product.avg_cost = product.avg_cost.quantize(Decimal("0.01"))
                             update_fields.append("avg_cost")
+                        if margin_consumer is not None:
+                            product.margin_consumer = margin_consumer
+                            update_fields.append("margin_consumer")
+                        if margin_barber is not None:
+                            product.margin_barber = margin_barber
+                            update_fields.append("margin_barber")
+                        if margin_distributor is not None:
+                            product.margin_distributor = margin_distributor
+                            update_fields.append("margin_distributor")
                         if update_fields:
                             product.save(update_fields=update_fields)
                             updated += 1
