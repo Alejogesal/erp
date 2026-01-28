@@ -3225,6 +3225,47 @@ def product_costs(request):
                 messages.success(request, "Producto creado.")
                 return redirect("inventory_product_costs")
             messages.error(request, "Revisá los datos del producto.")
+        elif action == "bulk_update_margins":
+            def parse_optional_decimal(raw: str | None) -> Decimal | None:
+                if raw is None:
+                    return None
+                value = str(raw).strip().replace(",", ".")
+                if value == "":
+                    return None
+                try:
+                    return Decimal(value).quantize(Decimal("0.01"))
+                except Exception:
+                    return None
+
+            margin_consumer = parse_optional_decimal(request.POST.get("margin_consumer"))
+            margin_barber = parse_optional_decimal(request.POST.get("margin_barber"))
+            margin_distributor = parse_optional_decimal(request.POST.get("margin_distributor"))
+            if margin_consumer is None and margin_barber is None and margin_distributor is None:
+                messages.error(request, "Completá al menos un margen para aplicar cambios.")
+                return redirect("inventory_product_costs")
+
+            target_products = list(Product.objects.order_by("sku"))
+            if not target_products:
+                messages.error(request, "No se encontraron productos para aplicar los cambios.")
+                return redirect("inventory_product_costs")
+
+            updated = 0
+            for product in target_products:
+                update_fields = []
+                if margin_consumer is not None:
+                    product.margin_consumer = margin_consumer
+                    update_fields.append("margin_consumer")
+                if margin_barber is not None:
+                    product.margin_barber = margin_barber
+                    update_fields.append("margin_barber")
+                if margin_distributor is not None:
+                    product.margin_distributor = margin_distributor
+                    update_fields.append("margin_distributor")
+                if update_fields:
+                    product.save(update_fields=update_fields)
+                    updated += 1
+            messages.success(request, f"Márgenes actualizados en {updated} productos.")
+            return redirect("inventory_product_costs")
         elif action == "import_costs":
             upload = request.FILES.get("file")
             if not upload:

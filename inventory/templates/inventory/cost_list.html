@@ -91,7 +91,6 @@
     <div class="card-title">Nuevo producto</div>
     <form method="post">
         {% csrf_token %}
-        <input type="hidden" name="action" value="create_product">
         <div class="product-form-grid">
             <div>
                 {{ product_form.name.label_tag }}
@@ -141,7 +140,12 @@
                 </details>
             </div>
         </div>
-        <button type="submit">Guardar producto</button>
+        <div style="display:flex; gap:10px; align-items:center;">
+            <button type="submit" name="action" value="create_product">Guardar producto</button>
+            <button type="submit" name="action" value="bulk_update_margins" formnovalidate>
+                Aplicar márgenes a toda la lista
+            </button>
+        </div>
     </form>
 </div>
 
