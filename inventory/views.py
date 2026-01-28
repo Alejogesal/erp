@@ -502,11 +502,37 @@ def sale_edit(request, sale_id: int):
     customer_audiences = {str(customer.id): customer.audience for customer in Customer.objects.only("id", "audience")}
 
     if request.method == "POST":
-        header_form = SaleHeaderForm(request.POST)
-        formset = SaleItemFormSet(request.POST)
+        post_data = request.POST.copy()
+        for key in list(post_data.keys()):
+            if not key.endswith("-product_text"):
+                continue
+            prefix = key[:-len("product_text")]
+            product_key = f"{prefix}product"
+            if post_data.get(product_key):
+                continue
+            product_text = (post_data.get(key) or "").strip()
+            if not product_text:
+                continue
+            label = product_text.split(" (", 1)[0].strip()
+            sku_candidate = ""
+            name_candidate = label
+            if " - " in label:
+                sku_candidate, name_candidate = [part.strip() for part in label.split(" - ", 1)]
+            product = None
+            if sku_candidate and sku_candidate.lower() != "sin sku":
+                product = Product.objects.filter(sku__iexact=sku_candidate).first()
+            if not product and name_candidate:
+                product = (
+                    Product.objects.filter(name__iexact=name_candidate).first()
+                    or Product.objects.filter(name__icontains=name_candidate).first()
+                )
+            if product:
+                post_data[product_key] = str(product.id)
+        header_form = SaleHeaderForm(post_data)
+        formset = SaleItemFormSet(post_data)
         for form in formset.forms:
             prefix = form.prefix
-            if not (request.POST.get(f"{prefix}-product") or request.POST.get(f"{prefix}-quantity")):
+            if not (post_data.get(f"{prefix}-product") or post_data.get(f"{prefix}-quantity")):
                 form.empty_permitted = True
             elif not form.has_changed():
                 form.empty_permitted = True
@@ -588,12 +614,14 @@ def sale_edit(request, sale_id: int):
                             ).first()
                             if discount_obj:
                                 discount = discount_obj.discount_percent
-                            elif data["product"].group:
-                                group_discount = CustomerGroupDiscount.objects.filter(
-                                    customer=customer, group=data["product"].group
-                                ).first()
-                                if group_discount:
-                                    discount = group_discount.discount_percent
+                            else:
+                                group_key = (data["product"].group or "").strip()
+                                if group_key:
+                                    group_discount = CustomerGroupDiscount.objects.filter(
+                                        customer=customer, group__iexact=group_key
+                                    ).first()
+                                    if group_discount:
+                                        discount = group_discount.discount_percent
                         final_price = base_price * (Decimal("1.00") - discount / Decimal("100.00"))
                         qty = Decimal(data["quantity"])
                         line_total = (qty * final_price).quantize(Decimal("0.01"))
@@ -1124,11 +1152,37 @@ def sales_list(request):
         messages.success(request, f"Ventas eliminadas: {deleted}.")
         return redirect("inventory_sales_list")
     if request.method == "POST":
-        header_form = SaleHeaderForm(request.POST)
-        formset = SaleItemFormSet(request.POST)
+        post_data = request.POST.copy()
+        for key in list(post_data.keys()):
+            if not key.endswith("-product_text"):
+                continue
+            prefix = key[:-len("product_text")]
+            product_key = f"{prefix}product"
+            if post_data.get(product_key):
+                continue
+            product_text = (post_data.get(key) or "").strip()
+            if not product_text:
+                continue
+            label = product_text.split(" (", 1)[0].strip()
+            sku_candidate = ""
+            name_candidate = label
+            if " - " in label:
+                sku_candidate, name_candidate = [part.strip() for part in label.split(" - ", 1)]
+            product = None
+            if sku_candidate and sku_candidate.lower() != "sin sku":
+                product = Product.objects.filter(sku__iexact=sku_candidate).first()
+            if not product and name_candidate:
+                product = (
+                    Product.objects.filter(name__iexact=name_candidate).first()
+                    or Product.objects.filter(name__icontains=name_candidate).first()
+                )
+            if product:
+                post_data[product_key] = str(product.id)
+        header_form = SaleHeaderForm(post_data)
+        formset = SaleItemFormSet(post_data)
         for form in formset.forms:
             prefix = form.prefix
-            if not (request.POST.get(f"{prefix}-product") or request.POST.get(f"{prefix}-quantity")):
+            if not (post_data.get(f"{prefix}-product") or post_data.get(f"{prefix}-quantity")):
                 form.empty_permitted = True
             elif not form.has_changed():
                 form.empty_permitted = True
@@ -1187,12 +1241,14 @@ def sales_list(request):
                                 ).first()
                                 if discount_obj:
                                     discount = discount_obj.discount_percent
-                                elif data["product"].group:
-                                    group_discount = CustomerGroupDiscount.objects.filter(
-                                        customer=customer, group=data["product"].group
-                                    ).first()
-                                    if group_discount:
-                                        discount = group_discount.discount_percent
+                                else:
+                                    group_key = (data["product"].group or "").strip()
+                                    if group_key:
+                                        group_discount = CustomerGroupDiscount.objects.filter(
+                                            customer=customer, group__iexact=group_key
+                                        ).first()
+                                        if group_discount:
+                                            discount = group_discount.discount_percent
                             final_price = base_price * (Decimal("1.00") - discount / Decimal("100.00"))
                             qty = Decimal(data["quantity"])
                             line_total = (qty * final_price).quantize(Decimal("0.01"))

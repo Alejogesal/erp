@@ -266,6 +266,7 @@
             const search = document.createElement("input");
             search.type = "text";
             search.placeholder = "Buscar producto...";
+            search.name = (selectEl.name || "").replace("-product", "-product_text");
             const datalist = document.createElement("datalist");
             const listId = `product-options-${Math.random().toString(36).slice(2)}`;
             datalist.id = listId;
@@ -288,7 +289,21 @@
             }
 
             const syncSelection = () => {
-                const match = Array.from(datalist.options).find((opt) => opt.value === search.value);
+                const raw = (search.value || "").trim();
+                if (!raw) return;
+                const opts = Array.from(datalist.options);
+                let match = opts.find((opt) => opt.value === raw);
+                if (!match) {
+                    const lowered = raw.toLowerCase();
+                    match = opts.find((opt) => (opt.value || "").toLowerCase() === lowered);
+                }
+                if (!match) {
+                    const lowered = raw.toLowerCase();
+                    const candidates = opts.filter((opt) => (opt.value || "").toLowerCase().includes(lowered));
+                    if (candidates.length >= 1) {
+                        match = candidates[0];
+                    }
+                }
                 if (match) {
                     selectEl.value = match.dataset.value || "";
                     updateSearchFromSelect(selectEl);
@@ -340,8 +355,9 @@
                 const product = row.querySelector("select[name$='-product']");
                 const qty = row.querySelector("input[name$='-quantity']");
                 const productValue = (product?.value || "").trim();
+                const searchValue = (product?._searchInput?.value || "").trim();
                 const qtyValue = (qty?.value || "").trim();
-                return !productValue && !qtyValue;
+                return !productValue && !searchValue && !qtyValue;
             };
             while (rows.length && isEmptyRow(rows[rows.length - 1])) {
                 rows[rows.length - 1].remove();
