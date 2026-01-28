@@ -430,7 +430,7 @@ def sale_receipt(request, sale_id: int):
         else Decimal("0.00")
     )
     is_ml = sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE
-    subtotal_display = sale.total if is_ml and sale.total is not None else subtotal
+    subtotal_display = subtotal
     total_display = sale.total if is_ml and sale.total is not None else (subtotal - discount_total)
     commission_total = sale.ml_commission_total or Decimal("0.00")
     tax_total = sale.ml_tax_total or Decimal("0.00")
@@ -471,7 +471,7 @@ def sale_receipt_pdf(request, sale_id: int):
         else Decimal("0.00")
     )
     is_ml = sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE
-    subtotal_display = sale.total if is_ml and sale.total is not None else subtotal
+    subtotal_display = subtotal
     total_display = sale.total if is_ml and sale.total is not None else (subtotal - discount_total)
     commission_total = sale.ml_commission_total or Decimal("0.00")
     tax_total = sale.ml_tax_total or Decimal("0.00")
@@ -832,6 +832,8 @@ def sales_list(request):
         for customer in Customer.objects.only("id", "audience")
     }
     search_query = (request.GET.get("q") or "").strip()
+    start_date_raw = (request.GET.get("start_date") or "").strip()
+    end_date_raw = (request.GET.get("end_date") or "").strip()
     include_comun = request.GET.get("wh_comun") == "1"
     include_ml = request.GET.get("wh_ml") == "1"
     show_history = request.GET.get("show_history") == "1"
@@ -1445,6 +1447,28 @@ def sales_list(request):
             .prefetch_related("items__product")
             .order_by("-created_at", "-id")
         )
+        if start_date_raw:
+            try:
+                start_dt = datetime.fromisoformat(start_date_raw)
+                if timezone.is_naive(start_dt):
+                    start_dt = timezone.make_aware(datetime.combine(start_dt.date(), time.min))
+                else:
+                    start_dt = datetime.combine(start_dt.date(), time.min, tzinfo=start_dt.tzinfo)
+                sales = sales.filter(created_at__gte=start_dt)
+            except ValueError:
+                messages.error(request, "Fecha desde inválida.")
+                return redirect("inventory_sales_list")
+        if end_date_raw:
+            try:
+                end_dt = datetime.fromisoformat(end_date_raw)
+                if timezone.is_naive(end_dt):
+                    end_dt = timezone.make_aware(datetime.combine(end_dt.date(), time.max))
+                else:
+                    end_dt = datetime.combine(end_dt.date(), time.max, tzinfo=end_dt.tzinfo)
+                sales = sales.filter(created_at__lte=end_dt)
+            except ValueError:
+                messages.error(request, "Fecha hasta inválida.")
+                return redirect("inventory_sales_list")
         if search_query:
             sales = sales.filter(
                 Q(customer__name__icontains=search_query)
@@ -1498,6 +1522,8 @@ def sales_list(request):
                 "sales_ml": sales_ml,
                 "page_obj": page_obj,
                 "search_query": search_query,
+                "start_date": start_date_raw,
+                "end_date": end_date_raw,
                 "include_comun": include_comun,
                 "include_ml": include_ml,
                 "show_history": show_history,
@@ -1519,6 +1545,8 @@ def sales_list(request):
             "sales_ml": sales_ml,
             "page_obj": page_obj,
             "search_query": search_query,
+            "start_date": start_date_raw,
+            "end_date": end_date_raw,
             "include_comun": include_comun,
             "include_ml": include_ml,
             "show_history": show_history,
