@@ -29,6 +29,11 @@
             </div>
             {{ form.purchase_date.errors }}
         </p>
+        <p>
+            {{ form.descuento_total.label_tag }}
+            {{ form.descuento_total }}
+            {{ form.descuento_total.errors }}
+        </p>
         {{ formset.non_form_errors }}
         <h3>Productos</h3>
         {{ formset.management_form }}

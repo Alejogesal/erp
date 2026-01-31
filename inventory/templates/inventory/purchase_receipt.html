@@ -97,6 +97,11 @@
         <div class="label">IVA</div>
         <div></div>
         <div>${{ vat_total|latam_number:2 }}</div>
+        {% if discount_total > 0 %}
+        <div class="label">Descuento ({{ discount_percent|latam_number:2 }}%)</div>
+        <div></div>
+        <div>-${{ discount_total|latam_number:2 }}</div>
+        {% endif %}
         <div class="label" style="font-weight:600;">Total</div>
         <div></div>
         <div style="font-weight:600;">${{ total|latam_number:2 }}</div>
@@ -104,6 +109,11 @@
         <div class="label">Subtotal</div>
         <div></div>
         <div>${{ subtotal|latam_number:2 }}</div>
+        {% if discount_total > 0 %}
+        <div class="label">Descuento ({{ discount_percent|latam_number:2 }}%)</div>
+        <div></div>
+        <div>-${{ discount_total|latam_number:2 }}</div>
+        {% endif %}
         <div class="label" style="font-weight:600;">Total</div>
         <div></div>
         <div style="font-weight:600;">${{ total|latam_number:2 }}</div>

@@ -89,6 +89,14 @@ class PurchaseHeaderForm(forms.Form):
         required=False,
         widget=forms.DateInput(attrs={"type": "date"}),
     )
+    descuento_total = forms.DecimalField(
+        label="Descuento %",
+        min_value=Decimal("0.00"),
+        max_value=Decimal("100.00"),
+        decimal_places=2,
+        required=False,
+        initial=Decimal("0.00"),
+    )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -831,8 +839,11 @@ def purchase_receipt(request, purchase_id: int):
         subtotal_no_vat += (item.unit_cost_no_vat * item.quantity).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         vat_total += item.line_vat
     subtotal = sum((item.line_total for item in items), Decimal("0.00"))
-    if purchase.total != subtotal:
-        purchase.total = subtotal
+    discount_percent = purchase.discount_percent or Decimal("0.00")
+    discount_total = (subtotal * discount_percent / Decimal("100.00")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    total = (subtotal - discount_total).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if purchase.total != total:
+        purchase.total = total
         purchase.save(update_fields=["total"])
     context = {
         "purchase": purchase,
@@ -840,7 +851,9 @@ def purchase_receipt(request, purchase_id: int):
         "subtotal": subtotal,
         "subtotal_no_vat": subtotal_no_vat,
         "vat_total": vat_total,
-        "total": subtotal,
+        "discount_total": discount_total,
+        "discount_percent": discount_percent,
+        "total": total,
         "invoice_number": purchase.invoice_number,
         "has_vat": has_vat,
     }
@@ -1805,6 +1818,7 @@ def purchases_list(request):
                 items = []
             warehouse = header_form.cleaned_data["warehouse"]
             purchase_date = header_form.cleaned_data.get("purchase_date")
+            discount_percent = header_form.cleaned_data.get("descuento_total") or Decimal("0.00")
             if not items:
                 messages.error(request, "Agregá al menos un producto.")
                 return redirect("inventory_purchases_list")
@@ -1815,6 +1829,7 @@ def purchases_list(request):
                         supplier=purchase_supplier,
                         warehouse=warehouse,
                         reference="Compra",
+                        discount_percent=discount_percent,
                         user=request.user,
                     )
                     if purchase_date:
@@ -1822,11 +1837,11 @@ def purchases_list(request):
                         if timezone.is_naive(created_at):
                             created_at = timezone.make_aware(created_at)
                         Purchase.objects.filter(pk=purchase.pk).update(created_at=created_at)
-                    total = Decimal("0.00")
+                    subtotal = Decimal("0.00")
                     for data in items:
                         qty = Decimal(data["quantity"])
                         unit_cost = data["unit_cost"]
-                        total += qty * unit_cost
+                        subtotal += qty * unit_cost
                         PurchaseItem.objects.create(
                             purchase=purchase,
                             product=data["product"],
@@ -1845,8 +1860,12 @@ def purchases_list(request):
                             reference=f"Compra #{purchase.id}",
                             purchase=purchase,
                         )
+                    discount_total = (subtotal * discount_percent / Decimal("100.00")).quantize(
+                        Decimal("0.01"), rounding=ROUND_HALF_UP
+                    )
+                    total = (subtotal - discount_total).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                     purchase.total = total
-                    purchase.save(update_fields=["total"])
+                    purchase.save(update_fields=["total", "discount_percent"])
                 messages.success(request, "Compra registrada.")
                 return redirect("inventory_purchases_list")
             except Exception as exc:
@@ -2004,7 +2023,9 @@ def purchase_edit(request, purchase_id: int):
                     purchase.warehouse = header_form.cleaned_data["warehouse"]
                     purchase.supplier = items[0].get("supplier")
                     purchase_date = header_form.cleaned_data.get("purchase_date")
-                    update_fields = ["warehouse", "supplier"]
+                    discount_percent = header_form.cleaned_data.get("descuento_total") or Decimal("0.00")
+                    purchase.discount_percent = discount_percent
+                    update_fields = ["warehouse", "supplier", "discount_percent"]
                     if purchase_date:
                         created_at = datetime.combine(purchase_date, time(12, 0))
                         if timezone.is_naive(created_at):
@@ -2013,13 +2034,13 @@ def purchase_edit(request, purchase_id: int):
                         update_fields.append("created_at")
                     purchase.save(update_fields=update_fields)
 
-                    total = Decimal("0.00")
+                    subtotal = Decimal("0.00")
                     for item in items:
                         product = item["product"]
                         qty = item["quantity"]
                         unit_cost = item["unit_cost"]
                         vat = item.get("vat_percent") or Decimal("0.00")
-                        total += unit_cost * qty
+                        subtotal += unit_cost * qty
                         PurchaseItem.objects.create(
                             purchase=purchase,
                             product=product,
@@ -2038,7 +2059,11 @@ def purchase_edit(request, purchase_id: int):
                             supplier=purchase.supplier,
                             purchase=purchase,
                         )
-                    purchase.total = total.quantize(Decimal("0.01"))
+                    discount_total = (subtotal * discount_percent / Decimal("100.00")).quantize(
+                        Decimal("0.01"), rounding=ROUND_HALF_UP
+                    )
+                    total = (subtotal - discount_total).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                    purchase.total = total
                     purchase.save(update_fields=["total"])
                 messages.success(request, "Compra actualizada.")
                 return redirect("inventory_purchase_receipt", purchase_id=purchase.id)
@@ -2055,6 +2080,7 @@ def purchase_edit(request, purchase_id: int):
             initial={
                 "warehouse": purchase.warehouse,
                 "purchase_date": timezone.localtime(purchase.created_at).date(),
+                "descuento_total": purchase.discount_percent,
             }
         )
         initial = [

@@ -29,6 +29,11 @@
             </div>
             {{ form.purchase_date.errors }}
         </p>
+        <p>
+            {{ form.descuento_total.label_tag }}
+            {{ form.descuento_total }}
+            {{ form.descuento_total.errors }}
+        </p>
         {{ formset.non_form_errors }}
         <div style="display:flex; align-items:center; gap:10px; margin:10px 0;">
             <button type="button" id="toggle-vat">Mostrar IVA</button>
