@@ -813,7 +813,9 @@ def purchase_receipt(request, purchase_id: int):
     vat_total = Decimal("0.00")
     for item in items:
         item.line_total = item.quantity * item.unit_cost
-        vat_percent = item.vat_percent or Decimal("0.00")
+        product_vat = item.product.vat_percent or Decimal("0.00")
+        item_vat = item.vat_percent or Decimal("0.00")
+        vat_percent = item_vat if item_vat > 0 else product_vat
         if vat_percent > 0:
             has_vat = True
             vat_factor = Decimal("1.00") + (vat_percent / Decimal("100.00"))
@@ -824,6 +826,7 @@ def purchase_receipt(request, purchase_id: int):
         else:
             item.unit_cost_no_vat = item.unit_cost
             item.unit_vat = Decimal("0.00")
+        item.vat_percent = vat_percent
         item.line_vat = (item.unit_vat * item.quantity).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         subtotal_no_vat += (item.unit_cost_no_vat * item.quantity).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         vat_total += item.line_vat
