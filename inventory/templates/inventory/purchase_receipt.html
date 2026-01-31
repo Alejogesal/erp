@@ -57,9 +57,16 @@
             <tr>
                 <th>Producto</th>
                 <th class="num">Cantidad</th>
+                {% if has_vat %}
+                <th class="num">Costo unitario sin IVA</th>
+                <th class="num">IVA %</th>
+                <th class="num">IVA</th>
+                <th class="num">Total</th>
+                {% else %}
                 <th class="num">Costo unitario</th>
                 <th class="num">IVA %</th>
                 <th class="num">Total</th>
+                {% endif %}
             </tr>
         </thead>
         <tbody>
@@ -67,21 +74,40 @@
             <tr>
                 <td>{{ item.product.name }}</td>
                 <td class="num">{{ item.quantity|latam_number:2 }}</td>
+                {% if has_vat %}
+                <td class="num">${{ item.unit_cost_no_vat|latam_number:2 }}</td>
+                <td class="num">{{ item.vat_percent|latam_number:2 }}</td>
+                <td class="num">${{ item.line_vat|latam_number:2 }}</td>
+                <td class="num">${{ item.line_total|latam_number:2 }}</td>
+                {% else %}
                 <td class="num">${{ item.unit_cost|latam_number:2 }}</td>
                 <td class="num">{{ item.vat_percent|latam_number:2 }}</td>
                 <td class="num">${{ item.line_total|latam_number:2 }}</td>
+                {% endif %}
             </tr>
             {% endfor %}
         </tbody>
     </table>
 
     <div class="totals">
+        {% if has_vat %}
+        <div class="label">Subtotal sin IVA</div>
+        <div></div>
+        <div>${{ subtotal_no_vat|latam_number:2 }}</div>
+        <div class="label">IVA</div>
+        <div></div>
+        <div>${{ vat_total|latam_number:2 }}</div>
+        <div class="label" style="font-weight:600;">Total</div>
+        <div></div>
+        <div style="font-weight:600;">${{ total|latam_number:2 }}</div>
+        {% else %}
         <div class="label">Subtotal</div>
         <div></div>
         <div>${{ subtotal|latam_number:2 }}</div>
         <div class="label" style="font-weight:600;">Total</div>
         <div></div>
         <div style="font-weight:600;">${{ total|latam_number:2 }}</div>
+        {% endif %}
     </div>
 </div>
 

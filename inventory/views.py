@@ -808,8 +808,25 @@ def purchase_receipt(request, purchase_id: int):
         Purchase.objects.select_related("supplier", "warehouse").prefetch_related("items__product"), pk=purchase_id
     )
     items = list(purchase.items.all())
+    has_vat = False
+    subtotal_no_vat = Decimal("0.00")
+    vat_total = Decimal("0.00")
     for item in items:
         item.line_total = item.quantity * item.unit_cost
+        vat_percent = item.vat_percent or Decimal("0.00")
+        if vat_percent > 0:
+            has_vat = True
+            vat_factor = Decimal("1.00") + (vat_percent / Decimal("100.00"))
+            item.unit_cost_no_vat = (item.unit_cost / vat_factor).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+            item.unit_vat = (item.unit_cost - item.unit_cost_no_vat).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        else:
+            item.unit_cost_no_vat = item.unit_cost
+            item.unit_vat = Decimal("0.00")
+        item.line_vat = (item.unit_vat * item.quantity).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        subtotal_no_vat += (item.unit_cost_no_vat * item.quantity).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        vat_total += item.line_vat
     subtotal = sum((item.line_total for item in items), Decimal("0.00"))
     if purchase.total != subtotal:
         purchase.total = subtotal
@@ -818,8 +835,11 @@ def purchase_receipt(request, purchase_id: int):
         "purchase": purchase,
         "items": items,
         "subtotal": subtotal,
+        "subtotal_no_vat": subtotal_no_vat,
+        "vat_total": vat_total,
         "total": subtotal,
         "invoice_number": purchase.invoice_number,
+        "has_vat": has_vat,
     }
     return render(request, "inventory/purchase_receipt.html", context)
 
