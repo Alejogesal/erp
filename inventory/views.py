@@ -334,7 +334,7 @@ def dashboard(request):
     ranking_qs = (
         sale_item_qs.values("product__id", "product__sku", "product__name", "variant__name")
         .annotate(total_quantity=Sum("quantity"))
-        .order_by("-total_quantity")[:10]
+        .order_by("-total_quantity")
     )
 
     ranking = [
@@ -3668,6 +3668,21 @@ def product_costs(request):
                             )
                     messages.success(request, f"Actualización masiva aplicada a {updated} productos.")
                     return redirect("inventory_product_costs")
+        elif action == "update_cost_by_product":
+            product_id = request.POST.get("product_id")
+            avg_cost_raw = request.POST.get("avg_cost")
+            if not product_id:
+                messages.error(request, "Seleccioná un producto.")
+                return redirect("inventory_product_costs")
+            product = Product.objects.filter(id=product_id).first()
+            if not product:
+                messages.error(request, "Producto no encontrado.")
+                return redirect("inventory_product_costs")
+            avg_cost = _parse_decimal(avg_cost_raw)
+            product.avg_cost = avg_cost
+            product.save(update_fields=["avg_cost"])
+            messages.success(request, "Costo actualizado.")
+            return redirect("inventory_product_costs")
         else:
             formset = ProductCostFormSet(request.POST)
             if formset.is_valid():
@@ -3735,6 +3750,7 @@ def product_costs(request):
             "product_form": product_form,
             "bulk_form": bulk_form,
             "group_options": group_options,
+            "products": products,
         },
     )
 

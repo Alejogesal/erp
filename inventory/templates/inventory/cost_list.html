@@ -158,6 +158,54 @@
 </div>
 
 <div class="card" style="margin-bottom:16px;">
+    <div class="card-title">Actualizar costos por marca</div>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="bulk_update">
+        <div class="product-form-grid">
+            <div>
+                <label for="bulk-group">Marca / Grupo</label>
+                <input id="bulk-group" name="group" list="group-options" placeholder="Ej: Bellissima">
+            </div>
+            <div>
+                <label for="bulk-cost-percent">Ajuste % costo</label>
+                <input id="bulk-cost-percent" name="cost_percent" placeholder="Ej: 10 o -5" required>
+            </div>
+        </div>
+        <datalist id="group-options">
+            {% for group in group_options %}
+                <option value="{{ group }}"></option>
+            {% endfor %}
+        </datalist>
+        <button type="submit">Aplicar ajuste</button>
+    </form>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+    <div class="card-title">Actualizar costo por producto</div>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="update_cost_by_product">
+        <div class="product-form-grid">
+            <div class="full">
+                <label for="single-product">Producto</label>
+                <select id="single-product" name="product_id">
+                    <option value="">Seleccionar producto</option>
+                    {% for product in products %}
+                        <option value="{{ product.id }}">{{ product.sku }} - {{ product.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label for="single-cost">Costo unitario sin IVA</label>
+                <input id="single-cost" name="avg_cost" placeholder="0,00">
+            </div>
+        </div>
+        <button type="submit">Actualizar costo</button>
+    </form>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
     <div class="card-title">Eliminar productos importados</div>
     <form method="post" enctype="multipart/form-data" onsubmit="return confirm('¿Eliminar productos del archivo? Solo se borran los que no tienen movimientos.');">
         {% csrf_token %}

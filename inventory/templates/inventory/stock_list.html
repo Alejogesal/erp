@@ -32,6 +32,19 @@
         text-transform: uppercase;
         white-space: nowrap;
     }
+    .stock-filter .toggle {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--muted);
+        white-space: nowrap;
+    }
+    .stock-filter input[type="checkbox"] {
+        width: 14px;
+        height: 14px;
+        accent-color: var(--accent);
+    }
     .stock-adjust {
         display: grid;
         gap: 6px;
@@ -163,6 +176,10 @@
     <div class="stock-filter">
         <span class="hint">Buscar</span>
         <input id="stock-filter" type="text" placeholder="SKU, producto o marca" value="{{ query }}">
+        <label class="toggle">
+            <input id="stock-only" type="checkbox">
+            Solo con stock
+        </label>
     </div>
     <table>
         <thead>
@@ -175,7 +192,7 @@
         </thead>
         <tbody>
             {% for product in products %}
-            <tr>
+            <tr data-total="{{ product.total_qty }}">
                 <td>{{ product.sku }}</td>
                 <td>
                     {{ product.name }}
@@ -216,6 +233,7 @@
 <script>
     (function() {
         const filterInput = document.getElementById("stock-filter");
+        const stockOnly = document.getElementById("stock-only");
         if (!filterInput) return;
         const rows = Array.from(document.querySelectorAll("table tbody tr"));
         const getRowText = (row) => {
@@ -223,14 +241,23 @@
             const name = row.children[1]?.textContent || "";
             return `${sku} ${name}`.toLowerCase();
         };
+        const parseTotal = (row) => {
+            const raw = row.getAttribute("data-total") || "0";
+            const normalized = raw.replace(",", ".");
+            const value = parseFloat(normalized);
+            return Number.isNaN(value) ? 0 : value;
+        };
         const applyFilter = () => {
             const query = filterInput.value.trim().toLowerCase();
             rows.forEach((row) => {
                 if (!row.querySelector("td")) return;
-                row.style.display = !query || getRowText(row).includes(query) ? "" : "none";
+                const matchesText = !query || getRowText(row).includes(query);
+                const matchesStock = !stockOnly?.checked || parseTotal(row) > 0;
+                row.style.display = matchesText && matchesStock ? "" : "none";
             });
         };
         filterInput.addEventListener("input", applyFilter);
+        stockOnly?.addEventListener("change", applyFilter);
     })();
 </script>
 {{ variant_data|json_script:"ml-variant-data" }}
