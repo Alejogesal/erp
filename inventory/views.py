@@ -332,7 +332,7 @@ def dashboard(request):
             margin_comun += (sale.total or Decimal("0.00")) - cost_total
 
     ranking_qs = (
-        sale_item_qs.values("product__id", "product__sku", "product__name")
+        sale_item_qs.values("product__id", "product__sku", "product__name", "variant__name")
         .annotate(total_quantity=Sum("quantity"))
         .order_by("-total_quantity")[:10]
     )
@@ -342,6 +342,7 @@ def dashboard(request):
             "product_id": item["product__id"],
             "sku": item["product__sku"],
             "name": item["product__name"],
+            "variant": item["variant__name"],
             "quantity": item["total_quantity"],
         }
         for item in ranking_qs

@@ -105,6 +105,7 @@
                 <tr>
                     <th>SKU</th>
                     <th>Producto</th>
+                    <th>Variedad</th>
                     <th>Cantidad vendida</th>
                 </tr>
             </thead>
@@ -113,6 +114,7 @@
                 <tr>
                     <td>{{ item.sku }}</td>
                     <td>{{ item.name }}</td>
+                    <td>{{ item.variant|default:"-" }}</td>
                     <td>{{ item.quantity|latam_number:2 }}</td>
                 </tr>
                 {% endfor %}
