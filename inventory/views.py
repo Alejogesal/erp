@@ -2194,6 +2194,7 @@ def stock_list(request):
     ml_wh = Warehouse.objects.filter(type=ml_code).first()
     transfer_form = StockTransferForm()
     query = (request.GET.get("q") or "").strip()
+    show_history = (request.GET.get("show_history") or "").strip() == "1"
     aris_supplier = Supplier.objects.filter(name__iexact="Aris Norma").first()
     aurill_supplier = Supplier.objects.filter(name__iexact="Aurill- Dario").first()
 
@@ -2491,7 +2492,7 @@ def stock_list(request):
         else:
             product.has_variants = False
         product.total_qty = product.comun_qty
-    if ml_wh:
+    if ml_wh and show_history:
         transfer_history = (
             StockMovement.objects.filter(
                 movement_type=StockMovement.MovementType.TRANSFER,
@@ -2512,6 +2513,7 @@ def stock_list(request):
             "query": query,
             "variant_data": variant_data,
             "transfer_history": transfer_history,
+            "show_history": show_history,
         },
     )
 

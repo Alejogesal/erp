@@ -172,8 +172,14 @@
 </div>
 
 <div class="card table-card" style="margin-bottom:16px;">
-    <div class="card-title">Historial de transferencias a MercadoLibre</div>
-    {% if transfer_history %}
+    <div class="card-title" style="display:flex; align-items:center; justify-content:space-between;">
+        <span>Historial de transferencias a MercadoLibre</span>
+        {% if not show_history %}
+            <a class="pill" href="?show_history=1{% if query %}&q={{ query|urlencode }}{% endif %}" style="font-size:12px; padding:4px 8px;">Cargar historial</a>
+        {% endif %}
+    </div>
+    {% if show_history %}
+        {% if transfer_history %}
         <table>
             <thead>
                 <tr>
@@ -200,8 +206,11 @@
                 {% endfor %}
             </tbody>
         </table>
+        {% else %}
+            <p class="subtitle">Aún no hay transferencias registradas.</p>
+        {% endif %}
     {% else %}
-        <p class="subtitle">Aún no hay transferencias registradas.</p>
+        <p class="subtitle">Historial oculto. Tocá "Cargar historial".</p>
     {% endif %}
 </div>
 
