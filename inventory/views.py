@@ -1,6 +1,7 @@
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import os
 import base64
+import calendar
 
 from django import forms
 from django.conf import settings
@@ -2576,8 +2577,9 @@ def _koda_system_prompt() -> str:
         "Cada acción debe ser un objeto con {type, data}. "
         "Tu objetivo es ayudar con precisión, evitando suposiciones. "
         "Nunca inventes cifras o resultados. Si el usuario pide reportes o totales "
-        "y no hay datos explícitos en el mensaje, pedí rango de fechas y filtros "
-        "(depósito, canal, cliente) y dejá actions vacío y needs_confirmation=false. "
+        "y no hay datos explícitos en el mensaje, pedí rango de fechas. "
+        "Solo preguntá por filtros (depósito, canal, cliente) si el usuario los menciona "
+        "o si explícitamente pide un filtro. Dejá actions vacío y needs_confirmation=false. "
         "Para consultas informativas (márgenes, ventas, stock), NO uses actions. "
         "Siempre respondé algo útil en reply, aunque no haya acciones. "
         "Si falta información para ejecutar una acción, hacé preguntas concretas. "
@@ -2638,38 +2640,78 @@ def _koda_parse_date_range(message: str) -> tuple[datetime, datetime, datetime.d
     elif "ayer" in lowered:
         day = today - timedelta(days=1)
         start_date = end_date = day
+    elif "este mes" in lowered or "mes actual" in lowered:
+        start_date = today.replace(day=1)
+        end_date = today
+    elif "mes pasado" in lowered or "mes anterior" in lowered:
+        first_this_month = today.replace(day=1)
+        last_prev_month = first_this_month - timedelta(days=1)
+        start_date = last_prev_month.replace(day=1)
+        end_date = last_prev_month
     else:
-        matches = list(re.finditer(r"(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?", lowered))
-        if not matches:
-            return None
-        def parse_match(match, fallback_year: int) -> datetime.date | None:
-            day = int(match.group(1))
-            month = int(match.group(2))
-            year_raw = match.group(3)
+        month_map = {
+            "enero": 1,
+            "febrero": 2,
+            "marzo": 3,
+            "abril": 4,
+            "mayo": 5,
+            "junio": 6,
+            "julio": 7,
+            "agosto": 8,
+            "septiembre": 9,
+            "setiembre": 9,
+            "octubre": 10,
+            "noviembre": 11,
+            "diciembre": 12,
+        }
+        month_match = re.search(
+            r"\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b(?:\s+de)?\s*(\d{4})?",
+            lowered,
+        )
+        if month_match:
+            month = month_map[month_match.group(1)]
+            year_raw = month_match.group(2)
             if year_raw:
                 year = int(year_raw)
-                if year < 100:
-                    year += 2000
             else:
-                year = fallback_year
-            try:
-                return datetime(year, month, day).date()
-            except ValueError:
-                return None
-
-        first = matches[0]
-        fallback_year = today.year
-        first_date = parse_match(first, fallback_year)
-        if not first_date:
-            return None
-        if len(matches) >= 2:
-            second = matches[1]
-            second_date = parse_match(second, first_date.year)
-            if not second_date:
-                return None
-            start_date, end_date = first_date, second_date
+                year = today.year
+                if month > today.month:
+                    year -= 1
+            last_day = calendar.monthrange(year, month)[1]
+            start_date = datetime(year, month, 1).date()
+            end_date = datetime(year, month, last_day).date()
         else:
-            start_date = end_date = first_date
+            matches = list(re.finditer(r"(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?", lowered))
+            if not matches:
+                return None
+            def parse_match(match, fallback_year: int) -> datetime.date | None:
+                day = int(match.group(1))
+                month = int(match.group(2))
+                year_raw = match.group(3)
+                if year_raw:
+                    year = int(year_raw)
+                    if year < 100:
+                        year += 2000
+                else:
+                    year = fallback_year
+                try:
+                    return datetime(year, month, day).date()
+                except ValueError:
+                    return None
+
+            first = matches[0]
+            fallback_year = today.year
+            first_date = parse_match(first, fallback_year)
+            if not first_date:
+                return None
+            if len(matches) >= 2:
+                second = matches[1]
+                second_date = parse_match(second, first_date.year)
+                if not second_date:
+                    return None
+                start_date, end_date = first_date, second_date
+            else:
+                start_date = end_date = first_date
     if end_date < start_date:
         start_date, end_date = end_date, start_date
     start_dt = timezone.make_aware(datetime.combine(start_date, time.min))
@@ -2744,7 +2786,15 @@ def _koda_try_local_response(message: str) -> str | None:
     lowered = message.lower()
     percent = _koda_extract_percent(lowered)
     wants_profit = any(word in lowered for word in ("ganancia", "margen", "utilidad", "gané", "gane", "ganado", "ganar")) or bool(re.search(r"\bgan", lowered))
-    wants_sales = "venta" in lowered or "ventas" in lowered
+    wants_sales = (
+        "venta" in lowered
+        or "ventas" in lowered
+        or "monto de venta" in lowered
+        or "monto venta" in lowered
+        or "ingreso" in lowered
+        or "ingresos" in lowered
+        or bool(re.search(r"\bfactur", lowered))
+    )
     wants_purchases = "compra" in lowered or "compras" in lowered
     wants_tax = "impuesto" in lowered or "iva" in lowered
 
