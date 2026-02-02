@@ -17,6 +17,7 @@ from .models import (
     MercadoLibreConnection,
     MercadoLibreItem,
     Product,
+    ProductVariant,
     Sale,
     SaleItem,
     Stock,
@@ -355,6 +356,65 @@ def _match_product(title: str, product_index) -> tuple[Product | None, str]:
     return None, ""
 
 
+def _extract_variation_values(order_item: dict, item_detail: dict | None = None) -> list[str]:
+    values: list[str] = []
+    for source in (order_item.get("variation_attributes"), (order_item.get("item") or {}).get("variation_attributes")):
+        for attr in source or []:
+            value = attr.get("value_name") or attr.get("name") or attr.get("value_id")
+            if value:
+                values.append(str(value))
+    variation_id = order_item.get("variation_id") or (order_item.get("item") or {}).get("variation_id")
+    if item_detail and variation_id:
+        for variation in item_detail.get("variations") or []:
+            if str(variation.get("id") or "") != str(variation_id):
+                continue
+            for attr in variation.get("attribute_combinations") or []:
+                value = attr.get("value_name") or attr.get("name") or attr.get("value_id")
+                if value:
+                    values.append(str(value))
+            for attr in variation.get("attributes") or []:
+                value = attr.get("value_name") or attr.get("name") or attr.get("value_id")
+                if value:
+                    values.append(str(value))
+            break
+    return values
+
+
+def _resolve_variant_for_order_item(product: Product, order_item: dict, item_id: str, access_token: str) -> ProductVariant | None:
+    if not ProductVariant.objects.filter(product=product).exists():
+        return None
+    values = _extract_variation_values(order_item)
+    if not values:
+        variation_id = order_item.get("variation_id") or (order_item.get("item") or {}).get("variation_id")
+        if variation_id and item_id:
+            try:
+                item_detail = get_item(item_id, access_token)
+            except Exception:
+                item_detail = None
+            values = _extract_variation_values(order_item, item_detail=item_detail)
+    if not values:
+        return None
+    value_norms = [_normalize(val) for val in values if val]
+    best = None
+    best_score = 0
+    for variant in ProductVariant.objects.filter(product=product):
+        name_norm = _normalize(variant.name)
+        if not name_norm:
+            continue
+        for val_norm in value_norms:
+            if not val_norm:
+                continue
+            score = 0
+            if name_norm == val_norm:
+                score = 3
+            elif name_norm in val_norm or val_norm in name_norm:
+                score = 1
+            if score > best_score:
+                best_score = score
+                best = variant
+    return best
+
+
 def sync_items_and_stock(connection: MercadoLibreConnection, user) -> SyncResult:
     access_token = get_valid_access_token(connection)
     if not access_token:
@@ -484,7 +544,8 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
         if not product:
             continue
         vat_percent = product.vat_percent or Decimal("0.00")
-        matched_items.append((product, quantity, unit_price, vat_percent))
+        variant = _resolve_variant_for_order_item(product, order_item, item_id, access_token)
+        matched_items.append((product, quantity, unit_price, vat_percent, variant))
 
     if not matched_items:
         return False, "no_matches"
@@ -507,6 +568,17 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
         existing_sale.ml_tax_total = tax_total.quantize(Decimal("0.01"))
         existing_sale.ml_order_id = str(order_id)
         existing_sale.save(update_fields=["ml_commission_total", "ml_tax_total", "ml_order_id"])
+        for product, quantity, unit_price, vat_percent, variant in matched_items:
+            if not variant:
+                continue
+            target = (
+                SaleItem.objects.filter(sale=existing_sale, product=product, variant__isnull=True, quantity=quantity)
+                .order_by("id")
+                .first()
+            )
+            if target:
+                target.variant = variant
+                target.save(update_fields=["variant"])
         return True, "updated"
 
     sale = Sale.objects.create(
@@ -519,11 +591,12 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
         ml_tax_total=tax_total.quantize(Decimal("0.01")),
         user=user,
     )
-    for product, quantity, unit_price, vat_percent in matched_items:
+    for product, quantity, unit_price, vat_percent, variant in matched_items:
         line_total = (unit_price * quantity).quantize(Decimal("0.01"))
         SaleItem.objects.create(
             sale=sale,
             product=product,
+            variant=variant,
             quantity=quantity,
             unit_price=unit_price,
             discount_percent=Decimal("0.00"),
