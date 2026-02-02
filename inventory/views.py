@@ -312,7 +312,6 @@ def dashboard(request):
     purchase_total = purchase_qs.aggregate(total=Sum("total")).get("total") or Decimal("0.00")
     sale_total = sale_item_qs.aggregate(total=Sum("line_total")).get("total") or Decimal("0.00")
     tax_total = tax_qs.aggregate(total=Sum("amount")).get("total") or Decimal("0.00")
-    net_margin = sale_total - purchase_total - tax_total
 
     margin_ml = Decimal("0.00")
     margin_comun = Decimal("0.00")
@@ -330,6 +329,8 @@ def dashboard(request):
             margin_ml += net_total - cost_total
         else:
             margin_comun += (sale.total or Decimal("0.00")) - cost_total
+
+    net_margin = (sale_total + margin_ml + margin_comun) - (purchase_total + tax_total)
 
     ranking_qs = (
         sale_item_qs.values("product__id", "product__sku", "product__name", "variant__name")
