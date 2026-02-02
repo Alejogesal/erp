@@ -2490,6 +2490,17 @@ def stock_list(request):
         else:
             product.has_variants = False
         product.total_qty = product.comun_qty
+    if ml_wh:
+        transfer_history = (
+            StockMovement.objects.filter(
+                movement_type=StockMovement.MovementType.TRANSFER,
+                to_warehouse=ml_wh,
+            )
+            .select_related("product", "user", "from_warehouse", "to_warehouse")
+            .order_by("-created_at", "-id")[:100]
+        )
+    else:
+        transfer_history = []
     return render(
         request,
         "inventory/stock_list.html",
@@ -2499,6 +2510,7 @@ def stock_list(request):
             "can_transfer": comun_wh is not None and ml_wh is not None,
             "query": query,
             "variant_data": variant_data,
+            "transfer_history": transfer_history,
         },
     )
 

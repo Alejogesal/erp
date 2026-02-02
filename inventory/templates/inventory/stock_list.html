@@ -171,6 +171,40 @@
     {% endif %}
 </div>
 
+<div class="card table-card" style="margin-bottom:16px;">
+    <div class="card-title">Historial de transferencias a MercadoLibre</div>
+    {% if transfer_history %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>SKU</th>
+                    <th>Producto</th>
+                    <th>Cantidad</th>
+                    <th>Origen</th>
+                    <th>Usuario</th>
+                    <th>Referencia</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for movement in transfer_history %}
+                <tr>
+                    <td>{{ movement.created_at|date:"d/m/Y H:i" }}</td>
+                    <td>{{ movement.product.sku }}</td>
+                    <td>{{ movement.product.name }}</td>
+                    <td>{{ movement.quantity|latam_number:2 }}</td>
+                    <td>{{ movement.from_warehouse.name|default:movement.from_warehouse.type }}</td>
+                    <td>{{ movement.user.get_full_name|default:movement.user.username }}</td>
+                    <td>{{ movement.reference }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p class="subtitle">Aún no hay transferencias registradas.</p>
+    {% endif %}
+</div>
+
 <div class="card table-card">
     <div class="card-title">Stock por depósito</div>
     <div class="stock-filter">
