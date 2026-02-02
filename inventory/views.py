@@ -4575,6 +4575,16 @@ def customers_view(request):
 def taxes_view(request):
     tax_form = TaxExpenseForm()
     if request.method == "POST":
+        action = request.POST.get("action") or ""
+        if action == "delete_tax":
+            tax_id = request.POST.get("tax_id")
+            deleted, _ = TaxExpense.objects.filter(id=tax_id).delete()
+            if deleted:
+                messages.success(request, "Impuesto eliminado.")
+            else:
+                messages.error(request, "No se encontró el impuesto.")
+            return redirect("inventory_taxes")
+
         tax_form = TaxExpenseForm(request.POST)
         if tax_form.is_valid():
             tax_form.save()

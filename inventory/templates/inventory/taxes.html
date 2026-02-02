@@ -46,6 +46,14 @@
     .flatpickr-day.flatpickr-disabled {
         color: rgba(255, 255, 255, 0.35);
     }
+    .danger {
+        background: #c0392b;
+        border: none;
+        color: #fff;
+    }
+    .danger:hover {
+        filter: brightness(1.05);
+    }
 </style>
 
 <div class="card" style="margin-bottom:16px;">
@@ -65,6 +73,7 @@
                 <th>Fecha</th>
                 <th>Descripción</th>
                 <th>Monto</th>
+                <th>Acciones</th>
             </tr>
         </thead>
         <tbody>
@@ -73,9 +82,17 @@
                 <td>{{ tax.paid_at|date:"d/m/Y" }}</td>
                 <td>{{ tax.description }}</td>
                 <td>${{ tax.amount|latam_number:2 }}</td>
+                <td>
+                    <form method="post" style="display:inline;">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="delete_tax">
+                        <input type="hidden" name="tax_id" value="{{ tax.id }}">
+                        <button type="submit" class="danger" onclick="return confirm('¿Eliminar impuesto?');">Eliminar</button>
+                    </form>
+                </td>
             </tr>
             {% empty %}
-            <tr><td colspan="3">Aún no hay impuestos cargados.</td></tr>
+            <tr><td colspan="4">Aún no hay impuestos cargados.</td></tr>
             {% endfor %}
         </tbody>
     </table>
