@@ -5,7 +5,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from inventory import services
-from inventory.models import Customer, Product, Supplier, Warehouse
+from inventory.models import Customer, Product, Sale, SaleItem, Supplier, Warehouse
 
 
 class DashboardViewTests(TestCase):
@@ -18,7 +18,18 @@ class DashboardViewTests(TestCase):
 
     def test_dashboard_totals_and_ranking(self):
         services.register_entry(self.product, self.comun, Decimal("4"), Decimal("10.00"), self.user)
-        services.register_exit(self.product, self.comun, Decimal("3"), self.user)
+        sale = Sale.objects.create(warehouse=self.comun, total=Decimal("60.00"))
+        SaleItem.objects.create(
+            sale=sale,
+            product=self.product,
+            quantity=Decimal("3.00"),
+            unit_price=Decimal("20.00"),
+            cost_unit=self.product.cost_with_vat(),
+            discount_percent=Decimal("0.00"),
+            final_unit_price=Decimal("20.00"),
+            line_total=Decimal("60.00"),
+            vat_percent=Decimal("0.00"),
+        )
 
         response = self.client.get(reverse("inventory_dashboard"))
         self.assertEqual(response.status_code, 200)
@@ -30,6 +41,7 @@ class DashboardViewTests(TestCase):
         self.assertEqual(len(ranking), 1)
         self.assertEqual(ranking[0]["sku"], "SKU-V")
         self.assertEqual(ranking[0]["quantity"], Decimal("3.00"))
+        self.assertEqual(ranking[0]["profit"], Decimal("30.00"))
 
     def test_create_product_from_dashboard(self):
         response = self.client.post(

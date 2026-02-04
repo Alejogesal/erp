@@ -294,7 +294,7 @@ def dashboard(request):
 
     purchase_qs = Purchase.objects.all()
     sale_item_qs = SaleItem.objects.all()
-    sales_qs = Sale.objects.select_related("warehouse").prefetch_related("items__product")
+    sales_qs = Sale.objects.select_related("warehouse").prefetch_related("items__product", "items__variant")
     tax_qs = TaxExpense.objects.all()
     if start_dt:
         purchase_qs = purchase_qs.filter(created_at__gte=start_dt)
@@ -332,22 +332,40 @@ def dashboard(request):
 
     net_margin = (sale_total + margin_ml + margin_comun) - (purchase_total + tax_total)
 
-    ranking_qs = (
-        sale_item_qs.values("product__id", "product__sku", "product__name", "variant__name")
-        .annotate(total_quantity=Sum("quantity"))
-        .order_by("-total_quantity")
-    )
+    ranking_map = {}
+    for sale in sales_qs:
+        items = list(sale.items.all())
+        if not items:
+            continue
+        items_total = sum((item.line_total or Decimal("0.00")) for item in items)
+        if items_total <= 0:
+            continue
+        if sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE:
+            revenue_total = (sale.total or Decimal("0.00")) - (sale.ml_commission_total or Decimal("0.00")) - (
+                sale.ml_tax_total or Decimal("0.00")
+            )
+        else:
+            revenue_total = sale.total or Decimal("0.00")
+        for item in items:
+            line_total = item.line_total or Decimal("0.00")
+            revenue_share = (revenue_total * line_total / items_total) if items_total else Decimal("0.00")
+            cost_unit = item.cost_unit if item.cost_unit and item.cost_unit > 0 else item.product.cost_with_vat()
+            cost_total = item.quantity * cost_unit
+            profit = (revenue_share - cost_total).quantize(Decimal("0.01"))
+            key = (item.product_id, item.variant_id)
+            if key not in ranking_map:
+                ranking_map[key] = {
+                    "product_id": item.product_id,
+                    "sku": item.product.sku,
+                    "name": item.product.name,
+                    "variant": item.variant.name if item.variant else None,
+                    "quantity": Decimal("0.00"),
+                    "profit": Decimal("0.00"),
+                }
+            ranking_map[key]["quantity"] += item.quantity
+            ranking_map[key]["profit"] += profit
 
-    ranking = [
-        {
-            "product_id": item["product__id"],
-            "sku": item["product__sku"],
-            "name": item["product__name"],
-            "variant": item["variant__name"],
-            "quantity": item["total_quantity"],
-        }
-        for item in ranking_qs
-    ]
+    ranking = sorted(ranking_map.values(), key=lambda item: item["profit"], reverse=True)
 
     context = {
         "purchase_total": purchase_total,

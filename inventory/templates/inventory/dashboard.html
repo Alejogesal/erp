@@ -3,7 +3,7 @@
 {% block title %}Dashboard{% endblock %}
 {% block content %}
     <h1>Dashboard</h1>
-    <p class="subtitle">Compará rápido el monto de compra vs. venta y los productos más vendidos.</p>
+    <p class="subtitle">Compará rápido el monto de compra vs. venta y los productos con mayor ganancia.</p>
 
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <style>
@@ -98,7 +98,7 @@
     </div>
 
     <div class="card table-card">
-        <div class="card-title">Ranking de más vendidos</div>
+        <div class="card-title">Ranking por ganancia</div>
     {% if ranking %}
         <table>
             <thead>
@@ -106,6 +106,7 @@
                     <th>SKU</th>
                     <th>Producto</th>
                     <th>Variedad</th>
+                    <th>Ganancia</th>
                     <th>Cantidad vendida</th>
                 </tr>
             </thead>
@@ -115,6 +116,7 @@
                     <td>{{ item.sku }}</td>
                     <td>{{ item.name }}</td>
                     <td>{{ item.variant|default:"-" }}</td>
+                    <td>${{ item.profit|latam_number:2 }}</td>
                     <td>{{ item.quantity|latam_number:2 }}</td>
                 </tr>
                 {% endfor %}
