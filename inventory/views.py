@@ -4402,13 +4402,19 @@ def mercadolibre_dashboard(request):
             else:
                 result = ml.sync_items_and_stock(connection, request.user)
                 metrics = result.metrics
-                notice = (
-                    f"Sync OK. Items: {result.total_items}, Matcheados: {result.matched}, "
-                    f"Sin match: {result.unmatched}, Stock actualizado: {result.updated_stock}."
-                )
-                if metrics.get("truncated"):
-                    notice += " (Sync limitado por configuración)"
-                messages.success(request, notice)
+                if metrics.get("error") == "unauthorized":
+                    messages.error(
+                        request,
+                        "MercadoLibre rechazó el token. Volvé a conectar la cuenta para actualizar el acceso.",
+                    )
+                else:
+                    notice = (
+                        f"Sync OK. Items: {result.total_items}, Matcheados: {result.matched}, "
+                        f"Sin match: {result.unmatched}, Stock actualizado: {result.updated_stock}."
+                    )
+                    if metrics.get("truncated"):
+                        notice += " (Sync limitado por configuración)"
+                    messages.success(request, notice)
         elif action == "sync_orders":
             if not connection or not connection.access_token:
                 messages.error(request, "Primero conectá la cuenta de MercadoLibre.")
@@ -4416,16 +4422,22 @@ def mercadolibre_dashboard(request):
                 days_env = os.environ.get("ML_ORDERS_DAYS", "")
                 days = int(days_env) if days_env.isdigit() else 30
                 result = ml.sync_recent_orders(connection, request.user, days=days)
-                reason_parts = []
-                for key, count in result.get("reasons", {}).items():
-                    reason_parts.append(f"{key}: {count}")
-                reason_text = f" ({', '.join(reason_parts)})" if reason_parts else ""
-                messages.success(
-                    request,
-                    "Sync ventas OK. Revisadas: "
-                    f"{result['total']}, nuevas: {result['created']}, "
-                    f"actualizadas: {result.get('updated', 0)}.{reason_text}",
-                )
+                if result.get("reasons", {}).get("unauthorized"):
+                    messages.error(
+                        request,
+                        "MercadoLibre rechazó el token. Volvé a conectar la cuenta para actualizar el acceso.",
+                    )
+                else:
+                    reason_parts = []
+                    for key, count in result.get("reasons", {}).items():
+                        reason_parts.append(f"{key}: {count}")
+                    reason_text = f" ({', '.join(reason_parts)})" if reason_parts else ""
+                    messages.success(
+                        request,
+                        "Sync ventas OK. Revisadas: "
+                        f"{result['total']}, nuevas: {result['created']}, "
+                        f"actualizadas: {result.get('updated', 0)}.{reason_text}",
+                    )
         elif action == "sync_item":
             item_id = (request.POST.get("ml_item_id") or "").strip()
             if not item_id:

@@ -110,6 +110,33 @@ def refresh_access_token(refresh_token: str) -> dict:
     )
 
 
+def _refresh_connection_token(connection: MercadoLibreConnection) -> str:
+    refreshed = refresh_access_token(connection.refresh_token)
+    access_token = refreshed.get("access_token", "") or ""
+    if not access_token:
+        return ""
+    connection.access_token = access_token
+    connection.refresh_token = refreshed.get("refresh_token", connection.refresh_token)
+    expires_in = int(refreshed.get("expires_in", 0) or 0)
+    if expires_in:
+        connection.expires_at = timezone.now() + timedelta(seconds=expires_in)
+    connection.save(update_fields=["access_token", "refresh_token", "expires_at"])
+    return access_token
+
+
+def _call_with_refresh(connection: MercadoLibreConnection, func, *args, **kwargs):
+    try:
+        return func(*args, **kwargs)
+    except HTTPError as exc:
+        if exc.code != 401:
+            raise
+        new_token = _refresh_connection_token(connection)
+        if not new_token:
+            raise
+        kwargs["access_token"] = new_token
+        return func(*args, **kwargs)
+
+
 def get_user_profile(access_token: str) -> dict:
     return _request("GET", "/users/me", access_token=access_token)
 
@@ -292,7 +319,18 @@ def sync_recent_orders(connection: MercadoLibreConnection, user, days: int = 30)
     access_token = get_valid_access_token(connection)
     if not access_token:
         return {"total": 0, "created": 0, "updated": 0, "reasons": {"missing_access_token": 1}}
-    order_ids = get_recent_order_ids(connection.ml_user_id, access_token, days=days)
+    try:
+        order_ids = _call_with_refresh(
+            connection,
+            get_recent_order_ids,
+            connection.ml_user_id,
+            access_token=access_token,
+            days=days,
+        )
+    except HTTPError as exc:
+        if exc.code == 401:
+            return {"total": 0, "created": 0, "updated": 0, "reasons": {"unauthorized": 1}}
+        raise
     created = 0
     updated = 0
     reasons: dict[str, int] = {}
@@ -380,7 +418,13 @@ def _extract_variation_values(order_item: dict, item_detail: dict | None = None)
     return values
 
 
-def _resolve_variant_for_order_item(product: Product, order_item: dict, item_id: str, access_token: str) -> ProductVariant | None:
+def _resolve_variant_for_order_item(
+    product: Product,
+    order_item: dict,
+    item_id: str,
+    access_token: str,
+    connection: MercadoLibreConnection | None = None,
+) -> ProductVariant | None:
     if not ProductVariant.objects.filter(product=product).exists():
         return None
     values = _extract_variation_values(order_item)
@@ -388,7 +432,12 @@ def _resolve_variant_for_order_item(product: Product, order_item: dict, item_id:
         variation_id = order_item.get("variation_id") or (order_item.get("item") or {}).get("variation_id")
         if variation_id and item_id:
             try:
-                item_detail = get_item(item_id, access_token)
+                if connection:
+                    item_detail = _call_with_refresh(
+                        connection, get_item, item_id, access_token=access_token
+                    )
+                else:
+                    item_detail = get_item(item_id, access_token)
             except Exception:
                 item_detail = None
             values = _extract_variation_values(order_item, item_detail=item_detail)
@@ -421,19 +470,40 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user) -> SyncResult
         return SyncResult(0, 0, 0, 0, {})
 
     if not connection.ml_user_id:
-        profile = get_user_profile(access_token)
+        try:
+            profile = _call_with_refresh(connection, get_user_profile, access_token=access_token)
+        except HTTPError as exc:
+            if exc.code == 401:
+                return SyncResult(0, 0, 0, 0, {"error": "unauthorized"})
+            raise
         connection.ml_user_id = str(profile.get("id", "") or "")
         connection.nickname = profile.get("nickname", "") or ""
         connection.save(update_fields=["ml_user_id", "nickname"])
 
     max_items_env = os.environ.get("ML_SYNC_MAX_ITEMS", "")
     max_items = int(max_items_env) if max_items_env.isdigit() else None
-    item_ids, truncated = get_item_ids(connection.ml_user_id, access_token, max_items=max_items)
+    try:
+        item_ids, truncated = _call_with_refresh(
+            connection,
+            get_item_ids,
+            connection.ml_user_id,
+            access_token=access_token,
+            max_items=max_items,
+        )
+    except HTTPError as exc:
+        if exc.code == 401:
+            return SyncResult(0, 0, 0, 0, {"error": "unauthorized"})
+        raise
     ml_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.MERCADOLIBRE).first()
     total = matched = unmatched = updated_stock = 0
 
     for item_id in item_ids:
-        item = get_item(item_id, access_token)
+        try:
+            item = _call_with_refresh(connection, get_item, item_id, access_token=access_token)
+        except HTTPError as exc:
+            if exc.code == 401:
+                return SyncResult(total, matched, unmatched, updated_stock, {"error": "unauthorized"})
+            raise
         title = item.get("title", "") or ""
         available = int(item.get("available_quantity", 0) or 0)
         status = item.get("status", "") or ""
@@ -476,7 +546,18 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user) -> SyncResult
         else:
             unmatched += 1
 
-    metrics = get_orders_summary(connection.ml_user_id, access_token, days=30)
+    try:
+        metrics = _call_with_refresh(
+            connection,
+            get_orders_summary,
+            connection.ml_user_id,
+            access_token=access_token,
+            days=30,
+        )
+    except HTTPError as exc:
+        if exc.code == 401:
+            return SyncResult(total, matched, unmatched, updated_stock, {"error": "unauthorized"})
+        raise
     item_sales = metrics.pop("item_sales", {})
     for item_id, data in item_sales.items():
         MercadoLibreItem.objects.filter(item_id=item_id).update(
@@ -498,7 +579,12 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
     if not access_token:
         return False, "missing_access_token"
 
-    order = get_order(order_id, access_token)
+    try:
+        order = _call_with_refresh(connection, get_order, order_id, access_token=access_token)
+    except HTTPError as exc:
+        if exc.code == 401:
+            return False, "unauthorized"
+        raise
     order_status = order.get("status", "") or ""
     if order_status in {"cancelled", "expired"}:
         return False, "ignored_status"
@@ -524,7 +610,10 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
             if ml_item and ml_item.product:
                 product = ml_item.product
         if not product and item_id:
-            item_detail = get_item(item_id, access_token)
+            try:
+                item_detail = _call_with_refresh(connection, get_item, item_id, access_token=access_token)
+            except HTTPError:
+                item_detail = {}
             title = item_detail.get("title", "") or ""
             status = item_detail.get("status", "") or ""
             shipping = item_detail.get("shipping") or {}
@@ -544,7 +633,7 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
         if not product:
             continue
         vat_percent = product.vat_percent or Decimal("0.00")
-        variant = _resolve_variant_for_order_item(product, order_item, item_id, access_token)
+        variant = _resolve_variant_for_order_item(product, order_item, item_id, access_token, connection=connection)
         matched_items.append((product, quantity, unit_price, vat_percent, variant))
 
     if not matched_items:
@@ -554,7 +643,10 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
     payments = order.get("payments") or []
     if not payments:
         try:
-            payments_data = get_order_payments(order_id, access_token)
+            try:
+                payments_data = _call_with_refresh(connection, get_order_payments, order_id, access_token=access_token)
+            except HTTPError:
+                payments_data = []
             if isinstance(payments_data, dict):
                 payments = payments_data.get("payments") or payments_data.get("results") or []
             elif isinstance(payments_data, list):
