@@ -330,7 +330,7 @@ def dashboard(request):
         else:
             margin_comun += (sale.total or Decimal("0.00")) - cost_total
 
-    net_margin = (sale_total + margin_ml + margin_comun) - (purchase_total + tax_total)
+    net_margin = (margin_ml + margin_comun) - tax_total
 
     ranking_map = {}
     for sale in sales_qs:
