@@ -761,6 +761,8 @@ def sale_edit(request, sale_id: int):
                     sale.discount_total = (discount_total + extra_discount_amount).quantize(Decimal("0.01"))
                     sale.save(update_fields=["total", "discount_total"])
                 messages.success(request, "Venta actualizada.")
+                if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE:
+                    return redirect("inventory_sales_list")
                 return redirect("inventory_sale_receipt", sale_id=sale.id)
             except services.NegativeStockError:
                 messages.error(request, "No se puede actualizar: el stock quedaría negativo.")
@@ -1488,6 +1490,8 @@ def sales_list(request):
                         sale.discount_total = (discount_total + extra_discount_amount).quantize(Decimal("0.01"))
                         sale.save(update_fields=["total", "discount_total"])
                     messages.success(request, "Venta registrada.")
+                    if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE:
+                        return redirect("inventory_sales_list")
                     return redirect("inventory_sale_receipt", sale_id=sale.id)
                 except services.NegativeStockError:
                     messages.error(request, "No hay stock suficiente para completar la venta.")
