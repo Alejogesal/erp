@@ -22,6 +22,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
 from django.utils import timezone
+from django.utils.text import slugify
 from datetime import datetime, time, timedelta
 import io
 import zipfile
@@ -3985,7 +3986,20 @@ def product_prices_download(request, audience: str):
     attr = price_attr_map[audience]
     rows = [[p.group or "", p.name, getattr(p, attr)] for p in products]
     xlsx_bytes = _build_xlsx(headers, rows, blue_cols={1}, number_cols={3})
-    filename = f"precios_{audience}.xlsx"
+    audience_label_map = {
+        "consumer": "consumidor",
+        "barber": "peluqueria",
+        "distributor": "distribuidor",
+    }
+    audience_label = audience_label_map.get(audience, audience)
+    if groups_raw:
+        if len(groups) == 1:
+            brand_slug = slugify(groups[0])
+        else:
+            brand_slug = "varias_marcas"
+        filename = f"{brand_slug}_{audience_label}.xlsx"
+    else:
+        filename = f"precios_{audience_label}.xlsx"
     response = HttpResponse(
         xlsx_bytes,
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
