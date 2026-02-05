@@ -208,6 +208,7 @@
         const totalVenta = document.getElementById("id_total_venta");
         const comisionMl = document.getElementById("id_comision_ml");
         const impuestosMl = document.getElementById("id_impuestos_ml");
+        const descuentoTotal = document.getElementById("id_descuento_total");
         const audiences = JSON.parse(document.getElementById("customer-audiences").textContent || "{}");
 
         function syncAudience() {
@@ -233,6 +234,11 @@
                 if (!field) return;
                 const wrapper = field.closest("p") || field.parentElement;
                 if (wrapper) wrapper.style.display = isMl ? "" : "none";
+            });
+            [descuentoTotal].forEach((field) => {
+                if (!field) return;
+                const wrapper = field.closest("p") || field.parentElement;
+                if (wrapper) wrapper.style.display = isMl ? "none" : "";
             });
             if (customerSelect) {
                 customerSelect.value = isMl ? "" : customerSelect.value;
