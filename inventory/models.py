@@ -338,11 +338,21 @@ class PurchaseItem(models.Model):
 
 
 class Sale(models.Model):
+    class DeliveryStatus(models.TextChoices):
+        NOT_DELIVERED = "NOT_DELIVERED", "No entregado"
+        IN_TRANSIT = "IN_TRANSIT", "Stock en camino"
+        DELIVERED = "DELIVERED", "Entregado"
+
     customer = models.ForeignKey(Customer, on_delete=models.SET_NULL, null=True, blank=True, related_name="sales")
     warehouse = models.ForeignKey(Warehouse, on_delete=models.PROTECT, related_name="sales")
     audience = models.CharField(max_length=20, choices=Customer.Audience.choices, default=Customer.Audience.CONSUMER)
     total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     discount_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    delivery_status = models.CharField(
+        max_length=20,
+        choices=DeliveryStatus.choices,
+        default=DeliveryStatus.NOT_DELIVERED,
+    )
     reference = models.CharField(max_length=255, blank=True, default="")
     ml_order_id = models.CharField(max_length=50, blank=True, default="")
     ml_commission_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))

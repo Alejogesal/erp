@@ -140,6 +140,12 @@ class SaleHeaderForm(forms.Form):
         input_formats=["%Y-%m-%d", "%d/%m/%Y"],
         widget=forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}),
     )
+    delivery_status = forms.ChoiceField(
+        choices=Sale.DeliveryStatus.choices,
+        label="Estado de entrega",
+        required=False,
+        initial=Sale.DeliveryStatus.NOT_DELIVERED,
+    )
     audiencia = forms.ChoiceField(
         choices=Customer.Audience.choices,
         label="Tipo de venta",
@@ -626,9 +632,11 @@ def sale_edit(request, sale_id: int):
             extra_discount_percent = header_form.cleaned_data.get("descuento_total") or Decimal("0.00")
             comision_ml = header_form.cleaned_data.get("comision_ml") or Decimal("0.00")
             impuestos_ml = header_form.cleaned_data.get("impuestos_ml") or Decimal("0.00")
+            delivery_status = header_form.cleaned_data.get("delivery_status") or Sale.DeliveryStatus.NOT_DELIVERED
             if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE:
                 customer = None
                 audience = Customer.Audience.CONSUMER
+                delivery_status = Sale.DeliveryStatus.NOT_DELIVERED
             elif customer:
                 audience = customer.audience
             try:
@@ -668,13 +676,21 @@ def sale_edit(request, sale_id: int):
                     sale.customer = customer
                     sale.warehouse = warehouse
                     sale.audience = audience
+                    sale.delivery_status = delivery_status
                     sale.ml_commission_total = (
                         comision_ml if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE else Decimal("0.00")
                     )
                     sale.ml_tax_total = (
                         impuestos_ml if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE else Decimal("0.00")
                     )
-                    update_fields = ["customer", "warehouse", "audience", "ml_commission_total", "ml_tax_total"]
+                    update_fields = [
+                        "customer",
+                        "warehouse",
+                        "audience",
+                        "delivery_status",
+                        "ml_commission_total",
+                        "ml_tax_total",
+                    ]
                     if sale_date:
                         created_at = datetime.combine(sale_date, time(12, 0))
                         if timezone.is_naive(created_at):
@@ -795,6 +811,7 @@ def sale_edit(request, sale_id: int):
                 "sale_date": timezone.localtime(sale.created_at).date() if sale.created_at else None,
                 "audiencia": sale.audience,
                 "cliente": sale.customer,
+                "delivery_status": sale.delivery_status,
                 "total_venta": sale.total if sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE else None,
                 "descuento_total": discount_percent,
                 "comision_ml": sale.ml_commission_total or Decimal("0.00"),
@@ -1366,9 +1383,11 @@ def sales_list(request):
             extra_discount_percent = header_form.cleaned_data.get("descuento_total") or Decimal("0.00")
             comision_ml = header_form.cleaned_data.get("comision_ml") or Decimal("0.00")
             impuestos_ml = header_form.cleaned_data.get("impuestos_ml") or Decimal("0.00")
+            delivery_status = header_form.cleaned_data.get("delivery_status") or Sale.DeliveryStatus.NOT_DELIVERED
             if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE:
                 customer = None
                 audience = Customer.Audience.CONSUMER
+                delivery_status = Sale.DeliveryStatus.NOT_DELIVERED
             elif customer:
                 audience = customer.audience
             items = []
@@ -1400,6 +1419,7 @@ def sales_list(request):
                             customer=customer,
                             warehouse=warehouse,
                             audience=audience,
+                            delivery_status=delivery_status,
                             reference=f"Venta {audience}",
                             user=request.user,
                             ml_commission_total=comision_ml if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE else Decimal("0.00"),

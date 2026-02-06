@@ -5,13 +5,14 @@
 
 {% if show_history and show_comun %}
 <h4 style="margin:10px 0 6px;">Depósito Común</h4>
-<table>
+<table style="width:100%; min-width:1100px;">
     <thead>
         <tr>
             <th>Comprobante</th>
             <th>Fecha</th>
             <th>Cliente</th>
             <th>Depósito</th>
+            <th>Estado</th>
             <th>Total</th>
             <th>Comisión ML</th>
             <th>Impuestos ML</th>
@@ -26,6 +27,7 @@
             <td>{{ sale.created_at|date:"d/m/Y H:i" }}</td>
             <td>{{ sale.customer|default:"Consumidor final" }}</td>
             <td>{{ sale.warehouse.name }}</td>
+            <td>{{ sale.get_delivery_status_display }}</td>
             <td>${{ sale.total|latam_number:2 }}</td>
             <td>${{ sale.ml_commission_total|latam_number:2 }}</td>
             <td>${{ sale.ml_tax_total|latam_number:2 }}</td>
@@ -38,10 +40,10 @@
             </td>
         </tr>
         {% empty %}
-        <tr class="empty-row"><td colspan="9">No hay ventas en Depósito Común.</td></tr>
+        <tr class="empty-row"><td colspan="10">No hay ventas en Depósito Común.</td></tr>
         {% endfor %}
         {% if sales_comun %}
-        <tr class="empty-row" style="display:none;"><td colspan="9">No hay ventas en Depósito Común.</td></tr>
+        <tr class="empty-row" style="display:none;"><td colspan="10">No hay ventas en Depósito Común.</td></tr>
         {% endif %}
     </tbody>
 </table>

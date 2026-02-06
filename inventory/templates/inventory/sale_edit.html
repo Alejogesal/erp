@@ -83,6 +83,7 @@
         const totalVenta = document.getElementById("id_total_venta");
         const comisionMl = document.getElementById("id_comision_ml");
         const impuestosMl = document.getElementById("id_impuestos_ml");
+        const deliveryStatus = document.getElementById("id_delivery_status");
         const descuentoTotal = document.getElementById("id_descuento_total");
         const audiences = JSON.parse(document.getElementById("customer-audiences").textContent || "{}");
 
@@ -115,6 +116,10 @@
                 const wrapper = field.closest("p") || field.parentElement;
                 if (wrapper) wrapper.style.display = isMl ? "none" : "";
             });
+            if (deliveryStatus) {
+                const wrapper = deliveryStatus.closest("p") || deliveryStatus.parentElement;
+                if (wrapper) wrapper.style.display = isMl ? "none" : "";
+            }
         };
         if (warehouseSelect) {
             warehouseSelect.addEventListener("change", syncMlFields);
