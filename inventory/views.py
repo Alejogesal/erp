@@ -334,6 +334,7 @@ def dashboard(request):
     net_margin = (margin_ml + margin_comun) - tax_total
 
     ranking_map = {}
+    ranking_variants_map = {}
     for sale in sales_qs:
         items = list(sale.items.all())
         if not items:
@@ -353,20 +354,35 @@ def dashboard(request):
             cost_unit = item.cost_unit if item.cost_unit and item.cost_unit > 0 else item.product.cost_with_vat()
             cost_total = item.quantity * cost_unit
             profit = (revenue_share - cost_total).quantize(Decimal("0.01"))
-            key = (item.product_id, item.variant_id)
-            if key not in ranking_map:
-                ranking_map[key] = {
+            product_key = item.product_id
+            if product_key not in ranking_map:
+                ranking_map[product_key] = {
                     "product_id": item.product_id,
                     "sku": item.product.sku,
                     "name": item.product.name,
-                    "variant": item.variant.name if item.variant else None,
                     "quantity": Decimal("0.00"),
                     "profit": Decimal("0.00"),
                 }
-            ranking_map[key]["quantity"] += item.quantity
-            ranking_map[key]["profit"] += profit
+            ranking_map[product_key]["quantity"] += item.quantity
+            ranking_map[product_key]["profit"] += profit
+
+            variant_key = (item.product_id, item.variant_id)
+            if variant_key not in ranking_variants_map:
+                ranking_variants_map[variant_key] = {
+                    "product_id": item.product_id,
+                    "variant": item.variant.name if item.variant else "Sin variedad",
+                    "quantity": Decimal("0.00"),
+                    "profit": Decimal("0.00"),
+                }
+            ranking_variants_map[variant_key]["quantity"] += item.quantity
+            ranking_variants_map[variant_key]["profit"] += profit
 
     ranking = sorted(ranking_map.values(), key=lambda item: item["profit"], reverse=True)
+    ranking_variants = {}
+    for entry in ranking_variants_map.values():
+        ranking_variants.setdefault(entry["product_id"], []).append(entry)
+    for product_id, entries in ranking_variants.items():
+        ranking_variants[product_id] = sorted(entries, key=lambda item: item["profit"], reverse=True)
 
     context = {
         "purchase_total": purchase_total,
@@ -376,6 +392,7 @@ def dashboard(request):
         "margin_ml": margin_ml,
         "margin_comun": margin_comun,
         "ranking": ranking,
+        "ranking_variants": ranking_variants,
         "start_date": start_date,
         "end_date": end_date,
         "tax_total": tax_total,
@@ -887,6 +904,9 @@ def purchase_receipt(request, purchase_id: int):
 @login_required
 def sales_list(request):
     SaleItemFormSet = formset_factory(SaleItemForm, extra=1, can_delete=False)
+    default_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
+    if not default_wh:
+        default_wh = Warehouse.objects.first()
     customer_audiences = {
         str(customer.id): customer.audience
         for customer in Customer.objects.only("id", "audience")
@@ -1501,7 +1521,10 @@ def sales_list(request):
         else:
             messages.error(request, "Revisá los campos de la venta.")
     else:
-        header_form = SaleHeaderForm(initial={"sale_date": timezone.localdate()})
+        header_initial = {"sale_date": timezone.localdate()}
+        if default_wh:
+            header_initial["warehouse"] = default_wh
+        header_form = SaleHeaderForm(initial=header_initial)
         formset = SaleItemFormSet()
     if show_history:
         sales = (
@@ -1620,6 +1643,8 @@ def sales_list(request):
             "formset": formset,
             "customer_audiences": customer_audiences,
             "variant_data": variant_data,
+            "clear_sale_form": request.method != "POST",
+            "default_warehouse_id": str(default_wh.id) if default_wh else "",
         },
     )
 

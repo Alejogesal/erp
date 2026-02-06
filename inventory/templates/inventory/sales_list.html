@@ -20,7 +20,7 @@
 
 <div class="card" style="margin-bottom:16px;">
     <div class="card-title">Registrar venta</div>
-    <form method="post" action="{% url 'inventory_sales_list' %}">
+    <form method="post" action="{% url 'inventory_sales_list' %}" data-clear-form="{% if clear_sale_form %}1{% else %}0{% endif %}" data-default-warehouse="{{ default_warehouse_id }}">
         {% csrf_token %}
         <h3>Datos de la venta</h3>
         {{ form.as_p }}
@@ -202,6 +202,9 @@
         const addBtn = document.getElementById("add-item");
         const body = document.getElementById("items-body");
         const totalForms = document.getElementById("id_form-TOTAL_FORMS");
+        const saleForm = addBtn?.closest("form") || document.querySelector("form[data-clear-form]");
+        const clearSaleForm = saleForm?.dataset.clearForm === "1";
+        const defaultWarehouseId = saleForm?.dataset.defaultWarehouse || "";
         const customerSelect = document.getElementById("id_cliente");
         const audienceSelect = document.getElementById("id_audiencia");
         const warehouseSelect = document.getElementById("id_warehouse");
@@ -255,7 +258,15 @@
         };
         if (warehouseSelect) {
             warehouseSelect.addEventListener("change", syncMlFields);
+            if (clearSaleForm && defaultWarehouseId) {
+                warehouseSelect.value = defaultWarehouseId;
+            }
             syncMlFields();
+        }
+        if (clearSaleForm) {
+            [totalVenta, comisionMl, impuestosMl].forEach((field) => {
+                if (field) field.value = "";
+            });
         }
 
         if (!addBtn || !body || !totalForms) return;
@@ -344,6 +355,10 @@
             const initialLabel = selectEl.options[selectEl.selectedIndex]?.textContent || "";
             if (initialLabel) {
                 search.value = initialLabel;
+            }
+            if (clearSaleForm) {
+                selectEl.value = "";
+                search.value = "";
             }
 
             const syncSelection = () => {
