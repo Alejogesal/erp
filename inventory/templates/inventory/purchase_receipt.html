@@ -59,13 +59,11 @@
                 <th class="num">Cantidad</th>
                 {% if has_vat %}
                 <th class="num">Costo unitario sin IVA</th>
-                <th class="num">DTO %</th>
                 <th class="num">IVA %</th>
                 <th class="num">IVA</th>
                 <th class="num">Total</th>
                 {% else %}
                 <th class="num">Costo unitario</th>
-                <th class="num">DTO %</th>
                 <th class="num">IVA %</th>
                 <th class="num">Total</th>
                 {% endif %}
@@ -78,13 +76,11 @@
                 <td class="num">{{ item.quantity|latam_number:2 }}</td>
                 {% if has_vat %}
                 <td class="num">${{ item.unit_cost_no_vat|latam_number:2 }}</td>
-                <td class="num">{{ item.discount_percent|latam_number:2 }}</td>
                 <td class="num">{{ item.vat_percent|latam_number:2 }}</td>
                 <td class="num">${{ item.line_vat|latam_number:2 }}</td>
                 <td class="num">${{ item.line_total|latam_number:2 }}</td>
                 {% else %}
-                <td class="num">${{ item.unit_cost_discounted|latam_number:2 }}</td>
-                <td class="num">{{ item.discount_percent|latam_number:2 }}</td>
+                <td class="num">${{ item.unit_cost|latam_number:2 }}</td>
                 <td class="num">{{ item.vat_percent|latam_number:2 }}</td>
                 <td class="num">${{ item.line_total|latam_number:2 }}</td>
                 {% endif %}

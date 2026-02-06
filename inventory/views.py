@@ -114,14 +114,6 @@ class PurchaseItemForm(forms.Form):
     product = forms.ModelChoiceField(queryset=Product.objects.all())
     quantity = forms.IntegerField(min_value=1)
     unit_cost = forms.DecimalField(min_value=Decimal("0.00"), decimal_places=2)
-    discount_percent = forms.DecimalField(
-        label="DTO %",
-        min_value=Decimal("0.00"),
-        max_value=Decimal("100.00"),
-        decimal_places=2,
-        required=False,
-        initial=Decimal("0.00"),
-    )
     supplier = forms.ModelChoiceField(queryset=Supplier.objects.all(), label="Proveedor", required=False)
     vat_percent = forms.DecimalField(
         label="IVA %",
@@ -852,29 +844,19 @@ def purchase_receipt(request, purchase_id: int):
     subtotal_no_vat = Decimal("0.00")
     vat_total = Decimal("0.00")
     for item in items:
-        discount_percent = item.discount_percent or Decimal("0.00")
-        discount_factor = Decimal("1.00") - (discount_percent / Decimal("100.00"))
-        item.discount_percent = discount_percent
-        item.unit_cost_discounted = (item.unit_cost * discount_factor).quantize(
-            Decimal("0.01"), rounding=ROUND_HALF_UP
-        )
-        item.line_total = (item.quantity * item.unit_cost_discounted).quantize(
-            Decimal("0.01"), rounding=ROUND_HALF_UP
-        )
+        item.line_total = item.quantity * item.unit_cost
         product_vat = item.product.vat_percent or Decimal("0.00")
         item_vat = item.vat_percent or Decimal("0.00")
         vat_percent = item_vat if item_vat > 0 else product_vat
         if vat_percent > 0:
             has_vat = True
             vat_factor = Decimal("1.00") + (vat_percent / Decimal("100.00"))
-            item.unit_cost_no_vat = (item.unit_cost_discounted / vat_factor).quantize(
+            item.unit_cost_no_vat = (item.unit_cost / vat_factor).quantize(
                 Decimal("0.01"), rounding=ROUND_HALF_UP
             )
-            item.unit_vat = (item.unit_cost_discounted - item.unit_cost_no_vat).quantize(
-                Decimal("0.01"), rounding=ROUND_HALF_UP
-            )
+            item.unit_vat = (item.unit_cost - item.unit_cost_no_vat).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         else:
-            item.unit_cost_no_vat = item.unit_cost_discounted
+            item.unit_cost_no_vat = item.unit_cost
             item.unit_vat = Decimal("0.00")
         item.vat_percent = vat_percent
         item.line_vat = (item.unit_vat * item.quantity).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -1760,7 +1742,6 @@ def purchases_list(request):
                     product_text = str(entry.get("product_text") or "").strip()
                     qty_raw = entry.get("quantity")
                     cost_raw = entry.get("unit_cost")
-                    discount_raw = entry.get("discount_percent")
                     supplier_id = str(entry.get("supplier_id") or "").strip()
                     vat_raw = entry.get("vat_percent")
                     if not product_id and not str(qty_raw or "").strip() and not str(cost_raw or "").strip():
@@ -1777,7 +1758,6 @@ def purchases_list(request):
                         continue
                     qty = parse_decimal(str(qty_raw))
                     unit_cost = parse_decimal(str(cost_raw))
-                    discount_percent = parse_decimal(str(discount_raw)) or Decimal("0.00")
                     vat_percent = parse_decimal(str(vat_raw)) or Decimal("0.00")
                     if qty is None or qty <= 0:
                         errors.append(f"Fila {idx}: cantidad inválida.")
@@ -1785,16 +1765,12 @@ def purchases_list(request):
                     if unit_cost is None or unit_cost < 0:
                         errors.append(f"Fila {idx}: costo inválido.")
                         continue
-                    if discount_percent < 0 or discount_percent > 100:
-                        errors.append(f"Fila {idx}: descuento inválido.")
-                        continue
                     supplier = Supplier.objects.filter(id=supplier_id).first() if supplier_id else None
                     items_data.append(
                         {
                             "product": product,
                             "quantity": qty,
                             "unit_cost": unit_cost,
-                            "discount_percent": discount_percent,
                             "vat_percent": vat_percent,
                             "supplier": supplier,
                         }
@@ -1816,7 +1792,6 @@ def purchases_list(request):
                     product_text = (request.POST.get(f"{prefix}product_text") or "").strip()
                     qty_raw = request.POST.get(f"{prefix}quantity")
                     cost_raw = request.POST.get(f"{prefix}unit_cost")
-                    discount_raw = request.POST.get(f"{prefix}discount_percent")
                     supplier_id = (request.POST.get(f"{prefix}supplier") or "").strip()
                     vat_raw = request.POST.get(f"{prefix}vat_percent")
                     if not product_id and not (qty_raw or "").strip() and not (cost_raw or "").strip():
@@ -1847,7 +1822,6 @@ def purchases_list(request):
                         continue
                     qty = parse_decimal(qty_raw)
                     unit_cost = parse_decimal(cost_raw)
-                    discount_percent = parse_decimal(discount_raw) or Decimal("0.00")
                     vat_percent = parse_decimal(vat_raw) or Decimal("0.00")
                     if qty is None or qty <= 0:
                         errors.append(f"Fila {idx + 1}: cantidad inválida.")
@@ -1855,16 +1829,12 @@ def purchases_list(request):
                     if unit_cost is None or unit_cost < 0:
                         errors.append(f"Fila {idx + 1}: costo inválido.")
                         continue
-                    if discount_percent < 0 or discount_percent > 100:
-                        errors.append(f"Fila {idx + 1}: descuento inválido.")
-                        continue
                     supplier = Supplier.objects.filter(id=supplier_id).first() if supplier_id else None
                     items_data.append(
                         {
                             "product": product,
                             "quantity": qty,
                             "unit_cost": unit_cost,
-                            "discount_percent": discount_percent,
                             "vat_percent": vat_percent,
                             "supplier": supplier,
                         }
@@ -1905,25 +1875,19 @@ def purchases_list(request):
                     for data in items:
                         qty = Decimal(data["quantity"])
                         unit_cost = data["unit_cost"]
-                        discount_percent = data.get("discount_percent") or Decimal("0.00")
-                        discount_factor = Decimal("1.00") - (discount_percent / Decimal("100.00"))
-                        effective_unit_cost = (unit_cost * discount_factor).quantize(
-                            Decimal("0.01"), rounding=ROUND_HALF_UP
-                        )
-                        subtotal += qty * effective_unit_cost
+                        subtotal += qty * unit_cost
                         PurchaseItem.objects.create(
                             purchase=purchase,
                             product=data["product"],
                             quantity=qty,
                             unit_cost=unit_cost,
-                            discount_percent=discount_percent,
                             vat_percent=data.get("vat_percent") or Decimal("0.00"),
                         )
                         services.register_entry(
                             product=data["product"],
                             warehouse=warehouse,
                             quantity=qty,
-                            unit_cost=effective_unit_cost,
+                            unit_cost=unit_cost,
                             supplier=data["supplier"],
                             vat_percent=data.get("vat_percent") or Decimal("0.00"),
                             user=request.user,
@@ -2038,34 +2002,28 @@ def purchase_edit(request, purchase_id: int):
                             continue
                         product_id = str(entry.get("product_id") or "").strip()
                         product_text = str(entry.get("product_text") or "").strip()
-                    qty_raw = entry.get("quantity")
-                    cost_raw = entry.get("unit_cost")
-                    discount_raw = entry.get("discount_percent")
-                    supplier_id = str(entry.get("supplier_id") or "").strip()
-                    vat_raw = entry.get("vat_percent")
+                        qty_raw = entry.get("quantity")
+                        cost_raw = entry.get("unit_cost")
+                        supplier_id = str(entry.get("supplier_id") or "").strip()
+                        vat_raw = entry.get("vat_percent")
                         if not product_id and not product_text:
                             continue
                         product = resolve_product(product_id, product_text)
-                    qty = parse_decimal(str(qty_raw))
-                    unit_cost = parse_decimal(str(cost_raw))
-                    discount_percent = parse_decimal(str(discount_raw)) or Decimal("0.00")
-                    if not product or qty is None or qty <= 0 or unit_cost is None:
-                        errors.append(f"Fila {idx}: datos inválidos.")
-                        continue
-                    if discount_percent < 0 or discount_percent > 100:
-                        errors.append(f"Fila {idx}: descuento inválido.")
-                        continue
-                    supplier = Supplier.objects.filter(id=supplier_id).first() if supplier_id else None
-                    items.append(
-                        {
-                            "product": product,
-                            "quantity": qty,
-                            "unit_cost": unit_cost,
-                            "discount_percent": discount_percent,
-                            "vat_percent": parse_decimal(str(vat_raw)) or Decimal("0.00"),
-                            "supplier": supplier,
-                        }
-                    )
+                        qty = parse_decimal(str(qty_raw))
+                        unit_cost = parse_decimal(str(cost_raw))
+                        if not product or qty is None or qty <= 0 or unit_cost is None:
+                            errors.append(f"Fila {idx}: datos inválidos.")
+                            continue
+                        supplier = Supplier.objects.filter(id=supplier_id).first() if supplier_id else None
+                        items.append(
+                            {
+                                "product": product,
+                                "quantity": qty,
+                                "unit_cost": unit_cost,
+                                "vat_percent": parse_decimal(str(vat_raw)) or Decimal("0.00"),
+                                "supplier": supplier,
+                            }
+                        )
             elif formset.is_valid():
                 for form in formset:
                     if form.cleaned_data.get("DELETE"):
@@ -2115,26 +2073,20 @@ def purchase_edit(request, purchase_id: int):
                         product = item["product"]
                         qty = item["quantity"]
                         unit_cost = item["unit_cost"]
-                        discount_percent = item.get("discount_percent") or Decimal("0.00")
-                        discount_factor = Decimal("1.00") - (discount_percent / Decimal("100.00"))
-                        effective_unit_cost = (unit_cost * discount_factor).quantize(
-                            Decimal("0.01"), rounding=ROUND_HALF_UP
-                        )
                         vat = item.get("vat_percent") or Decimal("0.00")
-                        subtotal += effective_unit_cost * qty
+                        subtotal += unit_cost * qty
                         PurchaseItem.objects.create(
                             purchase=purchase,
                             product=product,
                             quantity=qty,
                             unit_cost=unit_cost,
-                            discount_percent=discount_percent,
                             vat_percent=vat,
                         )
                         services.register_entry(
                             product=product,
                             warehouse=purchase.warehouse,
                             quantity=qty,
-                            unit_cost=effective_unit_cost,
+                            unit_cost=unit_cost,
                             vat_percent=vat,
                             user=request.user,
                             reference=f"Compra #{purchase.id}",
@@ -2170,7 +2122,6 @@ def purchase_edit(request, purchase_id: int):
                 "product": item.product,
                 "quantity": int(item.quantity),
                 "unit_cost": item.unit_cost,
-                "discount_percent": item.discount_percent,
                 "supplier": purchase.supplier,
                 "vat_percent": item.vat_percent,
             }
@@ -2690,7 +2641,7 @@ def _koda_system_prompt() -> str:
         "- transfer_to_ml: {items:[{product, quantity, variant?}]}\n"
         "- register_sale: {warehouse, audience?, customer?, items:[{product, quantity, unit_price?, vat_percent?}]}\n"
         "- update_sale: {sale_id? or invoice_number?, sale_date?, total?, ml_commission_total?, ml_tax_total?}\n"
-        "- register_purchase: {warehouse?, supplier, reference?, items:[{product, quantity, unit_cost?, discount_percent?, vat_percent?}], has_invoice_image?}\n"
+        "- register_purchase: {warehouse?, supplier, reference?, items:[{product, quantity, unit_cost?, vat_percent?}], has_invoice_image?}\n"
         "Para compras a proveedor, extraé items con {product: descripcion, quantity} y dejá unit_cost vacío.\n"
         "El backend completará el costo con el precio de lista/costo del ERP.\n"
         "Usá identificadores de producto por SKU si es posible, sino por nombre exacto. "
@@ -3343,31 +3294,23 @@ def _koda_execute_actions(actions: list[dict], user, invoice_path: str | None) -
                         unit_cost = product.cost_with_vat()
                     else:
                         unit_cost = Decimal(str(unit_cost_raw))
-                    discount_percent = Decimal(str(item.get("discount_percent") or "0.00"))
-                    if discount_percent < 0 or discount_percent > 100:
-                        raise ValueError("Descuento inválido.")
-                    discount_factor = Decimal("1.00") - (discount_percent / Decimal("100.00"))
-                    effective_unit_cost = (unit_cost * discount_factor).quantize(
-                        Decimal("0.01"), rounding=ROUND_HALF_UP
-                    )
                     vat_percent = Decimal(str(item.get("vat_percent") or "0.00"))
                     PurchaseItem.objects.create(
                         purchase=purchase,
                         product=product,
                         quantity=quantity,
                         unit_cost=unit_cost,
-                        discount_percent=discount_percent,
                         vat_percent=vat_percent,
                     )
                     services.register_entry(
                         product=product,
                         warehouse=warehouse,
                         quantity=quantity,
-                        unit_cost=effective_unit_cost,
+                        unit_cost=unit_cost,
                         user=user,
                         reference=f"Koda: compra #{purchase.id}",
                     )
-                    total += (quantity * effective_unit_cost).quantize(Decimal("0.01"))
+                    total += (quantity * unit_cost).quantize(Decimal("0.01"))
                 purchase.total = total
                 if invoice_path:
                     with open(invoice_path, "rb") as handle:
