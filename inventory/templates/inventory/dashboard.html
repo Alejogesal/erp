@@ -119,8 +119,8 @@
                     <td>${{ item.profit|latam_number:2 }}</td>
                     <td>{{ item.quantity|latam_number:2 }}</td>
                 </tr>
-                {% if ranking_variants and ranking_variants[item.product_id] %}
-                    {% for variant in ranking_variants[item.product_id] %}
+                {% if item.variants %}
+                    {% for variant in item.variants %}
                     <tr>
                         <td></td>
                         <td style="color: var(--muted);">Variedad</td>

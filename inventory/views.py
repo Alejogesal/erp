@@ -383,6 +383,8 @@ def dashboard(request):
         ranking_variants.setdefault(entry["product_id"], []).append(entry)
     for product_id, entries in ranking_variants.items():
         ranking_variants[product_id] = sorted(entries, key=lambda item: item["profit"], reverse=True)
+    for entry in ranking:
+        entry["variants"] = ranking_variants.get(entry["product_id"], [])
 
     context = {
         "purchase_total": purchase_total,
