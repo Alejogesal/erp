@@ -369,12 +369,12 @@ def dashboard(request):
             ranking_map[product_key]["quantity"] += item.quantity
             ranking_map[product_key]["profit"] += profit
 
-            if item.variant_id and item.product_id in products_with_variants:
+            if item.product_id in products_with_variants:
                 variant_key = (item.product_id, item.variant_id)
                 if variant_key not in ranking_variants_map:
                     ranking_variants_map[variant_key] = {
                         "product_id": item.product_id,
-                        "variant": item.variant.name if item.variant else "",
+                        "variant": item.variant.name if item.variant else "Sin variedad",
                         "quantity": Decimal("0.00"),
                         "profit": Decimal("0.00"),
                     }
