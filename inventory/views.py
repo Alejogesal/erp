@@ -335,6 +335,9 @@ def dashboard(request):
 
     ranking_map = {}
     ranking_variants_map = {}
+    products_with_variants = set(
+        ProductVariant.objects.values_list("product_id", flat=True).distinct()
+    )
     for sale in sales_qs:
         items = list(sale.items.all())
         if not items:
@@ -366,16 +369,17 @@ def dashboard(request):
             ranking_map[product_key]["quantity"] += item.quantity
             ranking_map[product_key]["profit"] += profit
 
-            variant_key = (item.product_id, item.variant_id)
-            if variant_key not in ranking_variants_map:
-                ranking_variants_map[variant_key] = {
-                    "product_id": item.product_id,
-                    "variant": item.variant.name if item.variant else "Sin variedad",
-                    "quantity": Decimal("0.00"),
-                    "profit": Decimal("0.00"),
-                }
-            ranking_variants_map[variant_key]["quantity"] += item.quantity
-            ranking_variants_map[variant_key]["profit"] += profit
+            if item.variant_id and item.product_id in products_with_variants:
+                variant_key = (item.product_id, item.variant_id)
+                if variant_key not in ranking_variants_map:
+                    ranking_variants_map[variant_key] = {
+                        "product_id": item.product_id,
+                        "variant": item.variant.name if item.variant else "",
+                        "quantity": Decimal("0.00"),
+                        "profit": Decimal("0.00"),
+                    }
+                ranking_variants_map[variant_key]["quantity"] += item.quantity
+                ranking_variants_map[variant_key]["profit"] += profit
 
     ranking = sorted(ranking_map.values(), key=lambda item: item["profit"], reverse=True)
     ranking_variants = {}
@@ -384,7 +388,10 @@ def dashboard(request):
     for product_id, entries in ranking_variants.items():
         ranking_variants[product_id] = sorted(entries, key=lambda item: item["profit"], reverse=True)
     for entry in ranking:
-        entry["variants"] = ranking_variants.get(entry["product_id"], [])
+        if entry["product_id"] in products_with_variants:
+            entry["variants"] = ranking_variants.get(entry["product_id"], [])
+        else:
+            entry["variants"] = []
 
     context = {
         "purchase_total": purchase_total,
