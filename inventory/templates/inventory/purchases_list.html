@@ -44,7 +44,8 @@
                     <th>Proveedor</th>
                     <th>Cantidad</th>
                     <th>Costo unitario</th>
-                <th class="vat-col">IVA %</th>
+                    <th>DTO %</th>
+                    <th class="vat-col">IVA %</th>
                     <th>Eliminar</th>
                 </tr>
             </thead>
@@ -55,6 +56,7 @@
                     <td>{{ item_form.supplier }}</td>
                     <td>{{ item_form.quantity }}</td>
                     <td>{{ item_form.unit_cost }}</td>
+                    <td>{{ item_form.discount_percent }}</td>
                     <td class="vat-col">{{ item_form.vat_percent }}</td>
                     <td>
                         {% if formset.can_delete %}
@@ -65,7 +67,7 @@
                 </tr>
                 {% if item_form.errors %}
                 <tr>
-                    <td colspan="6">{{ item_form.errors }}</td>
+                    <td colspan="7">{{ item_form.errors }}</td>
                 </tr>
                 {% endif %}
                 {% endfor %}
@@ -268,10 +270,11 @@
             const supplier = container.querySelector("[name$='-supplier']");
             const qty = container.querySelector("[name$='-quantity']");
             const cost = container.querySelector("[name$='-unit_cost']");
+            const discount = container.querySelector("[name$='-discount_percent']");
             const vat = container.querySelector("[name$='-vat_percent']");
             const deleteField = container.querySelector("[name$='-DELETE']");
 
-            [product, supplier, qty, cost, vat].forEach(field => {
+            [product, supplier, qty, cost, discount, vat].forEach(field => {
                 const td = document.createElement("td");
                 if (field) td.appendChild(field);
                 if (field && field.name?.includes("vat_percent")) td.classList.add("vat-col");
@@ -351,6 +354,7 @@
             const supplierSelect = row.querySelector("select[name$='-supplier']");
             const qtyInput = row.querySelector("input[name$='-quantity']");
             const costInput = row.querySelector("input[name$='-unit_cost']");
+            const discountInput = row.querySelector("input[name$='-discount_percent']");
             const vatInput = row.querySelector("input[name$='-vat_percent']");
             const searchInput = productSelect?._searchInput;
             const data = {
@@ -360,6 +364,7 @@
                 supplier_id: supplierSelect?.value || "",
                 quantity: qtyInput?.value || "",
                 unit_cost: costInput?.value || "",
+                discount_percent: discountInput?.value || "",
                 vat_percent: vatInput?.value || "",
             };
             const hasValue = Object.values(data).some((value) => value);
@@ -386,6 +391,7 @@
             const supplierSelect = row.querySelector("select[name$='-supplier']");
             const qtyInput = row.querySelector("input[name$='-quantity']");
             const costInput = row.querySelector("input[name$='-unit_cost']");
+            const discountInput = row.querySelector("input[name$='-discount_percent']");
             const vatInput = row.querySelector("input[name$='-vat_percent']");
             if (productSelect) {
                 if (data.product_id) {
@@ -400,6 +406,7 @@
             if (supplierSelect && data.supplier_id) supplierSelect.value = data.supplier_id;
             if (qtyInput && data.quantity) qtyInput.value = data.quantity;
             if (costInput && data.unit_cost) costInput.value = data.unit_cost;
+            if (discountInput && data.discount_percent) discountInput.value = data.discount_percent;
             if (vatInput && data.vat_percent) vatInput.value = data.vat_percent;
         };
 
@@ -435,23 +442,25 @@
             const rows = Array.from(body.querySelectorAll("tr"));
             rows.forEach((row) => {
                 const productSelect = row.querySelector("select[name$='-product']");
-                const qtyInput = row.querySelector("input[name$='-quantity']");
-                const costInput = row.querySelector("input[name$='-unit_cost']");
-                const supplierSelect = row.querySelector("select[name$='-supplier']");
-                const vatInput = row.querySelector("input[name$='-vat_percent']");
+            const qtyInput = row.querySelector("input[name$='-quantity']");
+            const costInput = row.querySelector("input[name$='-unit_cost']");
+            const discountInput = row.querySelector("input[name$='-discount_percent']");
+            const supplierSelect = row.querySelector("select[name$='-supplier']");
+            const vatInput = row.querySelector("input[name$='-vat_percent']");
                 const deleteCheckbox = row.querySelector("input[type='checkbox'][name$='-DELETE']");
                 if (!productSelect || !qtyInput || !costInput || !deleteCheckbox) return;
                 const qtyRaw = (qtyInput.value || "").trim();
                 const costRaw = (costInput.value || "").trim();
                 const qtyZeroish = !qtyRaw || qtyRaw === "0" || qtyRaw === "0.0" || qtyRaw === "0.00" || qtyRaw === "0,00";
                 const costZeroish = !costRaw || costRaw === "0" || costRaw === "0.0" || costRaw === "0.00" || costRaw === "0,00";
-                const isEmpty = !productSelect.value && qtyZeroish && costZeroish;
-                if (isEmpty) {
-                    deleteCheckbox.checked = true;
-                    if (supplierSelect) supplierSelect.value = "";
-                    if (vatInput) vatInput.value = "";
-                }
-            });
+            const isEmpty = !productSelect.value && qtyZeroish && costZeroish;
+            if (isEmpty) {
+                deleteCheckbox.checked = true;
+                if (supplierSelect) supplierSelect.value = "";
+                if (discountInput) discountInput.value = "";
+                if (vatInput) vatInput.value = "";
+            }
+        });
         };
 
         formEl?.addEventListener("input", saveDraft);
@@ -463,7 +472,7 @@
         });
         formEl?.addEventListener("submit", () => {
             suppressDraftSave = true;
-            document.querySelectorAll("input[name$='-unit_cost'], input[name$='-vat_percent']").forEach((input) => {
+            document.querySelectorAll("input[name$='-unit_cost'], input[name$='-vat_percent'], input[name$='-discount_percent']").forEach((input) => {
                 if (typeof input.value === "string" && input.value.includes(",")) {
                     input.value = input.value.replace(",", ".");
                 }

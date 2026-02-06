@@ -328,6 +328,7 @@ class PurchaseItem(models.Model):
     product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="purchase_items")
     quantity = models.DecimalField(max_digits=12, decimal_places=2)
     unit_cost = models.DecimalField(max_digits=12, decimal_places=2)
+    discount_percent = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0.00"))
     vat_percent = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0.00"))
 
     class Meta:
