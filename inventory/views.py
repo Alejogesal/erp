@@ -334,10 +334,6 @@ def dashboard(request):
     net_margin = (margin_ml + margin_comun) - tax_total
 
     ranking_map = {}
-    ranking_variants_map = {}
-    products_with_variants = set(
-        ProductVariant.objects.values_list("product_id", flat=True).distinct()
-    )
     for sale in sales_qs:
         items = list(sale.items.all())
         if not items:
@@ -357,41 +353,20 @@ def dashboard(request):
             cost_unit = item.cost_unit if item.cost_unit and item.cost_unit > 0 else item.product.cost_with_vat()
             cost_total = item.quantity * cost_unit
             profit = (revenue_share - cost_total).quantize(Decimal("0.01"))
-            product_key = item.product_id
-            if product_key not in ranking_map:
-                ranking_map[product_key] = {
+            key = (item.product_id, item.variant_id)
+            if key not in ranking_map:
+                ranking_map[key] = {
                     "product_id": item.product_id,
                     "sku": item.product.sku,
                     "name": item.product.name,
+                    "variant": item.variant.name if item.variant else None,
                     "quantity": Decimal("0.00"),
                     "profit": Decimal("0.00"),
                 }
-            ranking_map[product_key]["quantity"] += item.quantity
-            ranking_map[product_key]["profit"] += profit
-
-            if item.product_id in products_with_variants:
-                variant_key = (item.product_id, item.variant_id)
-                if variant_key not in ranking_variants_map:
-                    ranking_variants_map[variant_key] = {
-                        "product_id": item.product_id,
-                        "variant": item.variant.name if item.variant else "Sin variedad",
-                        "quantity": Decimal("0.00"),
-                        "profit": Decimal("0.00"),
-                    }
-                ranking_variants_map[variant_key]["quantity"] += item.quantity
-                ranking_variants_map[variant_key]["profit"] += profit
+            ranking_map[key]["quantity"] += item.quantity
+            ranking_map[key]["profit"] += profit
 
     ranking = sorted(ranking_map.values(), key=lambda item: item["profit"], reverse=True)
-    ranking_variants = {}
-    for entry in ranking_variants_map.values():
-        ranking_variants.setdefault(entry["product_id"], []).append(entry)
-    for product_id, entries in ranking_variants.items():
-        ranking_variants[product_id] = sorted(entries, key=lambda item: item["profit"], reverse=True)
-    for entry in ranking:
-        if entry["product_id"] in products_with_variants:
-            entry["variants"] = ranking_variants.get(entry["product_id"], [])
-        else:
-            entry["variants"] = []
 
     context = {
         "purchase_total": purchase_total,
@@ -401,7 +376,6 @@ def dashboard(request):
         "margin_ml": margin_ml,
         "margin_comun": margin_comun,
         "ranking": ranking,
-        "ranking_variants": ranking_variants,
         "start_date": start_date,
         "end_date": end_date,
         "tax_total": tax_total,

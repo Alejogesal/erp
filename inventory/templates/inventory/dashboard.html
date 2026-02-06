@@ -115,21 +115,10 @@
                 <tr>
                     <td>{{ item.sku }}</td>
                     <td>{{ item.name }}</td>
-                    <td>-</td>
+                    <td>{{ item.variant|default:"-" }}</td>
                     <td>${{ item.profit|latam_number:2 }}</td>
                     <td>{{ item.quantity|latam_number:2 }}</td>
                 </tr>
-                {% if item.variants %}
-                    {% for variant in item.variants %}
-                    <tr>
-                        <td></td>
-                        <td style="color: var(--muted);">Variedad</td>
-                        <td>{{ variant.variant }}</td>
-                        <td>${{ variant.profit|latam_number:2 }}</td>
-                        <td>{{ variant.quantity|latam_number:2 }}</td>
-                    </tr>
-                    {% endfor %}
-                {% endif %}
                 {% endfor %}
             </tbody>
         </table>
