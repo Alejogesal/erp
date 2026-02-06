@@ -540,8 +540,12 @@ def sale_receipt_pdf(request, sale_id: int):
         )
 
     pdf_bytes = HTML(string=html, base_url=request.build_absolute_uri("/")).write_pdf()
+    invoice_raw = sale.ml_order_id or sale.invoice_number
+    if isinstance(invoice_raw, str) and "-" in invoice_raw:
+        invoice_raw = invoice_raw.split("-", 1)[1]
+    invoice_number = str(invoice_raw).lstrip("0") or str(sale.id)
     response = HttpResponse(pdf_bytes, content_type="application/pdf")
-    response["Content-Disposition"] = f'attachment; filename="venta-{sale.id}.pdf"'
+    response["Content-Disposition"] = f'attachment; filename="FACT-{invoice_number}.pdf"'
     return response
 
 
