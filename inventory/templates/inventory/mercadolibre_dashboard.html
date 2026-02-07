@@ -39,6 +39,11 @@
                     <input type="text" name="ml_item_id" placeholder="ID publicación" style="width:160px;">
                     <button type="submit">Traer ID</button>
                 </form>
+                {% if missing_credentials %}
+                    <button type="button" disabled style="opacity:0.6; margin-left:8px;">Reconectar MercadoLibre</button>
+                {% else %}
+                    <a class="pill" href="{% url 'inventory_mercadolibre_connect' %}" style="margin-left:8px;">Reconectar MercadoLibre</a>
+                {% endif %}
             {% else %}
                 {% if missing_credentials %}
                     <button type="button" disabled style="opacity:0.6;">Conectar MercadoLibre</button>
