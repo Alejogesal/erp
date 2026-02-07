@@ -35,11 +35,6 @@
                 </form>
                 <form method="post" style="display:inline; margin-left:8px;">
                     {% csrf_token %}
-                    <input type="hidden" name="action" value="sync_orders">
-                    <button type="submit">Sincronizar ventas</button>
-                </form>
-                <form method="post" style="display:inline; margin-left:8px;">
-                    {% csrf_token %}
                     <input type="hidden" name="action" value="sync_item">
                     <input type="text" name="ml_item_id" placeholder="ID publicación" style="width:160px;">
                     <button type="submit">Traer ID</button>
