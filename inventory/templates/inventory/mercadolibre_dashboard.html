@@ -21,28 +21,28 @@
         {% else %}
             <p>Cuenta no conectada.</p>
         {% endif %}
-        <div style="margin-top:10px;">
+        <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
             {% if connection and connection.access_token %}
                 <form method="post" style="display:inline;">
                     {% csrf_token %}
                     <input type="hidden" name="action" value="sync">
                     <button type="submit">Sincronizar ahora</button>
                 </form>
-                <form method="post" style="display:inline; margin-left:8px;">
+                <form method="post" style="display:inline;">
                     {% csrf_token %}
                     <input type="hidden" name="action" value="sync_full">
                     <button type="submit">Sincronizar todo</button>
                 </form>
-                <form method="post" style="display:inline; margin-left:8px;">
+                <form method="post" style="display:inline;">
                     {% csrf_token %}
                     <input type="hidden" name="action" value="sync_item">
                     <input type="text" name="ml_item_id" placeholder="ID publicación" style="width:160px;">
                     <button type="submit">Traer ID</button>
                 </form>
                 {% if missing_credentials %}
-                    <button type="button" disabled style="opacity:0.6; margin-left:8px;">Reconectar MercadoLibre</button>
+                    <button type="button" disabled style="opacity:0.6;">Reconectar MercadoLibre</button>
                 {% else %}
-                    <a class="pill cta sm" href="{% url 'inventory_mercadolibre_connect' %}" style="margin-left:8px;">Reconectar MercadoLibre</a>
+                    <a class="pill cta sm" href="{% url 'inventory_mercadolibre_connect' %}">Reconectar MercadoLibre</a>
                 {% endif %}
             {% else %}
                 {% if missing_credentials %}
