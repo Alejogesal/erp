@@ -89,7 +89,9 @@
         const body = document.getElementById("items-body");
         const totalForms = document.getElementById("id_form-TOTAL_FORMS");
         const productInfoUrl = "{% url 'inventory_product_info' %}";
+        const productSearchUrl = "{% url 'inventory_product_search' %}";
         const productInfoCache = new Map();
+        const productSearchCache = new Map();
         if (!addBtn || !body || !totalForms) return;
 
         const fetchProductInfo = async (productId) => {
@@ -124,6 +126,55 @@
             }
         };
 
+        const ensureSelectOption = (selectEl, productId, label) => {
+            if (!selectEl || !productId) return;
+            const idValue = String(productId);
+            let option = Array.from(selectEl.options || []).find((opt) => opt.value === idValue);
+            if (!option) {
+                selectEl.innerHTML = "";
+                option = document.createElement("option");
+                option.value = idValue;
+                option.textContent = label || `Producto #${idValue}`;
+                selectEl.appendChild(option);
+            } else if (label && option.textContent !== label) {
+                option.textContent = label;
+            }
+            selectEl.value = idValue;
+        };
+
+        const fetchProductSearch = async (term) => {
+            if (productSearchCache.has(term)) return productSearchCache.get(term);
+            try {
+                const resp = await fetch(`${productSearchUrl}?q=${encodeURIComponent(term)}`, {
+                    credentials: "same-origin",
+                });
+                if (!resp.ok) return [];
+                const data = await resp.json();
+                const results = Array.isArray(data.results) ? data.results : [];
+                productSearchCache.set(term, results);
+                return results;
+            } catch (err) {
+                return [];
+            }
+        };
+
+        const populateDatalist = (datalist, results) => {
+            if (!datalist) return;
+            datalist.innerHTML = "";
+            results.forEach((item) => {
+                const option = document.createElement("option");
+                option.value = item.label || "";
+                option.dataset.id = item.id;
+                if (item.default_supplier_id) {
+                    option.dataset.defaultSupplierId = item.default_supplier_id;
+                }
+                if (item.cost_with_vat) {
+                    option.dataset.costWithVat = item.cost_with_vat;
+                }
+                datalist.appendChild(option);
+            });
+        };
+
         const updateSearchFromSelect = (selectEl) => {
             const searchInput = selectEl?._searchInput;
             if (!searchInput) return;
@@ -149,12 +200,7 @@
             datalist.id = listId;
             search.setAttribute("list", listId);
             selectEl._searchInput = search;
-            Array.from(selectEl.options).forEach((opt) => {
-                const option = document.createElement("option");
-                option.value = opt.textContent || "";
-                option.dataset.value = opt.value;
-                datalist.appendChild(option);
-            });
+            selectEl._searchList = datalist;
             selectEl.parentElement.insertBefore(wrapper, selectEl);
             wrapper.appendChild(search);
             wrapper.appendChild(datalist);
@@ -163,6 +209,20 @@
             if (initialLabel) {
                 search.value = initialLabel;
             }
+
+            let searchTimer = null;
+            search.addEventListener("input", () => {
+                const term = (search.value || "").trim();
+                if (term.length < 2) {
+                    datalist.innerHTML = "";
+                    return;
+                }
+                if (searchTimer) window.clearTimeout(searchTimer);
+                searchTimer = window.setTimeout(async () => {
+                    const results = await fetchProductSearch(term);
+                    populateDatalist(datalist, results);
+                }, 200);
+            });
 
             const syncSelection = () => {
                 const raw = (search.value || "").trim();
@@ -181,7 +241,16 @@
                     }
                 }
                 if (match) {
-                    selectEl.value = match.dataset.value || "";
+                    const productId = match.dataset.id;
+                    const label = match.value || raw;
+                    ensureSelectOption(selectEl, productId, label);
+                    if (productId) {
+                        productInfoCache.set(productId, {
+                            ok: true,
+                            default_supplier_id: match.dataset.defaultSupplierId || null,
+                            cost_with_vat: match.dataset.costWithVat || null,
+                        });
+                    }
                     applyProductDefaults(selectEl);
                     updateSearchFromSelect(selectEl);
                 }
@@ -279,18 +348,18 @@
             if (productSelect.value) return productSelect.value;
             const searchValue = productSelect._searchInput?.value?.trim() || "";
             if (!searchValue) return "";
-            const options = Array.from(productSelect.options || []);
-            let match = options.find((opt) => (opt.textContent || "") === searchValue);
+            const options = Array.from(productSelect._searchList?.options || []);
+            let match = options.find((opt) => (opt.value || "") === searchValue);
             if (!match) {
                 const lowered = searchValue.toLowerCase();
-                match = options.find((opt) => (opt.textContent || "").toLowerCase() === lowered);
+                match = options.find((opt) => (opt.value || "").toLowerCase() === lowered);
             }
             if (!match) {
                 const lowered = searchValue.toLowerCase();
-                const candidates = options.filter((opt) => (opt.textContent || "").toLowerCase().includes(lowered));
+                const candidates = options.filter((opt) => (opt.value || "").toLowerCase().includes(lowered));
                 if (candidates.length) match = candidates[0];
             }
-            return match?.value || "";
+            return match?.dataset?.id || "";
         };
 
         const serializeRow = (row) => {
@@ -336,7 +405,7 @@
             const vatInput = row.querySelector("input[name$='-vat_percent']");
             if (productSelect) {
                 if (data.product_id) {
-                    productSelect.value = data.product_id;
+                    ensureSelectOption(productSelect, data.product_id, data.product_text || data.product_search);
                     updateSearchFromSelect(productSelect);
                 } else if (productSelect._searchInput) {
                     productSelect._searchInput.value = data.product_search || "";

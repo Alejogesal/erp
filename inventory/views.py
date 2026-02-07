@@ -10,7 +10,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.utils import OperationalError
-from django.db.models import Case, DecimalField, Sum, Value, When, Q, Count
+from django.db.models import Case, DecimalField, Sum, Value, When, Q, Count, Subquery, OuterRef
 from django.db.models.deletion import ProtectedError
 from django.db.models.functions import Coalesce
 from django.forms import formset_factory
@@ -55,6 +55,65 @@ from .models import (
     SaleItem,
     TaxExpense,
 )
+
+
+def _products_with_last_cost_queryset():
+    supplier_cost = (
+        SupplierProduct.objects.filter(product=OuterRef("pk"))
+        .order_by("-last_purchase_at", "-id")
+        .values("last_cost")[:1]
+    )
+    movement_cost = (
+        StockMovement.objects.filter(product=OuterRef("pk"), movement_type=StockMovement.MovementType.ENTRY)
+        .order_by("-created_at", "-id")
+        .values("unit_cost")[:1]
+    )
+    return Product.objects.annotate(
+        last_purchase_cost_value=Coalesce(
+            Subquery(supplier_cost, output_field=DecimalField(max_digits=12, decimal_places=2)),
+            Subquery(movement_cost, output_field=DecimalField(max_digits=12, decimal_places=2)),
+            Value(Decimal("0.00")),
+            output_field=DecimalField(max_digits=12, decimal_places=2),
+        )
+    )
+
+
+def _product_label_with_last_cost(obj: Product) -> str:
+    last_cost = getattr(obj, "last_purchase_cost_value", None)
+    if last_cost is None:
+        last_cost = obj.last_purchase_cost()
+    return f"{obj.sku or 'Sin SKU'} - {obj.name} (último costo: {last_cost:.2f})"
+
+
+def _apply_product_queryset_to_formset(formset, products_qs):
+    for form in formset.forms:
+        if "product" in form.fields:
+            form.fields["product"].queryset = products_qs
+    if hasattr(formset, "empty_form") and "product" in formset.empty_form.fields:
+        formset.empty_form.fields["product"].queryset = Product.objects.none()
+
+
+def _extract_product_ids_from_payload(raw_payload: str | None) -> set[int]:
+    if not raw_payload:
+        return set()
+    try:
+        items_raw = json.loads(raw_payload)
+    except Exception:
+        return set()
+    if not isinstance(items_raw, list):
+        return set()
+    ids: set[int] = set()
+    for entry in items_raw:
+        if not isinstance(entry, dict):
+            continue
+        product_id = entry.get("product_id")
+        if not product_id:
+            continue
+        try:
+            ids.add(int(product_id))
+        except Exception:
+            continue
+    return ids
 
 
 class ProductForm(forms.ModelForm):
@@ -126,10 +185,9 @@ class PurchaseItemForm(forms.Form):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields["product"].queryset = _products_with_last_cost_queryset()
         self.fields["product"].empty_label = ""
-        self.fields["product"].label_from_instance = (
-            lambda obj: f"{obj.sku or 'Sin SKU'} - {obj.name} (último costo: {obj.last_purchase_cost_display()})"
-        )
+        self.fields["product"].label_from_instance = _product_label_with_last_cost
 
 
 class SaleHeaderForm(forms.Form):
@@ -194,10 +252,9 @@ class SaleItemForm(forms.Form):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields["product"].queryset = _products_with_last_cost_queryset()
         self.fields["product"].empty_label = ""
-        self.fields["product"].label_from_instance = (
-            lambda obj: f"{obj.sku or 'Sin SKU'} - {obj.name} (último costo: {obj.last_purchase_cost_display()})"
-        )
+        self.fields["product"].label_from_instance = _product_label_with_last_cost
 
 
 class StockTransferForm(forms.Form):
@@ -1705,6 +1762,12 @@ def purchases_list(request):
     if request.method == "POST":
         header_form = PurchaseHeaderForm(request.POST)
         formset = PurchaseItemFormSet(request.POST)
+        payload_ids = _extract_product_ids_from_payload(request.POST.get("items_payload"))
+        if payload_ids:
+            products_qs = _products_with_last_cost_queryset().filter(id__in=payload_ids)
+        else:
+            products_qs = Product.objects.none()
+        _apply_product_queryset_to_formset(formset, products_qs)
         for form in formset.forms:
             prefix = form.prefix
             product_raw = (request.POST.get(f"{prefix}-product") or "").strip()
@@ -1933,6 +1996,7 @@ def purchases_list(request):
     else:
         header_form = PurchaseHeaderForm()
         formset = PurchaseItemFormSet()
+        _apply_product_queryset_to_formset(formset, Product.objects.none())
 
     if show_history:
         purchases = (
@@ -1970,6 +2034,12 @@ def purchase_edit(request, purchase_id: int):
     if request.method == "POST":
         header_form = PurchaseHeaderForm(request.POST)
         formset = PurchaseItemFormSet(request.POST)
+        payload_ids = _extract_product_ids_from_payload(request.POST.get("items_payload"))
+        if payload_ids:
+            products_qs = _products_with_last_cost_queryset().filter(id__in=payload_ids)
+        else:
+            products_qs = Product.objects.none()
+        _apply_product_queryset_to_formset(formset, products_qs)
         items_payload_raw = request.POST.get("items_payload")
         for form in formset.forms:
             prefix = form.prefix
@@ -2152,6 +2222,9 @@ def purchase_edit(request, purchase_id: int):
             for item in purchase.items.all()
         ]
         formset = PurchaseItemFormSet(initial=initial)
+        product_ids = {item["product"].id for item in initial}
+        products_qs = _products_with_last_cost_queryset().filter(id__in=product_ids) if product_ids else Product.objects.none()
+        _apply_product_queryset_to_formset(formset, products_qs)
     return render(
         request,
         "inventory/purchase_edit.html",
@@ -3840,6 +3913,27 @@ def product_info(request):
             "cost_with_vat": f"{product.cost_with_vat():.2f}",
         }
     )
+
+
+@login_required
+def product_search(request):
+    term = (request.GET.get("q") or "").strip()
+    if not term:
+        return JsonResponse({"ok": True, "results": []})
+    qs = _products_with_last_cost_queryset().filter(
+        Q(sku__icontains=term) | Q(name__icontains=term) | Q(group__icontains=term)
+    )
+    results = []
+    for product in qs.order_by("sku")[:20]:
+        results.append(
+            {
+                "id": product.id,
+                "label": _product_label_with_last_cost(product),
+                "default_supplier_id": product.default_supplier_id,
+                "cost_with_vat": f"{product.cost_with_vat():.2f}",
+            }
+        )
+    return JsonResponse({"ok": True, "results": results})
 
 
 def _col_letter(idx: int) -> str:
