@@ -50,15 +50,15 @@
 
     <div class="card" style="margin-bottom:16px;">
         <div class="card-title">Filtrar por fechas</div>
-        <form method="get">
+        <form method="get" autocomplete="off">
             <div class="cards" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
                 <div>
                     <label for="start_date">Desde</label>
-                    <input id="start_date" name="start_date" type="date" value="{{ start_date }}">
+                    <input id="start_date" name="start_date" type="date" value="{{ start_date }}" autocomplete="off">
                 </div>
                 <div>
                     <label for="end_date">Hasta</label>
-                    <input id="end_date" name="end_date" type="date" value="{{ end_date }}">
+                    <input id="end_date" name="end_date" type="date" value="{{ end_date }}" autocomplete="off">
                 </div>
             </div>
             <div style="margin-top:12px;">
