@@ -30,6 +30,11 @@
                 </form>
                 <form method="post" style="display:inline; margin-left:8px;">
                     {% csrf_token %}
+                    <input type="hidden" name="action" value="sync_full">
+                    <button type="submit">Sincronizar todo</button>
+                </form>
+                <form method="post" style="display:inline; margin-left:8px;">
+                    {% csrf_token %}
                     <input type="hidden" name="action" value="sync_orders">
                     <button type="submit">Sincronizar ventas</button>
                 </form>
@@ -42,7 +47,7 @@
                 {% if missing_credentials %}
                     <button type="button" disabled style="opacity:0.6; margin-left:8px;">Reconectar MercadoLibre</button>
                 {% else %}
-                    <a class="pill primary" href="{% url 'inventory_mercadolibre_connect' %}" style="margin-left:8px;">Reconectar MercadoLibre</a>
+                    <a class="pill cta" href="{% url 'inventory_mercadolibre_connect' %}" style="margin-left:8px;">Reconectar MercadoLibre</a>
                 {% endif %}
             {% else %}
                 {% if missing_credentials %}

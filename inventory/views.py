@@ -4606,6 +4606,23 @@ def mercadolibre_dashboard(request):
                     if metrics.get("truncated"):
                         notice += " (Sync limitado por configuración)"
                     messages.success(request, notice)
+        elif action == "sync_full":
+            if not connection or not connection.access_token:
+                messages.error(request, "Primero conectá la cuenta de MercadoLibre.")
+            else:
+                result = ml.sync_items_and_stock(connection, request.user, ignore_env_limit=True)
+                metrics = result.metrics
+                if metrics.get("error") == "unauthorized":
+                    messages.error(
+                        request,
+                        "MercadoLibre rechazó el token. Volvé a conectar la cuenta para actualizar el acceso.",
+                    )
+                else:
+                    notice = (
+                        f"Sync completo OK. Items: {result.total_items}, Matcheados: {result.matched}, "
+                        f"Sin match: {result.unmatched}, Stock actualizado: {result.updated_stock}."
+                    )
+                    messages.success(request, notice)
         elif action == "sync_orders":
             if not connection or not connection.access_token:
                 messages.error(request, "Primero conectá la cuenta de MercadoLibre.")

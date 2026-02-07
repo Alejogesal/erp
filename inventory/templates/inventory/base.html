@@ -131,14 +131,21 @@
             color: var(--text);
             text-decoration: none;
             font-weight: 600;
-        }
-        .pill.primary {
-            background: var(--accent);
-            border-color: transparent;
-            color: white;
+            transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease, color 120ms ease, opacity 120ms ease;
         }
         .pill:hover { border-color: var(--accent); color: var(--accent); }
-        .pill.primary:hover { color: white; opacity: 0.95; }
+        .pill.cta {
+            background: linear-gradient(135deg, #3aa0ff, #2d6cff);
+            border-color: rgba(255, 255, 255, 0.08);
+            color: #fff;
+            box-shadow: 0 10px 22px rgba(45, 108, 255, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+        }
+        .pill.cta:hover {
+            color: #fff;
+            border-color: transparent;
+            transform: translateY(-1px);
+        }
+        .pill.cta:active { transform: translateY(0); }
         .messages { margin-bottom: 12px; padding: 0; }
         .messages li {
             list-style: none;

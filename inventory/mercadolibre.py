@@ -464,7 +464,7 @@ def _resolve_variant_for_order_item(
     return best
 
 
-def sync_items_and_stock(connection: MercadoLibreConnection, user) -> SyncResult:
+def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env_limit: bool = False) -> SyncResult:
     access_token = get_valid_access_token(connection)
     if not access_token:
         return SyncResult(0, 0, 0, 0, {})
@@ -480,8 +480,10 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user) -> SyncResult
         connection.nickname = profile.get("nickname", "") or ""
         connection.save(update_fields=["ml_user_id", "nickname"])
 
-    max_items_env = os.environ.get("ML_SYNC_MAX_ITEMS", "")
-    max_items = int(max_items_env) if max_items_env.isdigit() else None
+    max_items = None
+    if not ignore_env_limit:
+        max_items_env = os.environ.get("ML_SYNC_MAX_ITEMS", "")
+        max_items = int(max_items_env) if max_items_env.isdigit() else None
     try:
         item_ids, truncated = _call_with_refresh(
             connection,
