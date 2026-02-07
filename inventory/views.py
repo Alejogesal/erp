@@ -1030,15 +1030,6 @@ def sales_list(request):
         skipped = 0
         unmatched = 0
         unmatched_refs: list[str] = []
-        unmatched_product, _ = Product.objects.get_or_create(
-            sku="ML-SIN-MATCH",
-            defaults={
-                "name": "ML sin match",
-                "group": "MercadoLibre",
-                "avg_cost": Decimal("0.00"),
-                "vat_percent": Decimal("0.00"),
-            },
-        )
         for idx, row in enumerate(rows, start=1):
             title = row["title"]
             qty = row["quantity"]
@@ -1064,8 +1055,16 @@ def sales_list(request):
             if not product:
                 unmatched += 1
                 ref_label = order_id or f"fila {idx}"
-                unmatched_refs.append(ref_label)
-                product = unmatched_product
+                unmatched_refs.append(f"{ref_label}: {title}")
+                product = (
+                    Product.objects.filter(name=title, group="MercadoLibre (sin match)").first()
+                    or Product.objects.create(
+                        name=title,
+                        group="MercadoLibre (sin match)",
+                        avg_cost=Decimal("0.00"),
+                        vat_percent=Decimal("0.00"),
+                    )
+                )
 
             if order_id:
                 reference = f"XLSX ML {order_id}"
@@ -1093,16 +1092,12 @@ def sales_list(request):
                     Sale.objects.filter(pk=sale.pk).update(created_at=created_at)
                 unit_price = (price_total / qty).quantize(Decimal("0.01"))
                 line_total = (unit_price * qty).quantize(Decimal("0.01"))
-                variant = None
-                if product == unmatched_product:
-                    variant, _ = ProductVariant.objects.get_or_create(product=unmatched_product, name=title)
                 SaleItem.objects.create(
                     sale=sale,
                     product=product,
-                    variant=variant,
                     quantity=qty,
                     unit_price=unit_price,
-                    cost_unit=product.cost_with_vat() if product != unmatched_product else Decimal("0.00"),
+                    cost_unit=product.cost_with_vat(),
                     discount_percent=Decimal("0.00"),
                     final_unit_price=unit_price,
                     line_total=line_total,
@@ -1119,7 +1114,8 @@ def sales_list(request):
             more = "" if len(unmatched_refs) <= 10 else f" (+{len(unmatched_refs) - 10} más)"
             messages.warning(
                 request,
-                f"Sin match en comprobantes: {preview}{more}. Se registraron con producto 'ML sin match'.",
+                "Sin match en comprobantes: "
+                f"{preview}{more}. Se registraron con el nombre del XLSX. Editá la venta para asignar el producto.",
             )
         return redirect("inventory_sales_list")
     if action in {"sync_google_sales", "reset_google_sales"}:
@@ -3937,14 +3933,11 @@ def product_info(request):
     product = _products_with_last_cost_queryset().select_related("default_supplier").filter(id=product_id).first()
     if not product:
         return JsonResponse({"ok": False, "error": "product_not_found"}, status=404)
-    last_cost = getattr(product, "last_purchase_cost_value", None)
-    if last_cost is None:
-        last_cost = product.last_purchase_cost()
     return JsonResponse(
         {
             "ok": True,
             "default_supplier_id": product.default_supplier_id,
-            "cost_with_vat": f"{last_cost:.2f}",
+            "cost_with_vat": f"{product.cost_with_vat():.2f}",
         }
     )
 
@@ -3959,15 +3952,12 @@ def product_search(request):
     )
     results = []
     for product in qs.order_by("sku")[:20]:
-        last_cost = getattr(product, "last_purchase_cost_value", None)
-        if last_cost is None:
-            last_cost = product.last_purchase_cost()
         results.append(
             {
                 "id": product.id,
                 "label": _product_label_with_last_cost(product),
                 "default_supplier_id": product.default_supplier_id,
-                "cost_with_vat": f"{last_cost:.2f}",
+                "cost_with_vat": f"{product.cost_with_vat():.2f}",
             }
         )
     return JsonResponse({"ok": True, "results": results})
