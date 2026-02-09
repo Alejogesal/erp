@@ -2228,9 +2228,37 @@ def purchase_edit(request, purchase_id: int):
                 return redirect("inventory_purchase_edit", purchase_id=purchase.id)
             try:
                 with transaction.atomic():
+                    new_warehouse = header_form.cleaned_data["warehouse"]
+                    current_items = list(purchase.items.all())
+                    current_signature = sorted(
+                        [(item.product_id, Decimal(item.quantity)) for item in current_items],
+                        key=lambda row: (row[0], row[1]),
+                    )
+                    new_signature = sorted(
+                        [(item["product"].id, Decimal(item["quantity"])) for item in items],
+                        key=lambda row: (row[0], row[1]),
+                    )
+                    stock_changed = (
+                        purchase.warehouse_id != new_warehouse.id
+                        or current_signature != new_signature
+                    )
+                    if stock_changed:
+                        # Revert previous stock movements
+                        for movement in purchase.movements.select_for_update():
+                            if movement.movement_type == StockMovement.MovementType.ENTRY and movement.to_warehouse:
+                                stock, _ = Stock.objects.select_for_update().get_or_create(
+                                    product=movement.product,
+                                    warehouse=movement.to_warehouse,
+                                    defaults={"quantity": Decimal("0.00")},
+                                )
+                                stock.quantity = (stock.quantity - movement.quantity).quantize(Decimal("0.01"))
+                                if stock.quantity < 0:
+                                    raise services.NegativeStockError("Stock cannot go negative")
+                                stock.save(update_fields=["quantity"])
+                            movement.delete()
                     purchase.items.all().delete()
 
-                    purchase.warehouse = header_form.cleaned_data["warehouse"]
+                    purchase.warehouse = new_warehouse
                     purchase.supplier = items[0].get("supplier")
                     purchase_date = header_form.cleaned_data.get("purchase_date")
                     discount_percent = header_form.cleaned_data.get("descuento_total") or Decimal("0.00")
@@ -2263,6 +2291,18 @@ def purchase_edit(request, purchase_id: int):
                             discount_percent=discount_percent,
                             vat_percent=vat,
                         )
+                        if stock_changed:
+                            services.register_entry(
+                                product=product,
+                                warehouse=purchase.warehouse,
+                                quantity=qty,
+                                unit_cost=effective_unit_cost,
+                                vat_percent=vat,
+                                user=request.user,
+                                reference=f"Compra #{purchase.id}",
+                                supplier=purchase.supplier,
+                                purchase=purchase,
+                            )
                     discount_total = (subtotal * discount_percent / Decimal("100.00")).quantize(
                         Decimal("0.01"), rounding=ROUND_HALF_UP
                     )
@@ -2271,6 +2311,9 @@ def purchase_edit(request, purchase_id: int):
                     purchase.save(update_fields=["total"])
                 messages.success(request, "Compra actualizada.")
                 return redirect("inventory_purchase_receipt", purchase_id=purchase.id)
+            except services.NegativeStockError:
+                messages.error(request, "No se puede actualizar: el stock quedaría negativo.")
+                return redirect("inventory_purchase_edit", purchase_id=purchase.id)
             except Exception as exc:
                 messages.error(request, f"No se pudo actualizar la compra: {exc}")
                 return redirect("inventory_purchase_edit", purchase_id=purchase.id)
