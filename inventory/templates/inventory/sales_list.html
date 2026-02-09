@@ -203,6 +203,20 @@
             fetchHistory(1);
         });
 
+        const syncDeliverySelectStyle = (selectEl) => {
+            if (!selectEl) return;
+            const option = selectEl.selectedOptions?.[0];
+            if (!option) return;
+            const bg = option.dataset.bg || "";
+            const color = option.dataset.color || "";
+            selectEl.style.backgroundColor = bg;
+            selectEl.style.color = color;
+        };
+
+        historyEl?.querySelectorAll(".delivery-status-select").forEach((selectEl) => {
+            syncDeliverySelectStyle(selectEl);
+        });
+
         historyEl?.addEventListener("change", async (event) => {
             const target = event.target;
             if (!(target instanceof HTMLSelectElement)) return;
@@ -212,6 +226,7 @@
             const previous = target.dataset.current || "";
             const next = target.value;
             if (next === previous) return;
+            syncDeliverySelectStyle(target);
             const csrfToken = getCookie("csrftoken");
             target.disabled = true;
             try {
@@ -231,6 +246,7 @@
                 target.dataset.current = next;
             } catch (err) {
                 target.value = previous;
+                syncDeliverySelectStyle(target);
                 alert("No se pudo actualizar el estado.");
             } finally {
                 target.disabled = false;
