@@ -4,6 +4,12 @@
 {% block content %}
 <h1>Ventas</h1>
 <p class="subtitle">Registrá ventas y consultá comprobantes emitidos.</p>
+<style>
+    .delivery-status-select {
+        background: var(--status-bg, #0f1622);
+        color: var(--status-color, var(--text));
+    }
+</style>
 
 <div class="card" style="margin-bottom:16px;">
     <div class="card-title">Importar ventas MercadoLibre (Excel)</div>
@@ -209,8 +215,8 @@
             if (!option) return;
             const bg = option.dataset.bg || "";
             const color = option.dataset.color || "";
-            selectEl.style.backgroundColor = bg;
-            selectEl.style.color = color;
+            selectEl.style.setProperty("--status-bg", bg);
+            selectEl.style.setProperty("--status-color", color);
         };
 
         historyEl?.querySelectorAll(".delivery-status-select").forEach((selectEl) => {

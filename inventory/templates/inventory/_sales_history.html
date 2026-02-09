@@ -28,14 +28,14 @@
             <td>{{ sale.customer|default:"Consumidor final" }}</td>
             <td>{{ sale.warehouse.name }}</td>
             <td>
-                <select class="delivery-status-select" data-sale-id="{{ sale.id }}" data-update-url="{% url 'inventory_sale_delivery_status_update' sale.id %}" data-current="{{ sale.delivery_status }}" style="width:140px; font-size:12px; padding:6px 8px;">
+                <select class="delivery-status-select" data-sale-id="{{ sale.id }}" data-update-url="{% url 'inventory_sale_delivery_status_update' sale.id %}" data-current="{{ sale.delivery_status }}" style="width:140px; font-size:12px; padding:6px 8px; {% if sale.delivery_status == 'DELIVERED' %}--status-bg:#d8f5d6; --status-color:#1f3b1f;{% elif sale.delivery_status == 'IN_TRANSIT' %}--status-bg:#fff2c9; --status-color:#4a3b10;{% else %}--status-bg:#ffd6d6; --status-color:#4a1a1a;{% endif %}">
                     {% for value, label in delivery_status_choices %}
                     {% if value == "DELIVERED" %}
-                    <option value="{{ value }}" data-bg="#d8f5d6" data-color="#1f3b1f" style="background:#d8f5d6; color:#1f3b1f;" {% if sale.delivery_status == value %}selected{% endif %}>{{ label }}</option>
+                    <option value="{{ value }}" data-bg="#d8f5d6" data-color="#1f3b1f" {% if sale.delivery_status == value %}selected{% endif %}>{{ label }}</option>
                     {% elif value == "IN_TRANSIT" %}
-                    <option value="{{ value }}" data-bg="#fff2c9" data-color="#4a3b10" style="background:#fff2c9; color:#4a3b10;" {% if sale.delivery_status == value %}selected{% endif %}>{{ label }}</option>
+                    <option value="{{ value }}" data-bg="#fff2c9" data-color="#4a3b10" {% if sale.delivery_status == value %}selected{% endif %}>{{ label }}</option>
                     {% else %}
-                    <option value="{{ value }}" data-bg="#ffd6d6" data-color="#4a1a1a" style="background:#ffd6d6; color:#4a1a1a;" {% if sale.delivery_status == value %}selected{% endif %}>{{ label }}</option>
+                    <option value="{{ value }}" data-bg="#ffd6d6" data-color="#4a1a1a" {% if sale.delivery_status == value %}selected{% endif %}>{{ label }}</option>
                     {% endif %}
                     {% endfor %}
                 </select>
