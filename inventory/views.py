@@ -1688,6 +1688,11 @@ def sales_list(request):
         page_obj = None
     show_comun = show_history and (include_comun or (not include_ml and not include_comun))
     show_ml = show_history and (include_ml or (not include_ml and not include_comun))
+    delivery_status_choices = [
+        (Sale.DeliveryStatus.NOT_DELIVERED, Sale.DeliveryStatus.NOT_DELIVERED.label),
+        (Sale.DeliveryStatus.IN_TRANSIT, Sale.DeliveryStatus.IN_TRANSIT.label),
+        (Sale.DeliveryStatus.DELIVERED, Sale.DeliveryStatus.DELIVERED.label),
+    ]
     if request.GET.get("ajax") == "1":
         from django.template.loader import render_to_string
 
@@ -1705,6 +1710,7 @@ def sales_list(request):
                 "show_history": show_history,
                 "show_comun": show_comun,
                 "show_ml": show_ml,
+                "delivery_status_choices": delivery_status_choices,
             },
             request=request,
         )
@@ -1728,6 +1734,7 @@ def sales_list(request):
             "show_history": show_history,
             "show_comun": show_comun,
             "show_ml": show_ml,
+            "delivery_status_choices": delivery_status_choices,
             "sales_sheet_url": os.environ.get("GOOGLE_SHEETS_SALES_URL", ""),
             "customers": customers,
             "form": header_form,
@@ -1737,6 +1744,30 @@ def sales_list(request):
             "clear_sale_form": request.method != "POST",
             "default_warehouse_id": str(default_wh.id) if default_wh else "",
         },
+    )
+
+
+@login_required
+@require_http_methods(["POST"])
+def sale_delivery_status_update(request, sale_id: int):
+    sale = get_object_or_404(Sale, pk=sale_id)
+    delivery_status = (request.POST.get("delivery_status") or "").strip()
+    allowed_statuses = {
+        Sale.DeliveryStatus.NOT_DELIVERED,
+        Sale.DeliveryStatus.IN_TRANSIT,
+        Sale.DeliveryStatus.DELIVERED,
+    }
+    if delivery_status not in allowed_statuses:
+        return JsonResponse({"ok": False, "error": "Estado inválido."}, status=400)
+    if sale.delivery_status != delivery_status:
+        sale.delivery_status = delivery_status
+        sale.save(update_fields=["delivery_status"])
+    return JsonResponse(
+        {
+            "ok": True,
+            "delivery_status": sale.delivery_status,
+            "label": sale.get_delivery_status_display(),
+        }
     )
 
 

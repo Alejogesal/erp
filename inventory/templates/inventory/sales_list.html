@@ -118,6 +118,12 @@
         const loadBtn = document.getElementById("history-load");
         let historyEnabled = historyEl?.dataset.loaded === "1";
         let debounceId = null;
+        const getCookie = (name) => {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(";").shift();
+            return "";
+        };
 
         const buildParams = (page) => {
             const params = new URLSearchParams();
@@ -195,6 +201,40 @@
         loadBtn?.addEventListener("click", () => {
             historyEnabled = true;
             fetchHistory(1);
+        });
+
+        historyEl?.addEventListener("change", async (event) => {
+            const target = event.target;
+            if (!(target instanceof HTMLSelectElement)) return;
+            if (!target.classList.contains("delivery-status-select")) return;
+            const updateUrl = target.dataset.updateUrl;
+            if (!updateUrl) return;
+            const previous = target.dataset.current || "";
+            const next = target.value;
+            if (next === previous) return;
+            const csrfToken = getCookie("csrftoken");
+            target.disabled = true;
+            try {
+                const body = new URLSearchParams({ delivery_status: next });
+                const response = await fetch(updateUrl, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "X-CSRFToken": csrfToken || "",
+                    },
+                    body,
+                });
+                const data = await response.json();
+                if (!response.ok || !data.ok) {
+                    throw new Error(data.error || "Error");
+                }
+                target.dataset.current = next;
+            } catch (err) {
+                target.value = previous;
+                alert("No se pudo actualizar el estado.");
+            } finally {
+                target.disabled = false;
+            }
         });
     })();
 

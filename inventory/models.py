@@ -340,7 +340,7 @@ class PurchaseItem(models.Model):
 class Sale(models.Model):
     class DeliveryStatus(models.TextChoices):
         NOT_DELIVERED = "NOT_DELIVERED", "No entregado"
-        IN_TRANSIT = "IN_TRANSIT", "Stock en camino"
+        IN_TRANSIT = "IN_TRANSIT", "Preparado"
         DELIVERED = "DELIVERED", "Entregado"
 
     customer = models.ForeignKey(Customer, on_delete=models.SET_NULL, null=True, blank=True, related_name="sales")

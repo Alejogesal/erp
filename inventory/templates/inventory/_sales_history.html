@@ -27,7 +27,13 @@
             <td>{{ sale.created_at|date:"d/m/Y H:i" }}</td>
             <td>{{ sale.customer|default:"Consumidor final" }}</td>
             <td>{{ sale.warehouse.name }}</td>
-            <td>{{ sale.get_delivery_status_display }}</td>
+            <td>
+                <select class="delivery-status-select" data-sale-id="{{ sale.id }}" data-update-url="{% url 'inventory_sale_delivery_status_update' sale.id %}" data-current="{{ sale.delivery_status }}" style="width:140px; font-size:12px; padding:6px 8px;">
+                    {% for value, label in delivery_status_choices %}
+                    <option value="{{ value }}" {% if sale.delivery_status == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </td>
             <td>${{ sale.total|latam_number:2 }}</td>
             <td>${{ sale.ml_commission_total|latam_number:2 }}</td>
             <td>${{ sale.ml_tax_total|latam_number:2 }}</td>

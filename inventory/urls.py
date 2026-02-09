@@ -29,6 +29,11 @@ urlpatterns = [
     path("ventas/registrar/", views.register_sale, name="inventory_register_sale"),
     path("ventas/", views.sales_list, name="inventory_sales_list"),
     path("ventas/<int:sale_id>/editar/", views.sale_edit, name="inventory_sale_edit"),
+    path(
+        "ventas/<int:sale_id>/estado-entrega/",
+        views.sale_delivery_status_update,
+        name="inventory_sale_delivery_status_update",
+    ),
     path("ventas/<int:sale_id>/comprobante/", views.sale_receipt, name="inventory_sale_receipt"),
     path("ventas/<int:sale_id>/comprobante.pdf", views.sale_receipt_pdf, name="inventory_sale_receipt_pdf"),
     path("ventas/<int:sale_id>/eliminar/", views.sale_delete, name="inventory_sale_delete"),
