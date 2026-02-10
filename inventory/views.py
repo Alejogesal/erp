@@ -817,7 +817,7 @@ def sale_edit(request, sale_id: int):
                             variant=variant,
                             quantity=qty,
                             unit_price=base_price,
-                            cost_unit=data["product"].cost_with_vat(),
+                            cost_unit=data["product"].last_purchase_cost(),
                             discount_percent=discount,
                             final_unit_price=final_price,
                             line_total=line_total,
@@ -1111,7 +1111,7 @@ def sales_list(request):
                     product=product,
                     quantity=qty,
                     unit_price=unit_price,
-                    cost_unit=product.cost_with_vat(),
+                    cost_unit=product.last_purchase_cost(),
                     discount_percent=Decimal("0.00"),
                     final_unit_price=unit_price,
                     line_total=line_total,
@@ -1337,7 +1337,7 @@ def sales_list(request):
                         product=item["product"],
                         quantity=qty,
                         unit_price=unit_price,
-                        cost_unit=item["product"].cost_with_vat(),
+                        cost_unit=item["product"].last_purchase_cost(),
                         discount_percent=Decimal("0.00"),
                         final_unit_price=unit_price,
                         line_total=line_total,
@@ -1586,7 +1586,7 @@ def sales_list(request):
                                 variant=variant,
                                 quantity=qty,
                                 unit_price=base_price,
-                                cost_unit=data["product"].cost_with_vat(),
+                                cost_unit=data["product"].last_purchase_cost(),
                                 discount_percent=discount,
                                 final_unit_price=final_price,
                                 line_total=line_total,
@@ -2520,7 +2520,7 @@ def stock_list(request):
                 if qty <= 0:
                     continue
                 vat = product.vat_percent or Decimal("0.00")
-                unit_cost = (product.avg_cost or Decimal("0.00")) * (Decimal("1.00") + vat / Decimal("100.00"))
+                unit_cost = product.cost_with_vat()
                 target = "aurill" if "aurill" in (product.group or "").lower() else "aris"
                 purchases[target]["items"].append(
                     {
@@ -3419,7 +3419,7 @@ def _koda_execute_actions(actions: list[dict], user, invoice_path: str | None) -
                         product=product,
                         quantity=quantity,
                         unit_price=unit_price,
-                        cost_unit=product.cost_with_vat(),
+                        cost_unit=product.last_purchase_cost(),
                         discount_percent=Decimal("0.00"),
                         final_unit_price=unit_price,
                         line_total=line_total,

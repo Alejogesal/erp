@@ -25,7 +25,7 @@ class InventoryServiceTests(TestCase):
         self.product.refresh_from_db()
         stock_qty = self.product.stocks.get(warehouse=self.comun).quantity
         self.assertEqual(stock_qty, Decimal("20.00"))
-        self.assertEqual(self.product.avg_cost, Decimal("6.00"))
+        self.assertEqual(self.product.avg_cost, Decimal("7.00"))
 
     def test_exit_blocks_negative_stock(self):
         with self.assertRaises(services.NegativeStockError):

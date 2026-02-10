@@ -85,9 +85,8 @@ class Product(models.Model):
         return self.cost_with_vat() * multiplier
 
     def cost_with_vat(self) -> Decimal:
-        vat = self.vat_percent or Decimal("0.00")
-        multiplier = Decimal("1.00") + vat / Decimal("100.00")
-        return (self.avg_cost or Decimal("0.00")) * multiplier
+        # avg_cost is treated as the last purchase cost (already with IVA when provided).
+        return self.avg_cost or Decimal("0.00")
 
     @property
     def consumer_price(self) -> Decimal:

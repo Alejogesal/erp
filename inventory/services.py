@@ -73,9 +73,13 @@ def register_entry(
     stock = _get_stock_for_update(product, warehouse)
     current_total = _total_stock_quantity(product)
 
-    new_avg = _weighted_average(product.avg_cost, current_total, cost, qty)
-    product.avg_cost = new_avg
-    product.save(update_fields=["avg_cost"])
+    # Use last purchase cost as the product cost (not weighted average).
+    product.avg_cost = cost
+    update_fields = ["avg_cost"]
+    if vat_percent is not None:
+        product.vat_percent = vat
+        update_fields.append("vat_percent")
+    product.save(update_fields=update_fields)
 
     stock.quantity = (stock.quantity + qty).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     stock.save(update_fields=["quantity"])
