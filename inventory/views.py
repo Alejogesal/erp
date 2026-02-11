@@ -4987,6 +4987,36 @@ def customers_view(request):
             messages.error(request, "No se pudo actualizar el teléfono.")
 
     customers = Customer.objects.prefetch_related("discounts__product", "group_discounts").order_by("name")
+    sales_totals = {
+        row["customer_id"]: row["total"] or Decimal("0.00")
+        for row in Sale.objects.filter(customer__isnull=False)
+        .values("customer_id")
+        .annotate(total=Sum("total"))
+    }
+    payments_totals = {
+        row["customer_id"]: row["total"] or Decimal("0.00")
+        for row in CustomerPayment.objects.filter(kind=CustomerPayment.Kind.PAYMENT)
+        .values("customer_id")
+        .annotate(total=Sum("amount"))
+    }
+    refunds_totals = {
+        row["customer_id"]: row["total"] or Decimal("0.00")
+        for row in CustomerPayment.objects.filter(kind=CustomerPayment.Kind.REFUND)
+        .values("customer_id")
+        .annotate(total=Sum("amount"))
+    }
+    debtors = []
+    total_debt = Decimal("0.00")
+    for customer in customers:
+        sales_total = sales_totals.get(customer.id, Decimal("0.00"))
+        payments_total = payments_totals.get(customer.id, Decimal("0.00"))
+        refunds_total = refunds_totals.get(customer.id, Decimal("0.00"))
+        balance = sales_total - payments_total + refunds_total
+        if balance > 0:
+            debtors.append({"customer": customer, "balance": balance})
+            total_debt += balance
+    debtors.sort(key=lambda item: item["balance"], reverse=True)
+    debtors = debtors[:8]
     group_options = list(
         Product.objects.exclude(group__exact="")
         .values_list("group", flat=True)
@@ -5003,6 +5033,8 @@ def customers_view(request):
             "customers": customers,
             "audience_choices": Customer.Audience.choices,
             "group_options": group_options,
+            "total_debt": total_debt,
+            "debtors": debtors,
         },
     )
 
