@@ -39,6 +39,7 @@ from .models import (
     Customer,
     CustomerGroupDiscount,
     CustomerProductDiscount,
+    CustomerPayment,
     MercadoLibreNotification,
     MercadoLibreConnection,
     MercadoLibreItem,
@@ -4889,6 +4890,31 @@ class CustomerGroupDiscountForm(forms.ModelForm):
         return
 
 
+class CustomerPaymentForm(forms.ModelForm):
+    class Meta:
+        model = CustomerPayment
+        fields = ["sale", "amount", "method", "kind", "paid_at", "notes"]
+        labels = {
+            "sale": "Pedido",
+            "amount": "Monto",
+            "method": "Método",
+            "kind": "Tipo",
+            "paid_at": "Fecha",
+            "notes": "Notas",
+        }
+        widgets = {"paid_at": forms.DateInput(attrs={"type": "date"})}
+
+    def __init__(self, *args, **kwargs):
+        customer = kwargs.pop("customer", None)
+        super().__init__(*args, **kwargs)
+        self.fields["amount"].min_value = Decimal("0.01")
+        self.fields["sale"].required = False
+        self.fields["notes"].required = False
+        if customer is not None:
+            self.fields["sale"].queryset = Sale.objects.filter(customer=customer).order_by("-created_at")
+        self.fields["sale"].empty_label = "Cuenta corriente"
+
+
 class TaxExpenseForm(forms.ModelForm):
     class Meta:
         model = TaxExpense
@@ -4977,6 +5003,132 @@ def customers_view(request):
             "customers": customers,
             "audience_choices": Customer.Audience.choices,
             "group_options": group_options,
+        },
+    )
+
+
+@login_required
+def customer_history_view(request, customer_id):
+    customer = get_object_or_404(Customer, id=customer_id)
+    payment_form = CustomerPaymentForm(customer=customer)
+
+    if request.method == "POST":
+        action = request.POST.get("action") or ""
+        if action == "add_payment":
+            payment_form = CustomerPaymentForm(request.POST, customer=customer)
+            if payment_form.is_valid():
+                payment = payment_form.save(commit=False)
+                payment.customer = customer
+                payment.save()
+                messages.success(request, "Pago registrado.")
+                return redirect("inventory_customer_history", customer_id=customer.id)
+            messages.error(request, "Revisá los datos del pago.")
+
+    sales = list(
+        Sale.objects.filter(customer=customer)
+        .select_related("warehouse")
+        .order_by("-created_at", "-id")
+    )
+    payments = list(
+        CustomerPayment.objects.filter(customer=customer)
+        .select_related("sale")
+        .order_by("-paid_at", "-id")
+    )
+
+    payment_by_sale = {}
+    for payment in payments:
+        if not payment.sale_id:
+            continue
+        sale_id = payment.sale_id
+        info = payment_by_sale.setdefault(
+            sale_id,
+            {"paid_total": Decimal("0.00"), "methods": []},
+        )
+        signed = payment.amount if payment.kind == CustomerPayment.Kind.PAYMENT else -payment.amount
+        info["paid_total"] += signed
+        info["methods"].append(payment.get_method_display())
+
+    sales_rows = []
+    for sale in sales:
+        paid_info = payment_by_sale.get(sale.id) or {"paid_total": Decimal("0.00"), "methods": []}
+        paid_total = paid_info["paid_total"]
+        balance = sale.total - paid_total
+        methods = ", ".join(dict.fromkeys([m for m in paid_info["methods"] if m])) or "-"
+        sales_rows.append(
+            {
+                "sale": sale,
+                "paid_total": paid_total,
+                "methods": methods,
+                "balance": balance,
+            }
+        )
+
+    ledger_entries = []
+    for sale in sales:
+        ledger_entries.append(
+            {
+                "date": sale.created_at,
+                "date_display": sale.created_at,
+                "kind": "SALE",
+                "label": sale.ml_order_id or sale.invoice_number,
+                "detail": f"Venta ({sale.warehouse.name})",
+                "debit": sale.total,
+                "credit": Decimal("0.00"),
+            }
+        )
+    for payment in payments:
+        is_payment = payment.kind == CustomerPayment.Kind.PAYMENT
+        debit = Decimal("0.00") if is_payment else payment.amount
+        credit = payment.amount if is_payment else Decimal("0.00")
+        label = payment.get_method_display()
+        detail_parts = [label]
+        if payment.sale_id:
+            detail_parts.append(payment.sale.ml_order_id or payment.sale.invoice_number)
+        if payment.notes:
+            detail_parts.append(payment.notes)
+        ledger_entries.append(
+            {
+                "date": datetime.combine(payment.paid_at, time.min),
+                "date_display": payment.paid_at,
+                "kind": "PAYMENT" if is_payment else "REFUND",
+                "label": "Pago" if is_payment else "Devolución/Ajuste",
+                "detail": " · ".join([part for part in detail_parts if part]),
+                "debit": debit,
+                "credit": credit,
+            }
+        )
+
+    ledger_entries.sort(key=lambda item: item["date"])
+    balance = Decimal("0.00")
+    for entry in ledger_entries:
+        balance += entry["debit"]
+        balance -= entry["credit"]
+        entry["balance"] = balance
+
+    total_sales = sum((sale.total for sale in sales), Decimal("0.00"))
+    total_payments = sum(
+        (payment.amount for payment in payments if payment.kind == CustomerPayment.Kind.PAYMENT),
+        Decimal("0.00"),
+    )
+    total_refunds = sum(
+        (payment.amount for payment in payments if payment.kind == CustomerPayment.Kind.REFUND),
+        Decimal("0.00"),
+    )
+    current_balance = total_sales - total_payments + total_refunds
+
+    return render(
+        request,
+        "inventory/customer_history.html",
+        {
+            "customer": customer,
+            "sales_rows": sales_rows,
+            "payments": payments,
+            "payment_form": payment_form,
+            "ledger_entries": ledger_entries,
+            "total_sales": total_sales,
+            "total_payments": total_payments,
+            "total_refunds": total_refunds,
+            "current_balance": current_balance,
         },
     )
 

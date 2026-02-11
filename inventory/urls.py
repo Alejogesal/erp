@@ -20,6 +20,7 @@ urlpatterns = [
     path("productos/precios/<str:audience>/", views.product_prices_download, name="inventory_product_prices_download"),
     path("productos/importar-costos/", views.import_costs_xlsx, name="inventory_import_costs"),
     path("clientes/", views.customers_view, name="inventory_customers"),
+    path("clientes/<int:customer_id>/historial/", views.customer_history_view, name="inventory_customer_history"),
     path("proveedores/", views.suppliers, name="inventory_suppliers"),
     path("compras/registrar/", views.register_purchase, name="inventory_register_purchase"),
     path("compras/", views.purchases_list, name="inventory_purchases_list"),

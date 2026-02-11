@@ -1,0 +1,90 @@
+{% extends "inventory/base.html" %}
+{% load latam_numbers %}
+{% block title %}Historial de cliente{% endblock %}
+{% block content %}
+<h1>{{ customer.name }}</h1>
+<p class="subtitle">Historial de pedidos y pagos. {% if customer.email %}Teléfono: {{ customer.email }}{% endif %}</p>
+
+<div class="cards">
+    <div class="card">
+        <div class="card-title">Resumen</div>
+        <div style="display:flex; flex-direction:column; gap:8px; font-size:14px;">
+            <div><strong>Total ventas:</strong> ${{ total_sales|latam_number:2 }}</div>
+            <div><strong>Pagos:</strong> ${{ total_payments|latam_number:2 }}</div>
+            <div><strong>Devoluciones/Ajustes:</strong> ${{ total_refunds|latam_number:2 }}</div>
+            <div><strong>Saldo actual:</strong> ${{ current_balance|latam_number:2 }}</div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-title">Registrar pago</div>
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="add_payment">
+            {{ payment_form.as_p }}
+            <button type="submit">Guardar pago</button>
+        </form>
+    </div>
+</div>
+
+<div class="card table-card" style="margin-top:16px;">
+    <div class="card-title">Pedidos del cliente</div>
+    <table>
+        <thead>
+            <tr>
+                <th>Fecha</th>
+                <th>Comprobante</th>
+                <th>Depósito</th>
+                <th>Total</th>
+                <th>Pagado</th>
+                <th>Método</th>
+                <th>Saldo</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in sales_rows %}
+            <tr>
+                <td>{{ row.sale.created_at|date:"d/m/Y H:i" }}</td>
+                <td>{{ row.sale.ml_order_id|default:row.sale.invoice_number }}</td>
+                <td>{{ row.sale.warehouse.name }}</td>
+                <td>${{ row.sale.total|latam_number:2 }}</td>
+                <td>${{ row.paid_total|latam_number:2 }}</td>
+                <td>{{ row.methods }}</td>
+                <td>${{ row.balance|latam_number:2 }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="7">No hay pedidos registrados.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card table-card" style="margin-top:16px;">
+    <div class="card-title">Cuenta corriente</div>
+    <table>
+        <thead>
+            <tr>
+                <th>Fecha</th>
+                <th>Tipo</th>
+                <th>Detalle</th>
+                <th>Debe</th>
+                <th>Haber</th>
+                <th>Saldo</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for entry in ledger_entries %}
+            <tr>
+                <td>{{ entry.date_display|date:"d/m/Y" }}</td>
+                <td>{{ entry.label }}</td>
+                <td>{{ entry.detail }}</td>
+                <td>${{ entry.debit|latam_number:2 }}</td>
+                <td>${{ entry.credit|latam_number:2 }}</td>
+                <td>${{ entry.balance|latam_number:2 }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="6">No hay movimientos.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

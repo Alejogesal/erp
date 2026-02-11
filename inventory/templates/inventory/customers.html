@@ -48,7 +48,10 @@
         <tbody>
             {% for customer in customers %}
             <tr>
-                <td>{{ customer.name }}</td>
+                <td>
+                    <div>{{ customer.name }}</div>
+                    <a class="pill" href="{% url 'inventory_customer_history' customer.id %}" style="font-size:11px; padding:3px 6px; margin-top:4px; display:inline-block;">Historial</a>
+                </td>
                 <td>
                     <form method="post" style="display:flex; gap:6px; align-items:center;">
                         {% csrf_token %}

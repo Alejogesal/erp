@@ -396,6 +396,34 @@ class SaleItem(models.Model):
         return f"{self.product.sku} x {self.quantity}"
 
 
+class CustomerPayment(models.Model):
+    class Method(models.TextChoices):
+        CASH = "CASH", "Efectivo"
+        TRANSFER = "TRANSFER", "Transferencia"
+        CARD = "CARD", "Tarjeta"
+        MERCADOPAGO = "MERCADOPAGO", "MercadoPago"
+        OTHER = "OTHER", "Otro"
+
+    class Kind(models.TextChoices):
+        PAYMENT = "PAYMENT", "Pago"
+        REFUND = "REFUND", "Devolución/Ajuste"
+
+    customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name="payments")
+    sale = models.ForeignKey(Sale, on_delete=models.SET_NULL, null=True, blank=True, related_name="payments")
+    amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    method = models.CharField(max_length=20, choices=Method.choices, default=Method.CASH)
+    kind = models.CharField(max_length=20, choices=Kind.choices, default=Kind.PAYMENT)
+    paid_at = models.DateField(default=timezone.localdate)
+    notes = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-paid_at", "-id"]
+
+    def __str__(self) -> str:
+        return f"{self.customer} - {self.amount} ({self.method})"
+
+
 class TaxExpense(models.Model):
     description = models.CharField(max_length=255)
     amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
