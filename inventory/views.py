@@ -5065,9 +5065,12 @@ def customer_history_view(request, customer_id):
 
     ledger_entries = []
     for sale in sales:
+        sale_date = sale.created_at
+        if timezone.is_naive(sale_date):
+            sale_date = timezone.make_aware(sale_date, timezone.get_current_timezone())
         ledger_entries.append(
             {
-                "date": sale.created_at,
+                "date": sale_date,
                 "date_display": sale.created_at,
                 "kind": "SALE",
                 "label": sale.ml_order_id or sale.invoice_number,
@@ -5086,9 +5089,11 @@ def customer_history_view(request, customer_id):
             detail_parts.append(payment.sale.ml_order_id or payment.sale.invoice_number)
         if payment.notes:
             detail_parts.append(payment.notes)
+        payment_date = datetime.combine(payment.paid_at, time.min)
+        payment_date = timezone.make_aware(payment_date, timezone.get_current_timezone())
         ledger_entries.append(
             {
-                "date": datetime.combine(payment.paid_at, time.min),
+                "date": payment_date,
                 "date_display": payment.paid_at,
                 "kind": "PAYMENT" if is_payment else "REFUND",
                 "label": "Pago" if is_payment else "Devolución/Ajuste",
