@@ -35,6 +35,31 @@
     </div>
 </div>
 
+<div class="card table-card" style="margin-top:16px;">
+    <div class="card-title" style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+        <span>Deuda pendiente</span>
+        <span style="font-size:12px; color:var(--muted);">Total adeudado: ${{ total_debt|latam_number:2 }}</span>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th>Cliente</th>
+                <th>Saldo</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in debtors %}
+            <tr>
+                <td>{{ row.customer.name }}</td>
+                <td>${{ row.balance|latam_number:2 }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="2">No hay saldos pendientes.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
 <div class="card table-card">
     <div class="card-title">Clientes y descuentos</div>
     <table>
@@ -91,31 +116,6 @@
             </tr>
             {% empty %}
             <tr><td colspan="4">Aún no hay clientes cargados.</td></tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
-
-<div class="card table-card" style="margin-top:16px;">
-    <div class="card-title" style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
-        <span>Deuda pendiente</span>
-        <span style="font-size:12px; color:var(--muted);">Total adeudado: ${{ total_debt|latam_number:2 }}</span>
-    </div>
-    <table>
-        <thead>
-            <tr>
-                <th>Cliente</th>
-                <th>Saldo</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for row in debtors %}
-            <tr>
-                <td>{{ row.customer.name }}</td>
-                <td>${{ row.balance|latam_number:2 }}</td>
-            </tr>
-            {% empty %}
-            <tr><td colspan="2">No hay saldos pendientes.</td></tr>
             {% endfor %}
         </tbody>
     </table>
