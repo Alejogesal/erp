@@ -61,7 +61,10 @@
 </div>
 
 <div class="card table-card">
-    <div class="card-title">Clientes y descuentos</div>
+    <div class="card-title" style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+        <span>Clientes y descuentos</span>
+        <input id="customer-search" type="text" placeholder="Buscar cliente..." style="max-width:240px;">
+    </div>
     <table>
         <thead>
             <tr>
@@ -71,7 +74,7 @@
                 <th>Descuentos</th>
             </tr>
         </thead>
-        <tbody>
+        <tbody id="customers-body">
             {% for customer in customers %}
             <tr>
                 <td>
@@ -160,6 +163,27 @@
 </style>
 <script>
     (function() {
+        var searchInput = document.getElementById("customer-search");
+        var customersBody = document.getElementById("customers-body");
+        if (searchInput && customersBody) {
+            var rows = Array.prototype.slice.call(customersBody.querySelectorAll("tr"));
+            var normalize = function(value) {
+                return (value || "").toLowerCase().trim();
+            };
+            var filterRows = function() {
+                var query = normalize(searchInput.value);
+                if (!query) {
+                    rows.forEach(function(row) { row.style.display = ""; });
+                    return;
+                }
+                rows.forEach(function(row) {
+                    var text = normalize(row.textContent);
+                    row.style.display = text.indexOf(query) !== -1 ? "" : "none";
+                });
+            };
+            searchInput.addEventListener("input", filterRows);
+        }
+
         var audienceSelects = document.querySelectorAll(".customer-audience-select");
         Array.prototype.forEach.call(audienceSelects, function(select) {
             select.addEventListener("change", function() {
