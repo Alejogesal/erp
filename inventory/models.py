@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from django.conf import settings
 from django.db import models
@@ -85,8 +85,12 @@ class Product(models.Model):
         return self.cost_with_vat() * multiplier
 
     def cost_with_vat(self) -> Decimal:
-        # avg_cost is treated as the last purchase cost (already with IVA when provided).
-        return self.avg_cost or Decimal("0.00")
+        base_cost = self.avg_cost or Decimal("0.00")
+        vat = self.vat_percent or Decimal("0.00")
+        if vat <= 0:
+            return base_cost
+        multiplier = Decimal("1.00") + (vat / Decimal("100.00"))
+        return (base_cost * multiplier).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     @property
     def consumer_price(self) -> Decimal:

@@ -4028,6 +4028,8 @@ def product_info(request):
         {
             "ok": True,
             "default_supplier_id": product.default_supplier_id,
+            "avg_cost": f"{(product.avg_cost or Decimal('0.00')):.2f}",
+            "vat_percent": f"{(product.vat_percent or Decimal('0.00')):.2f}",
             "cost_with_vat": f"{product.cost_with_vat():.2f}",
         }
     )
@@ -4048,6 +4050,8 @@ def product_search(request):
                 "id": product.id,
                 "label": _product_label_with_last_cost(product),
                 "default_supplier_id": product.default_supplier_id,
+                "avg_cost": f"{(product.avg_cost or Decimal('0.00')):.2f}",
+                "vat_percent": f"{(product.vat_percent or Decimal('0.00')):.2f}",
                 "cost_with_vat": f"{product.cost_with_vat():.2f}",
             }
         )

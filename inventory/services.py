@@ -65,16 +65,22 @@ def register_entry(
     purchase=None,
 ) -> StockMovement:
     qty = _to_decimal(quantity)
-    cost = _to_decimal(unit_cost)
+    cost_with_vat = _to_decimal(unit_cost)
     vat = _to_decimal(vat_percent) if vat_percent is not None else Decimal("0.00")
     if qty <= 0:
         raise InvalidMovementError("Entry quantity must be positive")
+
+    if vat > 0:
+        vat_factor = Decimal("1.00") + (vat / Decimal("100.00"))
+        cost_base = (cost_with_vat / vat_factor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    else:
+        cost_base = cost_with_vat
 
     stock = _get_stock_for_update(product, warehouse)
     current_total = _total_stock_quantity(product)
 
     # Use last purchase cost as the product cost (not weighted average).
-    product.avg_cost = cost
+    product.avg_cost = cost_base
     update_fields = ["avg_cost"]
     if vat_percent is not None:
         product.vat_percent = vat
@@ -90,16 +96,16 @@ def register_entry(
         movement_type=StockMovement.MovementType.ENTRY,
         to_warehouse=warehouse,
         quantity=qty,
-        unit_cost=cost,
+        unit_cost=cost_with_vat,
         vat_percent=vat,
         user=user,
         reference=reference or "",
     )
     if supplier:
         supplier_product, _ = SupplierProduct.objects.get_or_create(
-            supplier=supplier, product=product, defaults={"last_cost": cost, "last_purchase_at": timezone.now()}
+            supplier=supplier, product=product, defaults={"last_cost": cost_with_vat, "last_purchase_at": timezone.now()}
         )
-        supplier_product.last_cost = cost
+        supplier_product.last_cost = cost_with_vat
         supplier_product.last_purchase_at = timezone.now()
         supplier_product.save(update_fields=["last_cost", "last_purchase_at"])
         if product.default_supplier_id is None:
