@@ -85,7 +85,7 @@
                 </td>
                 <td>
                         <input name="price_distributor" value="{% if product.price_distributor and product.price_distributor > 0 %}{{ product.price_distributor|latam_number:2 }}{% endif %}" placeholder="{{ product.distributor_price|latam_number:2 }}" style="max-width:110px;">
-                        <button type="submit">Guardar</button>
+                        <button type="submit" class="pill sm" style="font-size:12px; padding:4px 8px;">Guardar</button>
                     </form>
                 </td>
                 <td>
