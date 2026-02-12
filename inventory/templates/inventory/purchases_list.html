@@ -329,6 +329,7 @@
             const search = document.createElement("input");
             search.type = "text";
             search.placeholder = "Buscar producto...";
+            search.autocomplete = "off";
             search.name = (selectEl.name || "").replace("-product", "-product_text");
             const datalist = document.createElement("datalist");
             const listId = `product-options-${Math.random().toString(36).slice(2)}`;
@@ -393,6 +394,12 @@
             };
             selectEl._syncSelection = syncSelection;
             search.addEventListener("change", syncSelection);
+            search.addEventListener("focus", () => {
+                const term = (search.value || "").trim();
+                if (term.length < 2) {
+                    datalist.innerHTML = "";
+                }
+            });
             search.addEventListener("keydown", (event) => {
                 if (event.key === "Enter") {
                     syncSelection();
