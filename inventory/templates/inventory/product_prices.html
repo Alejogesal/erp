@@ -74,25 +74,25 @@
                 <td>{{ product.name }}</td>
                 <td>{{ product.group|default:"-" }}</td>
                 <td>
-                    <form method="post" action="{% url 'inventory_product_prices' %}" style="display:flex; gap:6px; align-items:center;">
+                    <form id="price-form-{{ product.id }}" method="post" action="{% url 'inventory_product_prices' %}">
                         {% csrf_token %}
-                        <input type="hidden" name="action" value="update_prices">
-                        <input type="hidden" name="product_id" value="{{ product.id }}">
-                        <input name="price_consumer" value="{% if product.price_consumer and product.price_consumer > 0 %}{{ product.price_consumer|latam_number:2 }}{% endif %}" placeholder="{{ product.consumer_price|latam_number:2 }}" style="max-width:110px;">
-                </td>
-                <td>
-                        <input name="price_barber" value="{% if product.price_barber and product.price_barber > 0 %}{{ product.price_barber|latam_number:2 }}{% endif %}" placeholder="{{ product.barber_price|latam_number:2 }}" style="max-width:110px;">
-                </td>
-                <td>
-                        <input name="price_distributor" value="{% if product.price_distributor and product.price_distributor > 0 %}{{ product.price_distributor|latam_number:2 }}{% endif %}" placeholder="{{ product.distributor_price|latam_number:2 }}" style="max-width:110px;">
-                        <button type="submit" class="pill sm" style="font-size:12px; padding:4px 8px;">Guardar</button>
                     </form>
+                    <input form="price-form-{{ product.id }}" type="hidden" name="action" value="update_prices">
+                    <input form="price-form-{{ product.id }}" type="hidden" name="product_id" value="{{ product.id }}">
+                    <input form="price-form-{{ product.id }}" name="price_consumer" value="{% if product.price_consumer and product.price_consumer > 0 %}{{ product.price_consumer|latam_number:2 }}{% endif %}" placeholder="{{ product.consumer_price|latam_number:2 }}" style="max-width:110px;">
                 </td>
                 <td>
-                    <a class="pill" href="{% url 'inventory_edit_product' product.pk %}">Editar</a>
+                    <input form="price-form-{{ product.id }}" name="price_barber" value="{% if product.price_barber and product.price_barber > 0 %}{{ product.price_barber|latam_number:2 }}{% endif %}" placeholder="{{ product.barber_price|latam_number:2 }}" style="max-width:110px;">
+                </td>
+                <td>
+                    <input form="price-form-{{ product.id }}" name="price_distributor" value="{% if product.price_distributor and product.price_distributor > 0 %}{{ product.price_distributor|latam_number:2 }}{% endif %}" placeholder="{{ product.distributor_price|latam_number:2 }}" style="max-width:110px;">
+                </td>
+                <td>
+                    <button form="price-form-{{ product.id }}" type="submit" class="pill sm" style="font-size:12px; padding:4px 8px;">Guardar</button>
+                    <a class="pill sm" style="font-size:12px; padding:4px 8px;" href="{% url 'inventory_edit_product' product.pk %}">Editar</a>
                     <form method="post" action="{% url 'inventory_product_delete' product.pk %}" style="display:inline;">
                         {% csrf_token %}
-                        <button type="submit" onclick="return confirm('¿Eliminar este producto?');">Eliminar</button>
+                        <button type="submit" class="pill sm" style="font-size:12px; padding:4px 8px;" onclick="return confirm('¿Eliminar este producto?');">Eliminar</button>
                     </form>
                 </td>
             </tr>
