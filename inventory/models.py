@@ -94,6 +94,8 @@ class Product(models.Model):
 
     @property
     def consumer_price(self) -> Decimal:
+        if self.price_consumer and self.price_consumer > 0:
+            return self.price_consumer
         return self._price_with_margin(self.margin_consumer)
 
     @property

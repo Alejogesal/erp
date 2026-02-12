@@ -73,7 +73,15 @@
                 <td>{{ product.sku }}</td>
                 <td>{{ product.name }}</td>
                 <td>{{ product.group|default:"-" }}</td>
-                <td>{{ product.consumer_price|latam_number:2 }}</td>
+                <td>
+                    <form method="post" action="{% url 'inventory_product_prices' %}" style="display:flex; gap:6px; align-items:center;">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="update_consumer_price">
+                        <input type="hidden" name="product_id" value="{{ product.id }}">
+                        <input name="price_consumer" value="{% if product.price_consumer and product.price_consumer > 0 %}{{ product.price_consumer|latam_number:2 }}{% endif %}" placeholder="{{ product.consumer_price|latam_number:2 }}" style="max-width:120px;">
+                        <button type="submit">Guardar</button>
+                    </form>
+                </td>
                 <td>{{ product.barber_price|latam_number:2 }}</td>
                 <td>{{ product.distributor_price|latam_number:2 }}</td>
                 <td>

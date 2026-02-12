@@ -3822,6 +3822,20 @@ def koda_confirm(request):
 
 @login_required
 def product_prices(request):
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "update_consumer_price":
+            product_id = request.POST.get("product_id")
+            price_raw = request.POST.get("price_consumer")
+            product = Product.objects.filter(id=product_id).first()
+            if not product:
+                messages.error(request, "Producto no encontrado.")
+                return redirect("inventory_product_prices")
+            price = _parse_decimal(price_raw)
+            product.price_consumer = price
+            product.save(update_fields=["price_consumer"])
+            messages.success(request, "Precio al público actualizado.")
+            return redirect("inventory_product_prices")
     products = Product.objects.order_by("sku")
     group_options = (
         Product.objects.exclude(group="")
