@@ -73,7 +73,6 @@
                 {% endfor %}
             </tbody>
         </table>
-        <button type="button" id="toggle-vat">Mostrar IVA</button>
         <button type="button" id="add-item">Agregar producto</button>
         <button type="submit">Registrar compra</button>
     </form>
@@ -141,7 +140,6 @@
 <script>
     (function() {
         const addBtn = document.getElementById("add-item");
-        const toggleVat = document.getElementById("toggle-vat");
         const body = document.getElementById("items-body");
         const totalForms = document.getElementById("id_form-TOTAL_FORMS");
         const productInfoUrl = "{% url 'inventory_product_info' %}";
@@ -449,25 +447,10 @@
             body.appendChild(tr);
             setupProductSearch(tr.querySelector("select[name$='-product']"));
             setupRow(tr);
-            if (vatHidden) {
-                tr.querySelectorAll(".vat-col").forEach((col) => {
-                    col.style.display = "none";
-                });
-            }
-        });
-
-        let vatHidden = false;
-        if (toggleVat) {
-            toggleVat.addEventListener("click", () => {
-                const cols = document.querySelectorAll(".vat-col");
-                cols.forEach((col) => {
-                    col.style.display = col.style.display === "none" ? "" : "none";
-                });
-                vatHidden = Array.from(cols).every((col) => col.style.display === "none");
+            tr.querySelectorAll(".vat-col").forEach((col) => {
+                col.style.display = "";
             });
-            document.querySelectorAll(".vat-col").forEach((col) => (col.style.display = "none"));
-            vatHidden = true;
-        }
+        });
 
         document.addEventListener("click", (event) => {
             const btn = event.target.closest(".delete-row");
