@@ -3783,12 +3783,13 @@ def product_costs(request):
             if not upload:
                 messages.error(request, "Subí un archivo XLSX.")
             else:
-                result = _process_costs_xlsx(upload)
+                group_override = (request.POST.get("group_override") or "").strip()
+                result = _process_costs_xlsx(upload, group_override=group_override or None)
                 if isinstance(result, str):
                     messages.error(request, result)
                 else:
-                    created, updated = result
-                    if created == 0 and updated == 0:
+                    created, updated, skipped = result
+                    if created == 0 and updated == 0 and skipped == 0:
                         messages.warning(
                             request,
                             "No se encontraron filas válidas para importar. Revisá las columnas y datos.",
@@ -3796,7 +3797,7 @@ def product_costs(request):
                         return redirect("inventory_product_costs")
                     messages.success(
                         request,
-                        f"Importación completa. Nuevos: {created}, Actualizados: {updated}.",
+                        f"Importación completa. Nuevos: {created}, Actualizados: {updated}, Omitidos: {skipped}.",
                     )
                     return redirect("inventory_product_costs")
         elif action == "delete_import":
@@ -3811,8 +3812,12 @@ def product_costs(request):
                     deleted = 0
                     skipped = 0
                     not_found = 0
-                    for group, description, _cost in rows:
-                        product = Product.objects.filter(name=description, group=group).first()
+                    for group, description, _cost, sku in rows:
+                        product = None
+                        if sku:
+                            product = Product.objects.filter(sku__iexact=sku).first()
+                        if not product:
+                            product = Product.objects.filter(name=description, group=group).first()
                         if not product:
                             not_found += 1
                             continue
@@ -4300,7 +4305,7 @@ def _normalize_header(value: str) -> str:
     return without_accents.strip().lower()
 
 
-def _read_costs_xlsx_rows(upload) -> tuple[list[tuple[str, str, Decimal]], str | None]:
+def _read_costs_xlsx_rows(upload) -> tuple[list[tuple[str, str, Decimal, str]], str | None]:
     try:
         from openpyxl import load_workbook
     except Exception:
@@ -4320,6 +4325,7 @@ def _read_costs_xlsx_rows(upload) -> tuple[list[tuple[str, str, Decimal]], str |
     desc_keys = ["descripcion", "descripción", "producto", "descripcion producto", "nombre"]
     cost_keys = ["precio venta", "precio", "costo", "costo unitario", "precio costo", "precio venta unitario"]
     group_keys = ["grupo", "marca", "categoria", "categoría"]
+    sku_keys = ["sku", "codigo", "código", "cod", "codigo sku"]
 
     def _pick_index(keys: list[str]) -> int | None:
         for key in keys:
@@ -4331,18 +4337,20 @@ def _read_costs_xlsx_rows(upload) -> tuple[list[tuple[str, str, Decimal]], str |
     desc_idx = _pick_index(desc_keys)
     cost_idx = _pick_index(cost_keys)
     group_idx = _pick_index(group_keys)
+    sku_idx = _pick_index(sku_keys)
 
     if desc_idx is None or cost_idx is None:
         return [], "Faltan columnas obligatorias: Descripción/Producto y Precio/Costo."
 
-    rows: list[tuple[str, str, Decimal]] = []
+    rows: list[tuple[str, str, Decimal, str]] = []
     for row in ws.iter_rows(min_row=2, values_only=True):
         group = str(row[group_idx] or "").strip() if group_idx is not None else ""
         description = str(row[desc_idx] or "").strip()
         cost = _parse_decimal(row[cost_idx])
+        sku = str(row[sku_idx] or "").strip() if sku_idx is not None else ""
         if not description:
             continue
-        rows.append((group, description, cost))
+        rows.append((group, description, cost, sku))
     return rows, None
 
 
@@ -4429,22 +4437,39 @@ def _read_ml_sales_xlsx_rows(upload) -> tuple[list[dict], str | None]:
 
 
 
-def _process_costs_xlsx(upload) -> tuple[int, int] | str:
+def _process_costs_xlsx(
+    upload,
+    *,
+    group_override: str | None = None,
+) -> tuple[int, int, int] | str:
     rows, error = _read_costs_xlsx_rows(upload)
     if error:
         return error
 
     created = 0
     updated = 0
+    skipped = 0
     prefix_counters: dict[str, int] = {}
 
-    for group, description, cost in rows:
+    effective_group = (group_override or "").strip()
 
-        product = Product.objects.filter(name=description, group=group).first()
+    for group, description, cost, sku in rows:
+        if effective_group:
+            group = effective_group
+
+        product = None
+        if sku:
+            product = Product.objects.filter(sku__iexact=sku).first()
+        if not product:
+            product = Product.objects.filter(name=description, group=group).first()
         if product:
             product.avg_cost = cost
             product.save(update_fields=["avg_cost"])
             updated += 1
+            continue
+
+        if effective_group:
+            skipped += 1
             continue
 
         prefix = _sku_prefix(group, description)
@@ -4471,7 +4496,7 @@ def _process_costs_xlsx(upload) -> tuple[int, int] | str:
         )
         created += 1
 
-    return created, updated
+    return created, updated, skipped
 
 
 @login_required
@@ -4566,15 +4591,29 @@ def import_costs_xlsx(request):
             messages.error(request, "Subí un archivo XLSX.")
             return redirect("inventory_import_costs")
 
-        result = _process_costs_xlsx(upload)
+        group_override = (request.POST.get("group_override") or "").strip()
+        result = _process_costs_xlsx(upload, group_override=group_override or None)
         if isinstance(result, str):
             messages.error(request, result)
             return redirect("inventory_import_costs")
-        created, updated = result
-        messages.success(request, f"Importación completa. Nuevos: {created}, Actualizados: {updated}.")
+        created, updated, skipped = result
+        messages.success(
+            request,
+            f"Importación completa. Nuevos: {created}, Actualizados: {updated}, Omitidos: {skipped}.",
+        )
         return redirect("inventory_product_prices")
 
-    return render(request, "inventory/cost_import.html", {"title": "Importar costos"})
+    group_options = (
+        Product.objects.exclude(group="")
+        .order_by("group")
+        .values_list("group", flat=True)
+        .distinct()
+    )
+    return render(
+        request,
+        "inventory/cost_import.html",
+        {"title": "Importar costos", "group_options": group_options},
+    )
 
 
 @login_required

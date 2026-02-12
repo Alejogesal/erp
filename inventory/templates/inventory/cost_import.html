@@ -2,12 +2,19 @@
 {% block title %}Importar costos{% endblock %}
 {% block content %}
 <h1>Importar costos</h1>
-<p class="subtitle">Subí un Excel (.xlsx) con las columnas: Grupo, Descripción, Precio Venta.</p>
+<p class="subtitle">Subí un Excel (.xlsx) con columnas: Grupo/Marca (opcional), Descripción/Producto y Costo.</p>
 <div class="card">
     <form method="post" enctype="multipart/form-data">
         {% csrf_token %}
         <label for="xlsx-file">Archivo XLSX</label>
         <input id="xlsx-file" name="file" type="file" accept=".xlsx" required />
+        <label for="xlsx-group">Marca / Grupo (opcional)</label>
+        <input id="xlsx-group" name="group_override" list="group-options" placeholder="Ej: Bellissima">
+        <datalist id="group-options">
+            {% for group in group_options %}
+                <option value="{{ group }}"></option>
+            {% endfor %}
+        </datalist>
         <button type="submit">Importar</button>
     </form>
 </div>
