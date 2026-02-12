@@ -787,8 +787,6 @@ def sale_edit(request, sale_id: int):
                         }.get(audience, data["product"].consumer_price)
                         discount = data.get("discount_percent")
                         if discount is None:
-                        discount = data.get("discount_percent")
-                        if discount is None:
                             discount = Decimal("0.00")
                             if customer:
                                 discount_obj = CustomerProductDiscount.objects.filter(
