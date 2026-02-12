@@ -1904,6 +1904,7 @@ def purchases_list(request):
                     cost_raw = entry.get("unit_cost")
                     discount_raw = entry.get("discount_percent")
                     supplier_id = str(entry.get("supplier_id") or "").strip()
+                    variant_id = str(entry.get("variant_id") or "").strip()
                     vat_raw = entry.get("vat_percent")
                     if not product_id and not str(qty_raw or "").strip() and not str(cost_raw or "").strip():
                         continue
@@ -1916,6 +1917,15 @@ def purchases_list(request):
                     product = resolve_product(product_id, product_text)
                     if not product:
                         errors.append(f"Fila {idx}: producto inválido.")
+                        continue
+                    variant = None
+                    if variant_id:
+                        variant = ProductVariant.objects.filter(id=variant_id, product=product).first()
+                        if not variant:
+                            errors.append(f"Fila {idx}: variedad inválida.")
+                            continue
+                    if ProductVariant.objects.filter(product=product).exists() and not variant:
+                        errors.append(f"Fila {idx}: elegí variedad.")
                         continue
                     qty = parse_decimal(str(qty_raw))
                     unit_cost = parse_decimal(str(cost_raw))
@@ -1939,6 +1949,7 @@ def purchases_list(request):
                             "discount_percent": discount_percent,
                             "vat_percent": vat_percent,
                             "supplier": supplier,
+                            "variant": variant,
                         }
                     )
                 return items_data, errors
@@ -1960,6 +1971,7 @@ def purchases_list(request):
                     cost_raw = request.POST.get(f"{prefix}unit_cost")
                     discount_raw = request.POST.get(f"{prefix}discount_percent")
                     supplier_id = (request.POST.get(f"{prefix}supplier") or "").strip()
+                    variant_id = (request.POST.get(f"{prefix}variant_id") or "").strip()
                     vat_raw = request.POST.get(f"{prefix}vat_percent")
                     if not product_id and not (qty_raw or "").strip() and not (cost_raw or "").strip():
                         continue
@@ -1987,6 +1999,15 @@ def purchases_list(request):
                     if not product:
                         errors.append(f"Fila {idx + 1}: producto inválido.")
                         continue
+                    variant = None
+                    if variant_id:
+                        variant = ProductVariant.objects.filter(id=variant_id, product=product).first()
+                        if not variant:
+                            errors.append(f"Fila {idx + 1}: variedad inválida.")
+                            continue
+                    if ProductVariant.objects.filter(product=product).exists() and not variant:
+                        errors.append(f"Fila {idx + 1}: elegí variedad.")
+                        continue
                     qty = parse_decimal(qty_raw)
                     unit_cost = parse_decimal(cost_raw)
                     discount_percent = parse_decimal(discount_raw) or Decimal("0.00")
@@ -2009,6 +2030,7 @@ def purchases_list(request):
                             "discount_percent": discount_percent,
                             "vat_percent": vat_percent,
                             "supplier": supplier,
+                            "variant": variant,
                         }
                     )
                 return items_data, errors
@@ -2055,11 +2077,22 @@ def purchases_list(request):
                         PurchaseItem.objects.create(
                             purchase=purchase,
                             product=data["product"],
+                            variant=data.get("variant"),
                             quantity=qty,
                             unit_cost=unit_cost,
                             discount_percent=discount_percent,
                             vat_percent=data.get("vat_percent") or Decimal("0.00"),
                         )
+                        if warehouse.type == Warehouse.WarehouseType.COMUN and data.get("variant") is not None:
+                            variant = (
+                                ProductVariant.objects.select_for_update()
+                                .filter(id=data["variant"].id, product=data["product"])
+                                .first()
+                            )
+                            if variant:
+                                variant.quantity = (variant.quantity + qty).quantize(Decimal("0.01"))
+                                variant.save(update_fields=["quantity"])
+                                _koda_sync_common_with_variants(data["product"], warehouse)
                         services.register_entry(
                             product=data["product"],
                             warehouse=warehouse,
@@ -2100,6 +2133,9 @@ def purchases_list(request):
     else:
         page_obj = None
         purchase_list = []
+    variant_data = {}
+    for row in ProductVariant.objects.values("id", "product_id", "name").order_by("name", "id"):
+        variant_data.setdefault(str(row["product_id"]), []).append({"id": row["id"], "name": row["name"]})
     return render(
         request,
         "inventory/purchases_list.html",
@@ -2109,6 +2145,7 @@ def purchases_list(request):
             "form": header_form,
             "formset": formset,
             "show_history": show_history,
+            "variant_data": variant_data,
         },
     )
 
@@ -2190,6 +2227,7 @@ def purchase_edit(request, purchase_id: int):
                         cost_raw = entry.get("unit_cost")
                         discount_raw = entry.get("discount_percent")
                         supplier_id = str(entry.get("supplier_id") or "").strip()
+                        variant_id = str(entry.get("variant_id") or "").strip()
                         vat_raw = entry.get("vat_percent")
                         if not product_id and not product_text:
                             continue
@@ -2199,6 +2237,15 @@ def purchase_edit(request, purchase_id: int):
                         discount_percent = parse_decimal(str(discount_raw)) or Decimal("0.00")
                         if not product or qty is None or qty <= 0 or unit_cost is None:
                             errors.append(f"Fila {idx}: datos inválidos.")
+                            continue
+                        variant = None
+                        if variant_id:
+                            variant = ProductVariant.objects.filter(id=variant_id, product=product).first()
+                            if not variant:
+                                errors.append(f"Fila {idx}: variedad inválida.")
+                                continue
+                        if ProductVariant.objects.filter(product=product).exists() and not variant:
+                            errors.append(f"Fila {idx}: elegí variedad.")
                             continue
                         if discount_percent < 0 or discount_percent > 100:
                             errors.append(f"Fila {idx}: descuento inválido.")
@@ -2212,6 +2259,7 @@ def purchase_edit(request, purchase_id: int):
                                 "discount_percent": discount_percent,
                                 "vat_percent": parse_decimal(str(vat_raw)) or Decimal("0.00"),
                                 "supplier": supplier,
+                                "variant": variant,
                             }
                         )
             elif formset.is_valid():
@@ -2220,7 +2268,19 @@ def purchase_edit(request, purchase_id: int):
                         continue
                     if not form.cleaned_data.get("product"):
                         continue
-                    items.append(form.cleaned_data)
+                    prefix = form.prefix
+                    product = form.cleaned_data.get("product")
+                    variant_id = (request.POST.get(f"{prefix}-variant_id") or "").strip()
+                    variant = None
+                    if variant_id:
+                        variant = ProductVariant.objects.filter(id=variant_id, product=product).first()
+                        if not variant:
+                            errors.append("Variedad inválida.")
+                            continue
+                    if product and ProductVariant.objects.filter(product=product).exists() and not variant:
+                        errors.append("Elegí variedad.")
+                        continue
+                    items.append({**form.cleaned_data, "variant": variant})
             if errors:
                 for err in errors[:3]:
                     messages.error(request, err)
@@ -2232,12 +2292,18 @@ def purchase_edit(request, purchase_id: int):
                     new_warehouse = header_form.cleaned_data["warehouse"]
                     current_items = list(purchase.items.all())
                     current_signature = sorted(
-                        [(item.product_id, Decimal(item.quantity)) for item in current_items],
-                        key=lambda row: (row[0], row[1]),
+                        [
+                            (item.product_id, item.variant_id or 0, Decimal(item.quantity))
+                            for item in current_items
+                        ],
+                        key=lambda row: (row[0], row[1], row[2]),
                     )
                     new_signature = sorted(
-                        [(item["product"].id, Decimal(item["quantity"])) for item in items],
-                        key=lambda row: (row[0], row[1]),
+                        [
+                            (item["product"].id, item.get("variant").id if item.get("variant") else 0, Decimal(item["quantity"]))
+                            for item in items
+                        ],
+                        key=lambda row: (row[0], row[1], row[2]),
                     )
                     stock_changed = (
                         purchase.warehouse_id != new_warehouse.id
@@ -2257,6 +2323,22 @@ def purchase_edit(request, purchase_id: int):
                                     raise services.NegativeStockError("Stock cannot go negative")
                                 stock.save(update_fields=["quantity"])
                             movement.delete()
+                        if purchase.warehouse.type == Warehouse.WarehouseType.COMUN:
+                            for item in current_items:
+                                if not item.variant_id:
+                                    continue
+                                variant = (
+                                    ProductVariant.objects.select_for_update()
+                                    .filter(id=item.variant_id, product=item.product)
+                                    .first()
+                                )
+                                if not variant:
+                                    continue
+                                if variant.quantity - item.quantity < 0:
+                                    raise services.NegativeStockError("Stock cannot go negative")
+                                variant.quantity = (variant.quantity - item.quantity).quantize(Decimal("0.01"))
+                                variant.save(update_fields=["quantity"])
+                                _koda_sync_common_with_variants(item.product, purchase.warehouse)
                     purchase.items.all().delete()
 
                     purchase.warehouse = new_warehouse
@@ -2287,11 +2369,22 @@ def purchase_edit(request, purchase_id: int):
                         PurchaseItem.objects.create(
                             purchase=purchase,
                             product=product,
+                            variant=item.get("variant"),
                             quantity=qty,
                             unit_cost=unit_cost,
                             discount_percent=discount_percent,
                             vat_percent=vat,
                         )
+                        if stock_changed and purchase.warehouse.type == Warehouse.WarehouseType.COMUN and item.get("variant") is not None:
+                            variant = (
+                                ProductVariant.objects.select_for_update()
+                                .filter(id=item["variant"].id, product=product)
+                                .first()
+                            )
+                            if variant:
+                                variant.quantity = (variant.quantity + qty).quantize(Decimal("0.01"))
+                                variant.save(update_fields=["quantity"])
+                                _koda_sync_common_with_variants(product, purchase.warehouse)
                         if stock_changed:
                             services.register_entry(
                                 product=product,
@@ -2328,6 +2421,7 @@ def purchase_edit(request, purchase_id: int):
                 "descuento_total": purchase.discount_percent,
             }
         )
+        purchase_items = list(purchase.items.select_related("variant", "product"))
         initial = [
             {
                 "product": item.product,
@@ -2337,12 +2431,19 @@ def purchase_edit(request, purchase_id: int):
                 "supplier": purchase.supplier,
                 "vat_percent": item.vat_percent,
             }
-            for item in purchase.items.all()
+            for item in purchase_items
         ]
         formset = PurchaseItemFormSet(initial=initial)
         product_ids = {item["product"].id for item in initial}
         products_qs = _products_with_last_cost_queryset().filter(id__in=product_ids) if product_ids else Product.objects.none()
         _apply_product_queryset_to_formset(formset, products_qs)
+        item_rows = [
+            {"form": form, "variant_id": item.variant_id}
+            for form, item in zip(formset.forms, purchase_items)
+        ]
+    variant_data = {}
+    for row in ProductVariant.objects.values("id", "product_id", "name").order_by("name", "id"):
+        variant_data.setdefault(str(row["product_id"]), []).append({"id": row["id"], "name": row["name"]})
     return render(
         request,
         "inventory/purchase_edit.html",
@@ -2350,6 +2451,8 @@ def purchase_edit(request, purchase_id: int):
             "purchase": purchase,
             "form": header_form,
             "formset": formset,
+            "item_rows": item_rows if request.method != "POST" else None,
+            "variant_data": variant_data,
         },
     )
 
@@ -2739,14 +2842,58 @@ def stock_list(request):
             product.has_variants = False
         product.total_qty = product.comun_qty
     if ml_wh and show_history:
-        transfer_history = (
+        transfer_movements = (
             StockMovement.objects.filter(
                 movement_type=StockMovement.MovementType.TRANSFER,
                 to_warehouse=ml_wh,
             )
             .select_related("product", "user", "from_warehouse", "to_warehouse")
-            .order_by("-created_at", "-id")[:100]
+            .order_by("-created_at", "-id")[:200]
         )
+        grouped: dict[str, dict] = {}
+        for movement in transfer_movements:
+            local_date = timezone.localtime(movement.created_at).date()
+            key = local_date.isoformat()
+            group = grouped.get(key)
+            if not group:
+                group = {
+                    "date": local_date,
+                    "items": [],
+                    "total_qty": Decimal("0.00"),
+                    "users": set(),
+                    "origins": set(),
+                    "references": set(),
+                }
+                grouped[key] = group
+            group["items"].append(
+                {
+                    "sku": movement.product.sku,
+                    "name": movement.product.name,
+                    "quantity": movement.quantity,
+                    "origin": movement.from_warehouse.name if movement.from_warehouse else "",
+                    "user": movement.user.get_full_name() or movement.user.username,
+                    "reference": movement.reference,
+                }
+            )
+            group["total_qty"] += movement.quantity
+            group["users"].add(movement.user.get_full_name() or movement.user.username)
+            group["origins"].add(movement.from_warehouse.name if movement.from_warehouse else "")
+            group["references"].add(movement.reference or "")
+        transfer_history = []
+        for key, group in grouped.items():
+            users = sorted(u for u in group["users"] if u)
+            origins = sorted(o for o in group["origins"] if o)
+            references = sorted(r for r in group["references"] if r)
+            transfer_history.append(
+                {
+                    "date": group["date"],
+                    "items": group["items"],
+                    "total_qty": group["total_qty"],
+                    "user_label": users[0] if len(users) == 1 else "Varios",
+                    "origin_label": origins[0] if len(origins) == 1 else "Varios",
+                    "reference_label": references[0] if len(references) == 1 else "Varios",
+                }
+            )
     else:
         transfer_history = []
     return render(

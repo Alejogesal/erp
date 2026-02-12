@@ -184,24 +184,44 @@
             <thead>
                 <tr>
                     <th>Fecha</th>
-                    <th>SKU</th>
-                    <th>Producto</th>
-                    <th>Cantidad</th>
+                    <th>Detalle</th>
+                    <th>Cantidad total</th>
                     <th>Origen</th>
                     <th>Usuario</th>
                     <th>Referencia</th>
                 </tr>
             </thead>
             <tbody>
-                {% for movement in transfer_history %}
+                {% for group in transfer_history %}
                 <tr>
-                    <td>{{ movement.created_at|date:"d/m/Y H:i" }}</td>
-                    <td>{{ movement.product.sku }}</td>
-                    <td>{{ movement.product.name }}</td>
-                    <td>{{ movement.quantity|latam_number:2 }}</td>
-                    <td>{{ movement.from_warehouse.name|default:movement.from_warehouse.type }}</td>
-                    <td>{{ movement.user.get_full_name|default:movement.user.username }}</td>
-                    <td>{{ movement.reference }}</td>
+                    <td>{{ group.date|date:"d/m/Y" }}</td>
+                    <td>
+                        <details>
+                            <summary>{{ group.items|length }} productos</summary>
+                            <table style="margin-top:8px;">
+                                <thead>
+                                    <tr>
+                                        <th>SKU</th>
+                                        <th>Producto</th>
+                                        <th>Cantidad</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for item in group.items %}
+                                    <tr>
+                                        <td>{{ item.sku }}</td>
+                                        <td>{{ item.name }}</td>
+                                        <td>{{ item.quantity|latam_number:2 }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </details>
+                    </td>
+                    <td>{{ group.total_qty|latam_number:2 }}</td>
+                    <td>{{ group.origin_label }}</td>
+                    <td>{{ group.user_label }}</td>
+                    <td>{{ group.reference_label }}</td>
                 </tr>
                 {% endfor %}
             </tbody>

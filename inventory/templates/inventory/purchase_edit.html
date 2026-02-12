@@ -44,6 +44,7 @@
             <thead>
                 <tr>
                     <th>Producto</th>
+                    <th>Variedad</th>
                     <th>Proveedor</th>
                     <th>Cantidad</th>
                     <th>Costo unitario (con IVA)</th>
@@ -53,9 +54,38 @@
                 </tr>
             </thead>
             <tbody id="items-body">
+                {% if item_rows %}
+                {% for row in item_rows %}
+                <tr>
+                    <td>{{ row.form.product }}</td>
+                    <td>
+                        <select name="{{ row.form.prefix }}-variant_id" class="variant-select" data-selected="{{ row.variant_id|default_if_none:'' }}"></select>
+                    </td>
+                    <td>{{ row.form.supplier }}</td>
+                    <td>{{ row.form.quantity }}</td>
+                    <td>{{ row.form.unit_cost }}</td>
+                    <td>{{ row.form.discount_percent }}</td>
+                    <td class="vat-col">{{ row.form.vat_percent }}</td>
+                    <td>
+                        {% if formset.can_delete %}
+                        {{ row.form.DELETE }}
+                        <button type="button" class="pill delete-row" style="font-size:12px; padding:4px 8px;">Eliminar</button>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% if row.form.errors %}
+                <tr>
+                    <td colspan="8">{{ row.form.errors }}</td>
+                </tr>
+                {% endif %}
+                {% endfor %}
+                {% else %}
                 {% for item_form in formset.forms %}
                 <tr>
                     <td>{{ item_form.product }}</td>
+                    <td>
+                        <select name="{{ item_form.prefix }}-variant_id" class="variant-select" data-selected=""></select>
+                    </td>
                     <td>{{ item_form.supplier }}</td>
                     <td>{{ item_form.quantity }}</td>
                     <td>{{ item_form.unit_cost }}</td>
@@ -70,10 +100,11 @@
                 </tr>
                 {% if item_form.errors %}
                 <tr>
-                    <td colspan="7">{{ item_form.errors }}</td>
+                    <td colspan="8">{{ item_form.errors }}</td>
                 </tr>
                 {% endif %}
                 {% endfor %}
+                {% endif %}
             </tbody>
         </table>
         <button type="button" id="add-item">Agregar producto</button>
@@ -85,6 +116,7 @@
     <a class="pill" href="{% url 'inventory_purchase_receipt' purchase.id %}">Volver al comprobante</a>
 </div>
 
+{{ variant_data|json_script:"purchase-variant-data" }}
 <script>
     (function() {
         const addBtn = document.getElementById("add-item");
@@ -94,6 +126,8 @@
         const productSearchUrl = "{% url 'inventory_product_search' %}";
         const productInfoCache = new Map();
         const productSearchCache = new Map();
+        const variantDataNode = document.getElementById("purchase-variant-data");
+        const variantData = variantDataNode ? JSON.parse(variantDataNode.textContent) : {};
         if (!addBtn || !body || !totalForms) return;
 
         const parseNumber = (value) => {
@@ -215,6 +249,7 @@
                 updateBaseFromCurrent(row);
                 applyVatToCost(row);
             }
+            updateVariantSelect(row, productId);
         };
 
         const ensureSelectOption = (selectEl, productId, label) => {
@@ -371,10 +406,44 @@
             requestAnimationFrame(() => updateSearchFromSelect(selectEl));
         };
 
+        const updateVariantSelect = (row, productId) => {
+            const variantSelect = row?.querySelector("select[name$='-variant_id']");
+            if (!variantSelect) return;
+            const variants = variantData[String(productId || "")] || [];
+            variantSelect.innerHTML = "";
+            if (!variants.length) {
+                const option = document.createElement("option");
+                option.value = "";
+                option.textContent = "-";
+                variantSelect.appendChild(option);
+                variantSelect.disabled = true;
+                return;
+            }
+            const empty = document.createElement("option");
+            empty.value = "";
+            empty.textContent = "Seleccionar";
+            variantSelect.appendChild(empty);
+            variants.forEach((variant) => {
+                const option = document.createElement("option");
+                option.value = variant.id;
+                option.textContent = variant.name;
+                variantSelect.appendChild(option);
+            });
+            variantSelect.disabled = false;
+            const selected = variantSelect.dataset.selected || "";
+            if (selected) {
+                variantSelect.value = selected;
+            }
+        };
+
         document.querySelectorAll("select[name$='-product']").forEach(setupProductSearch);
         document.querySelectorAll("select[name$='-product']").forEach(applyProductDefaults);
         document.querySelectorAll("select[name$='-product']").forEach(updateSearchFromSelect);
-        document.querySelectorAll("#items-body tr").forEach(setupRow);
+        document.querySelectorAll("#items-body tr").forEach((row) => {
+            setupRow(row);
+            const productSelect = row.querySelector("select[name$='-product']");
+            updateVariantSelect(row, productSelect?.value || "");
+        });
         document.querySelectorAll("input[type='checkbox'][name$='-DELETE']").forEach((checkbox) => {
             checkbox.style.display = "none";
         });
@@ -387,6 +456,10 @@
 
             const tr = document.createElement("tr");
             const product = container.querySelector("[name$='-product']");
+            const variant = document.createElement("select");
+            variant.name = `form-${idx}-variant_id`;
+            variant.className = "variant-select";
+            variant.dataset.selected = "";
             const supplier = container.querySelector("[name$='-supplier']");
             const qty = container.querySelector("[name$='-quantity']");
             const cost = container.querySelector("[name$='-unit_cost']");
@@ -394,7 +467,7 @@
             const vat = container.querySelector("[name$='-vat_percent']");
             const deleteField = container.querySelector("[name$='-DELETE']");
 
-            [product, supplier, qty, cost, discount, vat].forEach(field => {
+            [product, variant, supplier, qty, cost, discount, vat].forEach(field => {
                 const td = document.createElement("td");
                 if (field) td.appendChild(field);
                 if (field && field.name?.includes("vat_percent")) td.classList.add("vat-col");
@@ -418,6 +491,7 @@
             body.appendChild(tr);
             setupProductSearch(tr.querySelector("select[name$='-product']"));
             setupRow(tr);
+            updateVariantSelect(tr, "");
             if (vatHidden) {
                 tr.querySelectorAll(".vat-col").forEach((col) => {
                     col.style.display = "none";
@@ -473,6 +547,7 @@
 
         const serializeRow = (row) => {
             const productSelect = row.querySelector("select[name$='-product']");
+            const variantSelect = row.querySelector("select[name$='-variant_id']");
             const supplierSelect = row.querySelector("select[name$='-supplier']");
             const qtyInput = row.querySelector("input[name$='-quantity']");
             const costInput = row.querySelector("input[name$='-unit_cost']");
@@ -483,6 +558,7 @@
                 product_id: resolveProductId(productSelect),
                 product_text: searchInput?.value || "",
                 product_search: searchInput?.value || "",
+                variant_id: variantSelect?.value || "",
                 supplier_id: supplierSelect?.value || "",
                 quantity: qtyInput?.value || "",
                 unit_cost: costInput?.value || "",
@@ -510,12 +586,16 @@
         const fillRow = (row, data) => {
             if (!data) return;
             const productSelect = row.querySelector("select[name$='-product']");
+            const variantSelect = row.querySelector("select[name$='-variant_id']");
             const supplierSelect = row.querySelector("select[name$='-supplier']");
             const qtyInput = row.querySelector("input[name$='-quantity']");
             const costInput = row.querySelector("input[name$='-unit_cost']");
             const discountInput = row.querySelector("input[name$='-discount_percent']");
             const vatInput = row.querySelector("input[name$='-vat_percent']");
             if (productSelect) {
+                if (variantSelect && data.variant_id) {
+                    variantSelect.dataset.selected = data.variant_id;
+                }
                 if (data.product_id) {
                     ensureSelectOption(productSelect, data.product_id, data.product_text || data.product_search);
                     updateSearchFromSelect(productSelect);
@@ -524,6 +604,7 @@
                 }
                 setSupplierIfAvailable(productSelect);
                 setCostIfAvailable(productSelect);
+                updateVariantSelect(row, productSelect.value);
             }
             if (supplierSelect && data.supplier_id) supplierSelect.value = data.supplier_id;
             if (qtyInput && data.quantity) qtyInput.value = data.quantity;
