@@ -100,10 +100,14 @@ class Product(models.Model):
 
     @property
     def barber_price(self) -> Decimal:
+        if self.price_barber and self.price_barber > 0:
+            return self.price_barber
         return self._price_with_margin(self.margin_barber)
 
     @property
     def distributor_price(self) -> Decimal:
+        if self.price_distributor and self.price_distributor > 0:
+            return self.price_distributor
         return self._price_with_margin(self.margin_distributor)
 
     def last_purchase_cost(self) -> Decimal:

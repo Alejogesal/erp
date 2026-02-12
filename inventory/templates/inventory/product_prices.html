@@ -76,14 +76,18 @@
                 <td>
                     <form method="post" action="{% url 'inventory_product_prices' %}" style="display:flex; gap:6px; align-items:center;">
                         {% csrf_token %}
-                        <input type="hidden" name="action" value="update_consumer_price">
+                        <input type="hidden" name="action" value="update_prices">
                         <input type="hidden" name="product_id" value="{{ product.id }}">
-                        <input name="price_consumer" value="{% if product.price_consumer and product.price_consumer > 0 %}{{ product.price_consumer|latam_number:2 }}{% endif %}" placeholder="{{ product.consumer_price|latam_number:2 }}" style="max-width:120px;">
+                        <input name="price_consumer" value="{% if product.price_consumer and product.price_consumer > 0 %}{{ product.price_consumer|latam_number:2 }}{% endif %}" placeholder="{{ product.consumer_price|latam_number:2 }}" style="max-width:110px;">
+                </td>
+                <td>
+                        <input name="price_barber" value="{% if product.price_barber and product.price_barber > 0 %}{{ product.price_barber|latam_number:2 }}{% endif %}" placeholder="{{ product.barber_price|latam_number:2 }}" style="max-width:110px;">
+                </td>
+                <td>
+                        <input name="price_distributor" value="{% if product.price_distributor and product.price_distributor > 0 %}{{ product.price_distributor|latam_number:2 }}{% endif %}" placeholder="{{ product.distributor_price|latam_number:2 }}" style="max-width:110px;">
                         <button type="submit">Guardar</button>
                     </form>
                 </td>
-                <td>{{ product.barber_price|latam_number:2 }}</td>
-                <td>{{ product.distributor_price|latam_number:2 }}</td>
                 <td>
                     <a class="pill" href="{% url 'inventory_edit_product' product.pk %}">Editar</a>
                     <form method="post" action="{% url 'inventory_product_delete' product.pk %}" style="display:inline;">
