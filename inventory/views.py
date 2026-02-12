@@ -250,6 +250,13 @@ class SaleHeaderForm(forms.Form):
 class SaleItemForm(forms.Form):
     product = forms.ModelChoiceField(queryset=Product.objects.all())
     quantity = forms.IntegerField(min_value=1)
+    discount_percent = forms.DecimalField(
+        label="DTO %",
+        min_value=Decimal("0.00"),
+        max_value=Decimal("100.00"),
+        decimal_places=2,
+        required=False,
+    )
     vat_percent = forms.DecimalField(
         label="IVA %",
         min_value=Decimal("0.00"),
@@ -778,21 +785,25 @@ def sale_edit(request, sale_id: int):
                             Customer.Audience.BARBER: data["product"].barber_price,
                             Customer.Audience.DISTRIBUTOR: data["product"].distributor_price,
                         }.get(audience, data["product"].consumer_price)
-                        discount = Decimal("0.00")
-                        if customer:
-                            discount_obj = CustomerProductDiscount.objects.filter(
-                                customer=customer, product=data["product"]
-                            ).first()
-                            if discount_obj:
-                                discount = discount_obj.discount_percent
-                            else:
-                                group_key = (data["product"].group or "").strip()
-                                if group_key:
-                                    group_discount = CustomerGroupDiscount.objects.filter(
-                                        customer=customer, group__iexact=group_key
-                                    ).first()
-                                    if group_discount:
-                                        discount = group_discount.discount_percent
+                        discount = data.get("discount_percent")
+                        if discount is None:
+                        discount = data.get("discount_percent")
+                        if discount is None:
+                            discount = Decimal("0.00")
+                            if customer:
+                                discount_obj = CustomerProductDiscount.objects.filter(
+                                    customer=customer, product=data["product"]
+                                ).first()
+                                if discount_obj:
+                                    discount = discount_obj.discount_percent
+                                else:
+                                    group_key = (data["product"].group or "").strip()
+                                    if group_key:
+                                        group_discount = CustomerGroupDiscount.objects.filter(
+                                            customer=customer, group__iexact=group_key
+                                        ).first()
+                                        if group_discount:
+                                            discount = group_discount.discount_percent
                         final_price = base_price * (Decimal("1.00") - discount / Decimal("100.00"))
                         qty = Decimal(data["quantity"])
                         line_total = (qty * final_price).quantize(Decimal("0.01"))
@@ -893,6 +904,7 @@ def sale_edit(request, sale_id: int):
             {
                 "product": item.product,
                 "quantity": int(item.quantity),
+                "discount_percent": item.discount_percent,
                 "vat_percent": item.vat_percent,
             }
             for item in items

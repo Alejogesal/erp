@@ -39,6 +39,7 @@
                     <th>Producto</th>
                     <th>Variedad</th>
                     <th>Cantidad</th>
+                    <th>DTO %</th>
                     <th>IVA %</th>
                 </tr>
             </thead>
@@ -50,11 +51,12 @@
                         <select name="{{ item_form.prefix }}-variant_id" class="variant-select" data-selected=""></select>
                     </td>
                     <td>{{ item_form.quantity }}</td>
+                    <td>{{ item_form.discount_percent }}</td>
                     <td>{{ item_form.vat_percent }}</td>
                 </tr>
                 {% if item_form.errors %}
                 <tr>
-                    <td colspan="5">{{ item_form.errors }}</td>
+                    <td colspan="6">{{ item_form.errors }}</td>
                 </tr>
                 {% endif %}
                 {% endfor %}
@@ -475,8 +477,9 @@
             variant.className = "variant-select";
             variant.dataset.selected = "";
             const qty = container.querySelector("[name$='-quantity']");
+            const discount = container.querySelector("[name$='-discount_percent']");
             const vat = container.querySelector("[name$='-vat_percent']");
-            [product, variant, qty, vat].forEach(field => {
+            [product, variant, qty, discount, vat].forEach(field => {
                 const td = document.createElement("td");
                 if (field) td.appendChild(field);
                 tr.appendChild(td);
