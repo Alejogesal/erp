@@ -81,9 +81,12 @@ def _products_with_last_cost_queryset():
 
 
 def _product_label_with_last_cost(obj: Product) -> str:
-    last_cost = getattr(obj, "last_purchase_cost_value", None)
-    if last_cost is None:
-        last_cost = obj.last_purchase_cost()
+    if getattr(obj, "is_kit", False):
+        last_cost = obj.cost_with_vat()
+    else:
+        last_cost = getattr(obj, "last_purchase_cost_value", None)
+        if last_cost is None:
+            last_cost = obj.last_purchase_cost()
     return f"{obj.sku or 'Sin SKU'} - {obj.name} (último costo: {last_cost:.2f})"
 
 
