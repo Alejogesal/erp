@@ -57,6 +57,11 @@
         <option value="{{ group }}"></option>
     {% endfor %}
 </datalist>
+<datalist id="kit-product-options">
+    {% for product in products_no_kits %}
+        <option value="{{ product.sku }} - {{ product.name }}" data-id="{{ product.id }}"></option>
+    {% endfor %}
+</datalist>
 
 <div class="card" style="margin-bottom:16px;">
     <div class="card-title">Crear kit</div>
@@ -254,22 +259,36 @@
         kitData.forEach((kit) => {
             kitMap[String(kit.id)] = kit;
         });
+        const labelById = {};
+        products.forEach((prod) => {
+            labelById[String(prod.id)] = prod.label;
+        });
+
+        const resolveProductIdFromLabel = (label) => {
+            const options = Array.from(document.querySelectorAll("#kit-product-options option"));
+            const lowered = (label || "").trim().toLowerCase();
+            if (!lowered) return "";
+            let match = options.find((opt) => (opt.value || "").toLowerCase() === lowered);
+            if (!match) {
+                match = options.find((opt) => (opt.value || "").toLowerCase().includes(lowered));
+            }
+            return match?.dataset?.id || "";
+        };
+
         const renderRow = (container, prefix = "") => {
             const row = document.createElement("div");
             row.style.display = "flex";
             row.style.gap = "8px";
             row.style.marginTop = "8px";
-            const select = document.createElement("select");
-            select.name = `${prefix}kit_component`;
-            const empty = document.createElement("option");
-            empty.value = "";
-            empty.textContent = "Producto";
-            select.appendChild(empty);
-            products.forEach((prod) => {
-                const opt = document.createElement("option");
-                opt.value = prod.id;
-                opt.textContent = prod.label;
-                select.appendChild(opt);
+            const hidden = document.createElement("input");
+            hidden.type = "hidden";
+            hidden.name = `${prefix}kit_component`;
+            const input = document.createElement("input");
+            input.placeholder = "Producto";
+            input.setAttribute("list", "kit-product-options");
+            input.addEventListener("input", () => {
+                const id = resolveProductIdFromLabel(input.value);
+                hidden.value = id;
             });
             const qty = document.createElement("input");
             qty.name = `${prefix}kit_quantity`;
@@ -278,11 +297,12 @@
             remove.type = "button";
             remove.textContent = "Quitar";
             remove.addEventListener("click", () => row.remove());
-            row.appendChild(select);
+            row.appendChild(hidden);
+            row.appendChild(input);
             row.appendChild(qty);
             row.appendChild(remove);
             container.appendChild(row);
-            return { select, qty, row };
+            return { input, hidden, qty, row };
         };
 
         const kitItems = document.getElementById("kit-items");
@@ -320,7 +340,9 @@
                     kitEditItems.innerHTML = "";
                     (kit.components || []).forEach((comp) => {
                         const row = renderRow(kitEditItems, "");
-                        row.select.value = String(comp.product_id || "");
+                        const label = labelById[String(comp.product_id || "")] || "";
+                        row.input.value = label;
+                        row.hidden.value = String(comp.product_id || "");
                         row.qty.value = comp.quantity || "";
                     });
                 }
