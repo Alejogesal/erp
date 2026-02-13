@@ -3886,6 +3886,9 @@ def product_prices(request):
             price_distributor = _parse_decimal(request.POST.get("kit_price_distributor"))
             margin_barber = _parse_decimal(request.POST.get("kit_margin_barber"))
             margin_consumer = _parse_decimal(request.POST.get("kit_margin_consumer"))
+            if margin_barber > Decimal("100.00") or margin_consumer > Decimal("100.00"):
+                messages.error(request, "Los márgenes deben ser porcentajes entre 0 y 100.")
+                return redirect("inventory_product_prices")
             component_ids = request.POST.getlist("kit_component")
             component_qtys = request.POST.getlist("kit_quantity")
             if not name:
