@@ -493,6 +493,11 @@
 
         const formEl = addBtn.closest("form");
         formEl?.addEventListener("submit", () => {
+            document.querySelectorAll("input[name$='-quantity'], input[name$='-discount_percent'], input[name$='-vat_percent']").forEach((input) => {
+                if (typeof input.value === "string" && input.value.includes(",")) {
+                    input.value = input.value.replace(",", ".");
+                }
+            });
             document.querySelectorAll("select[name$='-product']").forEach((selectEl) => {
                 if (typeof selectEl._syncSelection === "function") {
                     selectEl._syncSelection();
