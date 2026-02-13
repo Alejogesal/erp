@@ -806,6 +806,11 @@ def sale_edit(request, sale_id: int):
                                         ).first()
                                         if group_discount:
                                             discount = group_discount.discount_percent
+                        if discount < 0 or discount > 100:
+                            raise ValueError("Descuento por ítem inválido (0 a 100).")
+                        vat_value = data.get("vat_percent") or Decimal("0.00")
+                        if vat_value < 0 or vat_value > 100:
+                            raise ValueError("IVA % inválido (0 a 100).")
                         final_price = base_price * (Decimal("1.00") - discount / Decimal("100.00"))
                         qty = Decimal(data["quantity"])
                         line_total = (qty * final_price).quantize(Decimal("0.01"))
@@ -836,7 +841,7 @@ def sale_edit(request, sale_id: int):
                             discount_percent=discount,
                             final_unit_price=final_price,
                             line_total=line_total,
-                            vat_percent=data.get("vat_percent") or Decimal("0.00"),
+                            vat_percent=vat_value,
                         )
                         total += line_total
                         discount_total += discount_amount
@@ -850,7 +855,7 @@ def sale_edit(request, sale_id: int):
                                         user=request.user,
                                         reference=f"Venta kit {audience} #{sale.id}",
                                         sale_price=final_price,
-                                        vat_percent=data.get("vat_percent") or Decimal("0.00"),
+                                        vat_percent=vat_value,
                                         sale=sale,
                                     )
                             else:
@@ -1590,6 +1595,11 @@ def sales_list(request):
                                         ).first()
                                         if group_discount:
                                             discount = group_discount.discount_percent
+                            if discount < 0 or discount > 100:
+                                raise ValueError("Descuento por ítem inválido (0 a 100).")
+                            vat_value = data.get("vat_percent") or Decimal("0.00")
+                            if vat_value < 0 or vat_value > 100:
+                                raise ValueError("IVA % inválido (0 a 100).")
                             final_price = base_price * (Decimal("1.00") - discount / Decimal("100.00"))
                             qty = Decimal(data["quantity"])
                             line_total = (qty * final_price).quantize(Decimal("0.01"))
@@ -1620,7 +1630,7 @@ def sales_list(request):
                                 discount_percent=discount,
                                 final_unit_price=final_price,
                                 line_total=line_total,
-                                vat_percent=data.get("vat_percent") or Decimal("0.00"),
+                                vat_percent=vat_value,
                             )
                             total += line_total
                             discount_total += discount_amount
@@ -1634,7 +1644,7 @@ def sales_list(request):
                                             user=request.user,
                                             reference=f"Venta kit {audience} #{sale.id}",
                                             sale_price=final_price,
-                                            vat_percent=data.get("vat_percent") or Decimal("0.00"),
+                                            vat_percent=vat_value,
                                             sale=sale,
                                         )
                                 else:
@@ -1645,7 +1655,7 @@ def sales_list(request):
                                         user=request.user,
                                         reference=f"Venta {audience} #{sale.id}",
                                         sale_price=final_price,
-                                        vat_percent=data.get("vat_percent") or Decimal("0.00"),
+                                        vat_percent=vat_value,
                                         sale=sale,
                                     )
                         gross_total = (
@@ -2123,7 +2133,7 @@ def purchases_list(request):
                             quantity=qty,
                             unit_cost=unit_cost,
                             discount_percent=discount_percent,
-                            vat_percent=data.get("vat_percent") or Decimal("0.00"),
+                                        vat_percent=vat_value,
                         )
                         if warehouse.type == Warehouse.WarehouseType.COMUN and data.get("variant") is not None:
                             variant = (
