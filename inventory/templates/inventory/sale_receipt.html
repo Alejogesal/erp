@@ -10,6 +10,9 @@
     .page { max-width: 100% !important; margin: 0; padding: 0 !important; display: block !important; }
     .main { width: 100% !important; }
     .actions, .messages { display: none !important; }
+    .invoice-wrapper { display: block !important; }
+    .invoice-body { margin-bottom: 8px; }
+    .totals { margin-top: 12px !important; }
 </style>
 {% endif %}
 <style>
@@ -40,11 +43,16 @@
     table.invoice-table th, table.invoice-table td { border-bottom: 1px solid #000; padding: 6px 4px; }
     table.invoice-table th { text-align: left; font-size: 11px; text-transform: uppercase; }
     table.invoice-table td.num { text-align: right; }
+    table.invoice-table { page-break-inside: auto; }
+    table.invoice-table thead { display: table-header-group; }
+    table.invoice-table tfoot { display: table-footer-group; }
+    table.invoice-table tr { page-break-inside: avoid; break-inside: avoid; }
     .totals { margin-top: 10px; font-size: 13px; }
     .totals-row { display: grid; grid-template-columns: 1fr 1fr 1fr; }
     .totals-row div { text-align: right; padding: 4px 0; }
     .totals-row .label { text-align: left; }
     .right { text-align: right; }
+    .totals { page-break-inside: avoid; break-inside: avoid; }
 </style>
 
 <div class="invoice-wrapper">
