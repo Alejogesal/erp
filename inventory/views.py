@@ -260,6 +260,7 @@ class SaleItemForm(forms.Form):
         max_value=Decimal("100.00"),
         decimal_places=2,
         required=False,
+        initial=Decimal("0.00"),
     )
     vat_percent = forms.DecimalField(
         label="IVA %",
