@@ -702,7 +702,28 @@ def sale_edit(request, sale_id: int):
                 items.append({**form.cleaned_data, "variant": variant})
             if any(form.errors for form in formset):
                 messages.error(request, "Revisá los campos de la venta.")
-                return redirect("inventory_sale_edit", sale_id=sale.id)
+                item_rows = [
+                    {
+                        "form": form,
+                        "variant_id": (post_data.get(f"{form.prefix}-variant_id") or "").strip(),
+                    }
+                    for form in formset.forms
+                ]
+                variant_data = {}
+                for row in ProductVariant.objects.values("id", "product_id", "name").order_by("name", "id"):
+                    variant_data.setdefault(str(row["product_id"]), []).append({"id": row["id"], "name": row["name"]})
+                return render(
+                    request,
+                    "inventory/sale_edit.html",
+                    {
+                        "sale": sale,
+                        "form": header_form,
+                        "formset": formset,
+                        "item_rows": item_rows,
+                        "customer_audiences": customer_audiences,
+                        "variant_data": variant_data,
+                    },
+                )
             if not items:
                 messages.error(request, "Agregá al menos un producto.")
                 return redirect("inventory_sale_edit", sale_id=sale.id)
@@ -892,6 +913,28 @@ def sale_edit(request, sale_id: int):
                 messages.error(request, f"No se pudo actualizar la venta: {exc}")
         else:
             messages.error(request, "Revisá los campos de la venta.")
+            item_rows = [
+                {
+                    "form": form,
+                    "variant_id": (post_data.get(f"{form.prefix}-variant_id") or "").strip(),
+                }
+                for form in formset.forms
+            ]
+            variant_data = {}
+            for row in ProductVariant.objects.values("id", "product_id", "name").order_by("name", "id"):
+                variant_data.setdefault(str(row["product_id"]), []).append({"id": row["id"], "name": row["name"]})
+            return render(
+                request,
+                "inventory/sale_edit.html",
+                {
+                    "sale": sale,
+                    "form": header_form,
+                    "formset": formset,
+                    "item_rows": item_rows,
+                    "customer_audiences": customer_audiences,
+                    "variant_data": variant_data,
+                },
+            )
         return redirect("inventory_sale_edit", sale_id=sale.id)
     else:
         items_for_discount = list(sale.items.all())
@@ -948,7 +991,7 @@ def sale_edit(request, sale_id: int):
             "sale": sale,
             "form": header_form,
             "formset": formset,
-            "item_rows": item_rows if request.method != "POST" else None,
+            "item_rows": item_rows,
             "customer_audiences": customer_audiences,
             "variant_data": variant_data,
         },
