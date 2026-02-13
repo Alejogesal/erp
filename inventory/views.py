@@ -17,6 +17,7 @@ from django.forms import formset_factory
 from django.core.paginator import Paginator
 from django.http import HttpResponse, JsonResponse
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 import csv
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
@@ -5156,7 +5157,14 @@ def mercadolibre_dashboard(request):
                     site_id = (getattr(settings, "ML_SITE_ID", "") or "MLA").upper()
                     item_id = f"{site_id}{item_id}"
                 try:
-                    item = ml.get_item(item_id, connection.access_token)
+                    access_token = ml.get_valid_access_token(connection)
+                    if not access_token:
+                        messages.error(
+                            request,
+                            "No hay token válido de MercadoLibre. Volvé a conectar la cuenta.",
+                        )
+                        return redirect("inventory_mercadolibre_dashboard")
+                    item = ml._call_with_refresh(connection, ml.get_item, item_id, access_token=access_token)
                     title = item.get("title", "") or ""
                     available = int(item.get("available_quantity", 0) or 0)
                     status = item.get("status", "") or ""
@@ -5179,6 +5187,14 @@ def mercadolibre_dashboard(request):
                         },
                     )
                     messages.success(request, "Publicación sincronizada.")
+                except HTTPError as exc:
+                    if exc.code == 401:
+                        messages.error(
+                            request,
+                            "MercadoLibre rechazó el token. Volvé a conectar la cuenta para actualizar el acceso.",
+                        )
+                    else:
+                        messages.error(request, f"No se pudo sincronizar: HTTP {exc.code}")
                 except Exception as exc:
                     messages.error(request, f"No se pudo sincronizar: {exc}")
         elif action == "link_item":
