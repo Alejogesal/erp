@@ -463,6 +463,9 @@
         document.querySelectorAll("select[name$='-product']").forEach(setupProductSearch);
         document.querySelectorAll("select[name$='-product']").forEach(updateVariantSelect);
         document.querySelectorAll("select[name$='-variant_id']").forEach((selectEl) => {
+            if (selectEl.value) {
+                selectEl.dataset.selected = selectEl.value;
+            }
             selectEl.addEventListener("change", () => {
                 selectEl.dataset.selected = selectEl.value || "";
             });
@@ -488,6 +491,9 @@
                 if (field) td.appendChild(field);
                 tr.appendChild(td);
             });
+            variant.addEventListener("change", () => {
+                variant.dataset.selected = variant.value || "";
+            });
 
             totalForms.value = idx + 1;
             body.appendChild(tr);
@@ -506,7 +512,6 @@
                 if (typeof selectEl._syncSelection === "function") {
                     selectEl._syncSelection();
                 }
-                updateVariantSelect(selectEl);
             });
             const rows = Array.from(body.querySelectorAll("tr"));
             let total = parseInt(totalForms.value, 10);
