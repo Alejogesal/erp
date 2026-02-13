@@ -590,6 +590,22 @@ def sale_receipt_pdf(request, sale_id: int):
     commission_total = sale.ml_commission_total or Decimal("0.00")
     tax_total = sale.ml_tax_total or Decimal("0.00")
     net_total = (total_display - commission_total - tax_total) if is_ml else None
+    full_page_size = 27
+    last_page_size = 20
+    pages = []
+    remaining = list(items)
+    while len(remaining) > full_page_size + last_page_size:
+        pages.append({"items": remaining[:full_page_size]})
+        remaining = remaining[full_page_size:]
+    if len(remaining) > last_page_size:
+        split_size = len(remaining) - last_page_size
+        pages.append({"items": remaining[:split_size]})
+        remaining = remaining[split_size:]
+    pages.append({"items": remaining})
+    for idx, page in enumerate(pages):
+        page["show_totals"] = idx == len(pages) - 1
+        page["page_number"] = idx + 1
+        page["page_count"] = len(pages)
     from django.template.loader import render_to_string
 
     html = render_to_string(
@@ -597,6 +613,7 @@ def sale_receipt_pdf(request, sale_id: int):
         {
             "sale": sale,
             "items": items,
+            "pages": pages,
             "subtotal": subtotal_display,
             "discount_total": discount_total,
             "extra_discount_percent": extra_discount_percent,
