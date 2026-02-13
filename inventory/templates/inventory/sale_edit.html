@@ -147,6 +147,7 @@
                 variantSelect.disabled = true;
                 return;
             }
+            const currentValue = variantSelect.value;
             const empty = document.createElement("option");
             empty.value = "";
             empty.textContent = "Seleccioná variedad";
@@ -158,10 +159,8 @@
                 variantSelect.appendChild(option);
             });
             variantSelect.disabled = false;
-            const selected = variantSelect.dataset.selected || "";
-            if (selected) {
-                variantSelect.value = selected;
-            }
+            const selected = variantSelect.dataset.selected || currentValue || "";
+            if (selected) variantSelect.value = selected;
         };
 
         const updateSearchFromSelect = (selectEl) => {
@@ -239,6 +238,11 @@
 
         document.querySelectorAll("select[name$='-product']").forEach(setupProductSearch);
         document.querySelectorAll("select[name$='-product']").forEach(updateVariantSelect);
+        document.querySelectorAll("select[name$='-variant_id']").forEach((selectEl) => {
+            selectEl.addEventListener("change", () => {
+                selectEl.dataset.selected = selectEl.value || "";
+            });
+        });
 
         addBtn.addEventListener("click", () => {
             const idx = parseInt(totalForms.value, 10);
