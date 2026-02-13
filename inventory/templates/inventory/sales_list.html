@@ -502,6 +502,7 @@
                 if (typeof selectEl._syncSelection === "function") {
                     selectEl._syncSelection();
                 }
+                updateVariantSelect(selectEl);
             });
             const rows = Array.from(body.querySelectorAll("tr"));
             let total = parseInt(totalForms.value, 10);
