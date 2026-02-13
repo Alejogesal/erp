@@ -33,7 +33,7 @@
     .invoice-body { flex: 1 1 auto; }
     .totals { margin-top: auto; }
     {% endif %}
-    .invoice-header { display: grid; grid-template-columns: 1fr 2fr; align-items: center; gap: 12px; }
+    .invoice-header { display: grid; grid-template-columns: 1fr 2fr; align-items: center; gap: 12px; margin-bottom: 12px; }
     .invoice-logo { text-align: center; border: 2px solid #000; padding: 16px; font-size: 28px; font-weight: 700; }
     .invoice-meta { font-size: 14px; line-height: 1.4; }
     .invoice-meta h2 { margin: 0 0 6px; font-size: 20px; }
@@ -47,12 +47,10 @@
     table.invoice-table thead { display: table-header-group; }
     table.invoice-table tfoot { display: table-footer-group; }
     table.invoice-table tr { page-break-inside: avoid; break-inside: avoid; }
-    .totals { margin-top: 10px; font-size: 13px; }
-    .totals-row { display: grid; grid-template-columns: 1fr 1fr 1fr; }
-    .totals-row div { text-align: right; padding: 4px 0; }
-    .totals-row .label { text-align: left; }
+    .totals-row td { border-bottom: none; padding: 4px 4px; }
+    .totals-label { text-align: right; font-weight: 600; }
+    .totals-amount { text-align: right; font-weight: 600; }
     .right { text-align: right; }
-    .totals { page-break-inside: avoid; break-inside: avoid; }
 </style>
 
 <div class="invoice-wrapper">
@@ -106,44 +104,37 @@
             </tr>
             {% endfor %}
         </tbody>
+        <tfoot>
+            <tr class="totals-row">
+                <td colspan="4" class="totals-label">Subtotal</td>
+                <td class="totals-amount">${{ subtotal|latam_number:2 }}</td>
+            </tr>
+            <tr class="totals-row">
+                <td colspan="4" class="totals-label">Descuento</td>
+                <td class="totals-amount">${{ discount_total|latam_number:2 }}</td>
+            </tr>
+            {% if is_ml %}
+            <tr class="totals-row">
+                <td colspan="4" class="totals-label">Comisión ML</td>
+                <td class="totals-amount">${{ commission_total|latam_number:2 }}</td>
+            </tr>
+            <tr class="totals-row">
+                <td colspan="4" class="totals-label">Impuestos ML</td>
+                <td class="totals-amount">${{ tax_total|latam_number:2 }}</td>
+            </tr>
+            {% endif %}
+            <tr class="totals-row">
+                <td colspan="4" class="totals-label">Total</td>
+                <td class="totals-amount">${{ total|latam_number:2 }}</td>
+            </tr>
+            {% if is_ml %}
+            <tr class="totals-row">
+                <td colspan="4" class="totals-label">Neto ML</td>
+                <td class="totals-amount">${{ net_total|latam_number:2 }}</td>
+            </tr>
+            {% endif %}
+        </tfoot>
     </table>
-    </div>
-
-    <div class="totals" style="border-top:1px solid #000; padding-top:8px; margin-top:12px;">
-        <div class="totals-row">
-            <div class="label">Subtotal</div>
-            <div></div>
-            <div>${{ subtotal|latam_number:2 }}</div>
-        </div>
-        <div class="totals-row">
-            <div class="label">Descuento</div>
-            <div></div>
-            <div>${{ discount_total|latam_number:2 }}</div>
-        </div>
-        {% if is_ml %}
-        <div class="totals-row">
-            <div class="label">Comisión ML</div>
-            <div></div>
-            <div>${{ commission_total|latam_number:2 }}</div>
-        </div>
-        <div class="totals-row">
-            <div class="label">Impuestos ML</div>
-            <div></div>
-            <div>${{ tax_total|latam_number:2 }}</div>
-        </div>
-        {% endif %}
-        <div class="totals-row" style="font-weight:700;">
-            <div class="label">Total</div>
-            <div></div>
-            <div>${{ total|latam_number:2 }}</div>
-        </div>
-        {% if is_ml %}
-        <div class="totals-row" style="font-weight:700;">
-            <div class="label">Neto ML</div>
-            <div></div>
-            <div>${{ net_total|latam_number:2 }}</div>
-        </div>
-        {% endif %}
     </div>
 </div>
 
