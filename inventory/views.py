@@ -825,8 +825,6 @@ def sale_edit(request, sale_id: int):
                                 .first()
                             )
                             if variant:
-                                if variant.quantity - qty < 0:
-                                    raise services.NegativeStockError("Stock insuficiente en variedad.")
                                 variant.quantity = (variant.quantity - qty).quantize(Decimal("0.01"))
                                 variant.save(update_fields=["quantity"])
                                 if comun_wh:
@@ -858,6 +856,7 @@ def sale_edit(request, sale_id: int):
                                         sale_price=final_price,
                                         vat_percent=vat_value,
                                         sale=sale,
+                                        allow_negative=True,
                                     )
                             else:
                                 services.register_exit(
@@ -867,8 +866,9 @@ def sale_edit(request, sale_id: int):
                                     user=request.user,
                                     reference=f"Venta {audience} #{sale.id}",
                                     sale_price=final_price,
-                                    vat_percent=data.get("vat_percent") or Decimal("0.00"),
+                                    vat_percent=vat_value,
                                     sale=sale,
+                                    allow_negative=True,
                                 )
                     gross_total = (
                         total_venta
@@ -1614,8 +1614,6 @@ def sales_list(request):
                                     .first()
                                 )
                                 if variant:
-                                    if variant.quantity - qty < 0:
-                                        raise services.NegativeStockError("Stock insuficiente en variedad.")
                                     variant.quantity = (variant.quantity - qty).quantize(Decimal("0.01"))
                                     variant.save(update_fields=["quantity"])
                                     if comun_wh:
@@ -1647,6 +1645,7 @@ def sales_list(request):
                                             sale_price=final_price,
                                             vat_percent=vat_value,
                                             sale=sale,
+                                            allow_negative=True,
                                         )
                                 else:
                                     services.register_exit(
@@ -1658,6 +1657,7 @@ def sales_list(request):
                                         sale_price=final_price,
                                         vat_percent=vat_value,
                                         sale=sale,
+                                        allow_negative=True,
                                     )
                         gross_total = (
                             total_venta
