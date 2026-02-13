@@ -52,6 +52,96 @@
     <a class="pill price-download" data-base-href="{% url 'inventory_product_prices_download' 'distributor' %}" href="{% url 'inventory_product_prices_download' 'distributor' %}">Descargar distribuidores</a>
 </div>
 
+<datalist id="group-options">
+    {% for group in group_options %}
+        <option value="{{ group }}"></option>
+    {% endfor %}
+</datalist>
+
+<div class="card" style="margin-bottom:16px;">
+    <div class="card-title">Crear kit</div>
+    <form method="post" action="{% url 'inventory_product_prices' %}">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="create_kit">
+        <div class="product-form-grid">
+            <div class="full">
+                <label for="kit-name">Nombre</label>
+                <input id="kit-name" name="kit_name" required>
+            </div>
+            <div>
+                <label for="kit-sku">SKU (opcional)</label>
+                <input id="kit-sku" name="kit_sku">
+            </div>
+            <div>
+                <label for="kit-group">Marca / Grupo</label>
+                <input id="kit-group" name="kit_group" list="group-options">
+            </div>
+            <div>
+                <label for="kit-price-dist">Precio distribuidor (fijo)</label>
+                <input id="kit-price-dist" name="kit_price_distributor" placeholder="0,00">
+            </div>
+            <div>
+                <label for="kit-margin-barber">Margen barberías %</label>
+                <input id="kit-margin-barber" name="kit_margin_barber" placeholder="0,00">
+            </div>
+            <div>
+                <label for="kit-margin-consumer">Margen consumidor %</label>
+                <input id="kit-margin-consumer" name="kit_margin_consumer" placeholder="0,00">
+            </div>
+        </div>
+        <div id="kit-items"></div>
+        <button type="button" id="kit-add-item">Agregar producto al kit</button>
+        <button type="submit">Guardar kit</button>
+    </form>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+    <div class="card-title">Editar kit</div>
+    <form method="post" action="{% url 'inventory_product_prices' %}">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="update_kit">
+        <div class="product-form-grid">
+            <div class="full">
+                <label for="kit-edit-id">Kit</label>
+                <select id="kit-edit-id" name="kit_id">
+                    <option value="">Seleccionar kit</option>
+                    {% for kit in kits %}
+                        <option value="{{ kit.id }}">{{ kit.sku }} - {{ kit.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="full">
+                <label for="kit-edit-name">Nombre</label>
+                <input id="kit-edit-name" name="kit_name">
+            </div>
+            <div>
+                <label for="kit-edit-sku">SKU (opcional)</label>
+                <input id="kit-edit-sku" name="kit_sku">
+            </div>
+            <div>
+                <label for="kit-edit-group">Marca / Grupo</label>
+                <input id="kit-edit-group" name="kit_group" list="group-options">
+            </div>
+            <div>
+                <label for="kit-edit-price-dist">Precio distribuidor (fijo)</label>
+                <input id="kit-edit-price-dist" name="kit_price_distributor" placeholder="0,00">
+            </div>
+            <div>
+                <label for="kit-edit-margin-barber">Margen barberías %</label>
+                <input id="kit-edit-margin-barber" name="kit_margin_barber" placeholder="0,00">
+            </div>
+            <div>
+                <label for="kit-edit-margin-consumer">Margen consumidor %</label>
+                <input id="kit-edit-margin-consumer" name="kit_margin_consumer" placeholder="0,00">
+            </div>
+        </div>
+        <div id="kit-edit-items"></div>
+        <button type="button" id="kit-edit-add-item">Agregar producto al kit</button>
+        <button type="submit">Guardar cambios</button>
+    </form>
+</div>
+
+{{ kit_data|json_script:"kit-data" }}
 <div class="card table-card">
     <div class="card-title">Precios por producto</div>
     <div class="price-filter">
@@ -150,6 +240,92 @@
         filterInput.addEventListener("change", updateDownloads);
         filterInput.addEventListener("blur", updateDownloads);
         updateDownloads();
+    })();
+
+    (function() {
+        const products = [
+            {% for product in products_no_kits %}
+            { id: "{{ product.id }}", label: "{{ product.sku }} - {{ product.name }}" },
+            {% endfor %}
+        ];
+        const kitDataNode = document.getElementById("kit-data");
+        const kitData = kitDataNode ? JSON.parse(kitDataNode.textContent) : [];
+        const kitMap = {};
+        kitData.forEach((kit) => {
+            kitMap[String(kit.id)] = kit;
+        });
+        const renderRow = (container, prefix = "") => {
+            const row = document.createElement("div");
+            row.style.display = "flex";
+            row.style.gap = "8px";
+            row.style.marginTop = "8px";
+            const select = document.createElement("select");
+            select.name = `${prefix}kit_component`;
+            const empty = document.createElement("option");
+            empty.value = "";
+            empty.textContent = "Producto";
+            select.appendChild(empty);
+            products.forEach((prod) => {
+                const opt = document.createElement("option");
+                opt.value = prod.id;
+                opt.textContent = prod.label;
+                select.appendChild(opt);
+            });
+            const qty = document.createElement("input");
+            qty.name = `${prefix}kit_quantity`;
+            qty.placeholder = "Cantidad";
+            const remove = document.createElement("button");
+            remove.type = "button";
+            remove.textContent = "Quitar";
+            remove.addEventListener("click", () => row.remove());
+            row.appendChild(select);
+            row.appendChild(qty);
+            row.appendChild(remove);
+            container.appendChild(row);
+            return { select, qty, row };
+        };
+
+        const kitItems = document.getElementById("kit-items");
+        const kitAdd = document.getElementById("kit-add-item");
+        if (kitItems && kitAdd) {
+            kitAdd.addEventListener("click", () => renderRow(kitItems, ""));
+            renderRow(kitItems, "");
+            renderRow(kitItems, "");
+        }
+
+        const kitEditItems = document.getElementById("kit-edit-items");
+        const kitEditAdd = document.getElementById("kit-edit-add-item");
+        if (kitEditItems && kitEditAdd) {
+            kitEditAdd.addEventListener("click", () => renderRow(kitEditItems, ""));
+        }
+
+        const kitEditSelect = document.getElementById("kit-edit-id");
+        const kitEditName = document.getElementById("kit-edit-name");
+        const kitEditSku = document.getElementById("kit-edit-sku");
+        const kitEditGroup = document.getElementById("kit-edit-group");
+        const kitEditPrice = document.getElementById("kit-edit-price-dist");
+        const kitEditMarginBarber = document.getElementById("kit-edit-margin-barber");
+        const kitEditMarginConsumer = document.getElementById("kit-edit-margin-consumer");
+        if (kitEditSelect) {
+            kitEditSelect.addEventListener("change", () => {
+                const kit = kitMap[kitEditSelect.value];
+                if (!kit) return;
+                if (kitEditName) kitEditName.value = kit.name || "";
+                if (kitEditSku) kitEditSku.value = kit.sku || "";
+                if (kitEditGroup) kitEditGroup.value = kit.group || "";
+                if (kitEditPrice) kitEditPrice.value = kit.price_distributor || "";
+                if (kitEditMarginBarber) kitEditMarginBarber.value = kit.margin_barber || "";
+                if (kitEditMarginConsumer) kitEditMarginConsumer.value = kit.margin_consumer || "";
+                if (kitEditItems) {
+                    kitEditItems.innerHTML = "";
+                    (kit.components || []).forEach((comp) => {
+                        const row = renderRow(kitEditItems, "");
+                        row.select.value = String(comp.product_id || "");
+                        row.qty.value = comp.quantity || "";
+                    });
+                }
+            });
+        }
     })();
 </script>
 {% endblock %}

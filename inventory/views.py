@@ -45,6 +45,7 @@ from .models import (
     MercadoLibreItem,
     Product,
     ProductVariant,
+    KitComponent,
     Purchase,
     PurchaseItem,
     Stock,
@@ -808,7 +809,7 @@ def sale_edit(request, sale_id: int):
                         discount_amount = (qty * (base_price - final_price)).quantize(Decimal("0.01"))
                         base_subtotal += (qty * base_price).quantize(Decimal("0.01"))
                         variant = data.get("variant")
-                        if warehouse.type == Warehouse.WarehouseType.COMUN and variant:
+                        if warehouse.type == Warehouse.WarehouseType.COMUN and variant and not data["product"].is_kit:
                             variant = (
                                 ProductVariant.objects.select_for_update()
                                 .filter(id=variant.id, product=data["product"])
@@ -821,13 +822,14 @@ def sale_edit(request, sale_id: int):
                                 variant.save(update_fields=["quantity"])
                                 if comun_wh:
                                     _koda_sync_common_with_variants(data["product"], comun_wh)
+                        kit_cost = data["product"].cost_with_vat() if data["product"].is_kit else data["product"].last_purchase_cost()
                         SaleItem.objects.create(
                             sale=sale,
                             product=data["product"],
                             variant=variant,
                             quantity=qty,
                             unit_price=base_price,
-                            cost_unit=data["product"].last_purchase_cost(),
+                            cost_unit=kit_cost,
                             discount_percent=discount,
                             final_unit_price=final_price,
                             line_total=line_total,
@@ -836,16 +838,29 @@ def sale_edit(request, sale_id: int):
                         total += line_total
                         discount_total += discount_amount
                         if warehouse.type != Warehouse.WarehouseType.MERCADOLIBRE:
-                            services.register_exit(
-                                product=data["product"],
-                                warehouse=warehouse,
-                                quantity=data["quantity"],
-                                user=request.user,
-                                reference=f"Venta {audience} #{sale.id}",
-                                sale_price=final_price,
-                                vat_percent=data.get("vat_percent") or Decimal("0.00"),
-                                sale=sale,
-                            )
+                            if data["product"].is_kit:
+                                for component in KitComponent.objects.select_related("component").filter(kit=data["product"]):
+                                    services.register_exit(
+                                        product=component.component,
+                                        warehouse=warehouse,
+                                        quantity=(qty * component.quantity),
+                                        user=request.user,
+                                        reference=f"Venta kit {audience} #{sale.id}",
+                                        sale_price=final_price,
+                                        vat_percent=data.get("vat_percent") or Decimal("0.00"),
+                                        sale=sale,
+                                    )
+                            else:
+                                services.register_exit(
+                                    product=data["product"],
+                                    warehouse=warehouse,
+                                    quantity=data["quantity"],
+                                    user=request.user,
+                                    reference=f"Venta {audience} #{sale.id}",
+                                    sale_price=final_price,
+                                    vat_percent=data.get("vat_percent") or Decimal("0.00"),
+                                    sale=sale,
+                                )
                     gross_total = (
                         total_venta
                         if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE and total_venta is not None
@@ -1578,7 +1593,7 @@ def sales_list(request):
                             discount_amount = (qty * (base_price - final_price)).quantize(Decimal("0.01"))
                             base_subtotal += (qty * base_price).quantize(Decimal("0.01"))
                             variant = data.get("variant")
-                            if warehouse.type == Warehouse.WarehouseType.COMUN and variant:
+                            if warehouse.type == Warehouse.WarehouseType.COMUN and variant and not data["product"].is_kit:
                                 variant = (
                                     ProductVariant.objects.select_for_update()
                                     .filter(id=variant.id, product=data["product"])
@@ -1591,13 +1606,14 @@ def sales_list(request):
                                     variant.save(update_fields=["quantity"])
                                     if comun_wh:
                                         _koda_sync_common_with_variants(data["product"], comun_wh)
+                            kit_cost = data["product"].cost_with_vat() if data["product"].is_kit else data["product"].last_purchase_cost()
                             SaleItem.objects.create(
                                 sale=sale,
                                 product=data["product"],
                                 variant=variant,
                                 quantity=qty,
                                 unit_price=base_price,
-                                cost_unit=data["product"].last_purchase_cost(),
+                                cost_unit=kit_cost,
                                 discount_percent=discount,
                                 final_unit_price=final_price,
                                 line_total=line_total,
@@ -1606,16 +1622,29 @@ def sales_list(request):
                             total += line_total
                             discount_total += discount_amount
                             if warehouse.type != Warehouse.WarehouseType.MERCADOLIBRE:
-                                services.register_exit(
-                                    product=data["product"],
-                                    warehouse=warehouse,
-                                    quantity=data["quantity"],
-                                    user=request.user,
-                                    reference=f"Venta {audience} #{sale.id}",
-                                    sale_price=final_price,
-                                    vat_percent=data.get("vat_percent") or Decimal("0.00"),
-                                    sale=sale,
-                                )
+                                if data["product"].is_kit:
+                                    for component in KitComponent.objects.select_related("component").filter(kit=data["product"]):
+                                        services.register_exit(
+                                            product=component.component,
+                                            warehouse=warehouse,
+                                            quantity=(qty * component.quantity),
+                                            user=request.user,
+                                            reference=f"Venta kit {audience} #{sale.id}",
+                                            sale_price=final_price,
+                                            vat_percent=data.get("vat_percent") or Decimal("0.00"),
+                                            sale=sale,
+                                        )
+                                else:
+                                    services.register_exit(
+                                        product=data["product"],
+                                        warehouse=warehouse,
+                                        quantity=data["quantity"],
+                                        user=request.user,
+                                        reference=f"Venta {audience} #{sale.id}",
+                                        sale_price=final_price,
+                                        vat_percent=data.get("vat_percent") or Decimal("0.00"),
+                                        sale=sale,
+                                    )
                         gross_total = (
                             total_venta
                             if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE and total_venta is not None
@@ -3849,7 +3878,86 @@ def product_prices(request):
             product.save(update_fields=["price_consumer", "price_barber", "price_distributor"])
             messages.success(request, "Precios actualizados.")
             return redirect("inventory_product_prices")
+        if action in {"create_kit", "update_kit"}:
+            kit_id = request.POST.get("kit_id") if action == "update_kit" else None
+            name = (request.POST.get("kit_name") or "").strip()
+            sku = (request.POST.get("kit_sku") or "").strip()
+            group = (request.POST.get("kit_group") or "").strip()
+            price_distributor = _parse_decimal(request.POST.get("kit_price_distributor"))
+            margin_barber = _parse_decimal(request.POST.get("kit_margin_barber"))
+            margin_consumer = _parse_decimal(request.POST.get("kit_margin_consumer"))
+            component_ids = request.POST.getlist("kit_component")
+            component_qtys = request.POST.getlist("kit_quantity")
+            if not name:
+                messages.error(request, "Ingresá el nombre del kit.")
+                return redirect("inventory_product_prices")
+            if len(component_ids) < 2:
+                messages.error(request, "Agregá al menos 2 productos al kit.")
+                return redirect("inventory_product_prices")
+            components: list[tuple[Product, Decimal]] = []
+            for product_id, qty_raw in zip(component_ids, component_qtys):
+                if not product_id:
+                    continue
+                product = Product.objects.filter(id=product_id).first()
+                if not product:
+                    continue
+                if product.is_kit:
+                    messages.error(request, "No se permiten kits dentro de kits.")
+                    return redirect("inventory_product_prices")
+                if ProductVariant.objects.filter(product=product).exists():
+                    messages.error(request, f"El producto {product.name} tiene variedades. No se puede usar en kits.")
+                    return redirect("inventory_product_prices")
+                qty = _parse_decimal(qty_raw)
+                if qty <= 0:
+                    continue
+                components.append((product, qty))
+            if len(components) < 2:
+                messages.error(request, "Agregá al menos 2 productos válidos.")
+                return redirect("inventory_product_prices")
+            with transaction.atomic():
+                if kit_id:
+                    kit = Product.objects.filter(id=kit_id, is_kit=True).first()
+                    if not kit:
+                        messages.error(request, "Kit no encontrado.")
+                        return redirect("inventory_product_prices")
+                else:
+                    kit = Product(is_kit=True)
+                kit.name = name
+                kit.sku = sku or None
+                kit.group = group
+                kit.price_distributor = price_distributor
+                kit.margin_barber = margin_barber
+                kit.margin_consumer = margin_consumer
+                kit.save()
+                KitComponent.objects.filter(kit=kit).delete()
+                for component, qty in components:
+                    KitComponent.objects.create(kit=kit, component=component, quantity=qty)
+            messages.success(request, "Kit guardado.")
+            return redirect("inventory_product_prices")
     products = Product.objects.order_by("sku")
+    products_no_kits = Product.objects.filter(is_kit=False).order_by("sku")
+    kits = Product.objects.filter(is_kit=True).order_by("sku")
+    kit_components = KitComponent.objects.select_related("kit", "component").all()
+    kit_map: dict[int, dict] = {}
+    for kit in kits:
+        kit_map[kit.id] = {
+            "id": kit.id,
+            "name": kit.name,
+            "sku": kit.sku or "",
+            "group": kit.group or "",
+            "price_distributor": f"{(kit.price_distributor or Decimal('0.00')):.2f}",
+            "margin_barber": f"{(kit.margin_barber or Decimal('0.00')):.2f}",
+            "margin_consumer": f"{(kit.margin_consumer or Decimal('0.00')):.2f}",
+            "components": [],
+        }
+    for comp in kit_components:
+        if comp.kit_id in kit_map:
+            kit_map[comp.kit_id]["components"].append(
+                {
+                    "product_id": comp.component_id,
+                    "quantity": f"{(comp.quantity or Decimal('0.00')):.2f}",
+                }
+            )
     group_options = (
         Product.objects.exclude(group="")
         .exclude(group__isnull=True)
@@ -3860,7 +3968,13 @@ def product_prices(request):
     return render(
         request,
         "inventory/product_prices.html",
-        {"products": products, "group_options": group_options},
+        {
+            "products": products,
+            "group_options": group_options,
+            "products_no_kits": products_no_kits,
+            "kits": kits,
+            "kit_data": list(kit_map.values()),
+        },
     )
 
 

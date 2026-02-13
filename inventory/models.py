@@ -67,6 +67,7 @@ class Product(models.Model):
         related_name="products",
         blank=True,
     )
+    is_kit = models.BooleanField(default=False)
 
     class Meta:
         ordering = ["sku"]
@@ -85,6 +86,11 @@ class Product(models.Model):
         return self.cost_with_vat() * multiplier
 
     def cost_with_vat(self) -> Decimal:
+        if self.is_kit:
+            total = Decimal("0.00")
+            for component in self.kit_components.select_related("component").all():
+                total += (component.component.cost_with_vat() * component.quantity)
+            return total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         base_cost = self.avg_cost or Decimal("0.00")
         vat = self.vat_percent or Decimal("0.00")
         if vat <= 0:
@@ -111,6 +117,8 @@ class Product(models.Model):
         return self._price_with_margin(self.margin_distributor)
 
     def last_purchase_cost(self) -> Decimal:
+        if self.is_kit:
+            return self.cost_with_vat()
         supplier_product = self.supplier_products.order_by("-last_purchase_at").first()
         if supplier_product and supplier_product.last_cost is not None:
             return supplier_product.last_cost
@@ -134,6 +142,19 @@ class ProductVariant(models.Model):
 
     def __str__(self) -> str:
         return f"{self.product.sku or 'Sin SKU'} - {self.name}"
+
+
+class KitComponent(models.Model):
+    kit = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="kit_components")
+    component = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="used_in_kits")
+    quantity = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("1.00"))
+
+    class Meta:
+        ordering = ["kit__sku", "id"]
+        unique_together = ("kit", "component")
+
+    def __str__(self) -> str:
+        return f"{self.kit.sku or self.kit.name} -> {self.component.sku or self.component.name} x {self.quantity}"
 
 
 class Customer(models.Model):
