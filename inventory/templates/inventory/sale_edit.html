@@ -1,6 +1,11 @@
 {% extends "inventory/base.html" %}
 {% block title %}Editar venta{% endblock %}
 {% block content %}
+<style>
+    input[type="checkbox"][name$="-DELETE"] {
+        display: none;
+    }
+</style>
 <h1>Editar venta</h1>
 <p class="subtitle">Actualizá productos y cantidades.</p>
 
@@ -35,7 +40,12 @@
                     <td>{{ row.form.quantity }}</td>
                     <td>{{ row.form.discount_percent }}</td>
                     <td>{{ row.form.vat_percent }}</td>
-                    <td>{% if formset.can_delete %}{{ row.form.DELETE }}{% endif %}</td>
+                    <td>
+                        {% if formset.can_delete %}
+                        {{ row.form.DELETE }}
+                        <button type="button" class="pill delete-row" style="font-size:12px; padding:4px 8px;">Eliminar</button>
+                        {% endif %}
+                    </td>
                 </tr>
                 {% if row.form.errors %}
                 <tr>
@@ -53,7 +63,12 @@
                     <td>{{ item_form.quantity }}</td>
                     <td>{{ item_form.discount_percent }}</td>
                     <td>{{ item_form.vat_percent }}</td>
-                    <td>{% if formset.can_delete %}{{ item_form.DELETE }}{% endif %}</td>
+                    <td>
+                        {% if formset.can_delete %}
+                        {{ item_form.DELETE }}
+                        <button type="button" class="pill delete-row" style="font-size:12px; padding:4px 8px;">Eliminar</button>
+                        {% endif %}
+                    </td>
                 </tr>
                 {% if item_form.errors %}
                 <tr>
@@ -264,11 +279,24 @@
             const vat = container.querySelector("[name$='-vat_percent']");
             const deleteField = container.querySelector("[name$='-DELETE']");
 
-            [product, variant, qty, discount, vat, deleteField].forEach(field => {
+            [product, variant, qty, discount, vat].forEach(field => {
                 const td = document.createElement("td");
                 if (field) td.appendChild(field);
                 tr.appendChild(td);
             });
+            const deleteTd = document.createElement("td");
+            if (deleteField) {
+                deleteField.style.display = "none";
+                deleteTd.appendChild(deleteField);
+                const deleteBtn = document.createElement("button");
+                deleteBtn.type = "button";
+                deleteBtn.className = "pill delete-row";
+                deleteBtn.style.fontSize = "12px";
+                deleteBtn.style.padding = "4px 8px";
+                deleteBtn.textContent = "Eliminar";
+                deleteTd.appendChild(deleteBtn);
+            }
+            tr.appendChild(deleteTd);
             variant.addEventListener("change", () => {
                 variant.dataset.selected = variant.value || "";
             });
@@ -277,6 +305,16 @@
             body.appendChild(tr);
             setupProductSearch(tr.querySelector("select[name$='-product']"));
             updateVariantSelect(tr.querySelector("select[name$='-product']"));
+        });
+
+        document.addEventListener("click", (event) => {
+            const btn = event.target.closest(".delete-row");
+            if (!btn) return;
+            const row = btn.closest("tr");
+            const checkbox = row?.querySelector("input[type='checkbox'][name$='-DELETE']");
+            if (!checkbox || !row) return;
+            checkbox.checked = true;
+            row.style.display = "none";
         });
 
         const formEl = addBtn.closest("form");
@@ -294,6 +332,8 @@
             const rows = Array.from(body.querySelectorAll("tr"));
             let total = parseInt(totalForms.value, 10);
             const isEmptyRow = (row) => {
+                const deleteCheck = row.querySelector("input[type='checkbox'][name$='-DELETE']");
+                if (deleteCheck?.checked) return false;
                 const product = row.querySelector("select[name$='-product']");
                 const qty = row.querySelector("input[name$='-quantity']");
                 const productValue = (product?.value || "").trim();
