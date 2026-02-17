@@ -2183,7 +2183,12 @@ def purchases_list(request):
                     for data in items:
                         qty = Decimal(data["quantity"])
                         unit_cost = data["unit_cost"]
-                        discount_percent = data.get("discount_percent") or Decimal("0.00")
+                        discount_percent = data.get("discount_percent")
+                        if discount_percent is None:
+                            discount_percent = Decimal("0.00")
+                        vat_percent = data.get("vat_percent")
+                        if vat_percent is None:
+                            vat_percent = Decimal("0.00")
                         effective_unit_cost = (unit_cost * (Decimal("1.00") - (discount_percent / Decimal("100.00")))).quantize(
                             Decimal("0.01"), rounding=ROUND_HALF_UP
                         )
@@ -2195,7 +2200,7 @@ def purchases_list(request):
                             quantity=qty,
                             unit_cost=unit_cost,
                             discount_percent=discount_percent,
-                                        vat_percent=vat_value,
+                            vat_percent=vat_percent,
                         )
                         if warehouse.type == Warehouse.WarehouseType.COMUN and data.get("variant") is not None:
                             variant = (
@@ -2213,7 +2218,7 @@ def purchases_list(request):
                             quantity=qty,
                             unit_cost=effective_unit_cost,
                             supplier=data["supplier"],
-                            vat_percent=data.get("vat_percent") or Decimal("0.00"),
+                            vat_percent=vat_percent,
                             user=request.user,
                             reference=f"Compra #{purchase.id}",
                             purchase=purchase,
@@ -4118,11 +4123,15 @@ def product_costs(request):
             margin_consumer = parse_optional_decimal(request.POST.get("margin_consumer"))
             margin_barber = parse_optional_decimal(request.POST.get("margin_barber"))
             margin_distributor = parse_optional_decimal(request.POST.get("margin_distributor"))
+            group = (request.POST.get("group") or "").strip()
             if margin_consumer is None and margin_barber is None and margin_distributor is None:
                 messages.error(request, "Completá al menos un margen para aplicar cambios.")
                 return redirect("inventory_product_costs")
 
-            target_products = list(Product.objects.order_by("sku"))
+            target_qs = Product.objects.order_by("sku")
+            if group:
+                target_qs = target_qs.filter(group__iexact=group)
+            target_products = list(target_qs)
             if not target_products:
                 messages.error(request, "No se encontraron productos para aplicar los cambios.")
                 return redirect("inventory_product_costs")
@@ -4142,7 +4151,10 @@ def product_costs(request):
                 if update_fields:
                     product.save(update_fields=update_fields)
                     updated += 1
-            messages.success(request, f"Márgenes actualizados en {updated} productos.")
+            if group:
+                messages.success(request, f"Márgenes actualizados en {updated} productos de la marca/grupo '{group}'.")
+            else:
+                messages.success(request, f"Márgenes actualizados en {updated} productos.")
             return redirect("inventory_product_costs")
         elif action == "import_costs":
             upload = request.FILES.get("file")
