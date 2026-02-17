@@ -122,6 +122,153 @@ def _extract_product_ids_from_payload(raw_payload: str | None) -> set[int]:
     return ids
 
 
+def _normalize_lookup_text(value: str) -> str:
+    cleaned = unicodedata.normalize("NFKD", (value or "").strip().lower())
+    cleaned = "".join(ch for ch in cleaned if not unicodedata.combining(ch))
+    cleaned = re.sub(r"[^a-z0-9]+", " ", cleaned)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _parse_latam_decimal(raw: str | None) -> Decimal | None:
+    if raw is None:
+        return None
+    value = str(raw).strip()
+    if not value:
+        return None
+    value = value.replace("$", "").replace(" ", "")
+    value = value.replace("%", "").replace("+", "")
+    value = value.replace("\u00a0", "")
+    value = value.replace(".", "").replace(",", ".")
+    try:
+        return Decimal(value)
+    except Exception:
+        return None
+
+
+def _extract_purchase_items_from_pdf_bytes(pdf_bytes: bytes) -> tuple[list[dict], dict, str | None]:
+    try:
+        from pdfminer.high_level import extract_text
+    except Exception:
+        return [], {}, "Falta pdfminer.six para leer PDFs."
+
+    try:
+        text = (extract_text(io.BytesIO(pdf_bytes)) or "").strip()
+    except Exception as exc:
+        return [], {}, f"No se pudo leer el PDF: {exc}"
+    if not text:
+        return [], {}, "El PDF no contiene texto legible."
+
+    compact_text = re.sub(r"\s+", " ", text)
+    metadata: dict[str, str] = {}
+    invoice_match = re.search(r"N[°ºo]?\s*([0-9]{4,5}-[0-9]{4,8})", compact_text, flags=re.IGNORECASE)
+    if invoice_match:
+        metadata["invoice_number"] = invoice_match.group(1)
+    date_match = re.search(r"Fecha[:\s]+(\d{1,2}/\d{1,2}/\d{2,4})", compact_text, flags=re.IGNORECASE)
+    if date_match:
+        metadata["date"] = date_match.group(1)
+
+    lines = [re.sub(r"\s+", " ", (line or "").strip()) for line in text.splitlines()]
+    lines = [line for line in lines if line]
+    in_table = False
+    pending_description = ""
+    parsed_items: list[dict] = []
+    row_re = re.compile(
+        r"^(?P<desc>.+?)\s+"
+        r"(?P<qty>\d[\d\.,]*)\s+"
+        r"\$?\s*(?P<price>\d[\d\.,]*)\s+"
+        r"(?:(?P<discount>-?\s*\d[\d\.,]*)\s*%?\s+)?"
+        r"\$?\s*(?P<amount>\d[\d\.,]*)\s*$",
+        flags=re.IGNORECASE,
+    )
+
+    for line in lines:
+        normalized = _normalize_lookup_text(line)
+        if not in_table:
+            if "descripcion" in normalized and "cantidad" in normalized and "precio" in normalized:
+                in_table = True
+            continue
+        if normalized.startswith("subtotal") or normalized.startswith("total") or normalized.startswith("descuento"):
+            break
+
+        match = row_re.match(line)
+        if not match:
+            if re.search(r"[A-Za-z]", line):
+                pending_description = f"{pending_description} {line}".strip() if pending_description else line
+            continue
+
+        desc = match.group("desc").strip()
+        if pending_description:
+            desc = f"{pending_description} {desc}".strip()
+            pending_description = ""
+        qty = _parse_latam_decimal(match.group("qty"))
+        unit_cost = _parse_latam_decimal(match.group("price"))
+        discount_raw = (match.group("discount") or "").replace(" ", "")
+        discount = _parse_latam_decimal(discount_raw) or Decimal("0.00")
+        if discount < 0:
+            discount = abs(discount)
+        if qty is None or qty <= 0 or unit_cost is None or unit_cost < 0:
+            continue
+
+        parsed_items.append(
+            {
+                "description": desc,
+                "quantity": qty,
+                "unit_cost": unit_cost,
+                "discount_percent": discount,
+            }
+        )
+
+    if not parsed_items:
+        return [], metadata, (
+            "No se encontraron ítems en el PDF. "
+            "Verificá que tenga una tabla con columnas descripción, cantidad y precio."
+        )
+    return parsed_items, metadata, None
+
+
+def _resolve_product_from_purchase_pdf(description: str) -> Product | None:
+    raw = (description or "").strip()
+    if not raw:
+        return None
+    product = Product.objects.filter(sku__iexact=raw).first()
+    if product:
+        return product
+    product = Product.objects.filter(name__iexact=raw).first()
+    if product:
+        return product
+    product = Product.objects.filter(name__icontains=raw).order_by("id").first()
+    if product:
+        return product
+
+    normalized_target = _normalize_lookup_text(raw)
+    if not normalized_target:
+        return None
+
+    tokens = [tok for tok in normalized_target.split() if len(tok) >= 3]
+    if not tokens:
+        return None
+    clauses = Q()
+    for token in tokens[:4]:
+        clauses |= Q(name__icontains=token) | Q(sku__icontains=token)
+    candidates = list(Product.objects.filter(clauses).only("id", "name", "sku")[:40])
+    if not candidates:
+        return None
+
+    best: Product | None = None
+    best_score = -1
+    token_set = set(tokens)
+    for candidate in candidates:
+        candidate_text = _normalize_lookup_text(f"{candidate.sku or ''} {candidate.name or ''}")
+        candidate_tokens = set(candidate_text.split())
+        score = len(token_set & candidate_tokens)
+        if score > best_score:
+            best = candidate
+            best_score = score
+    if best_score <= 0:
+        return None
+    return best
+
+
 class ProductForm(forms.ModelForm):
     class Meta:
         model = Product
@@ -1947,6 +2094,155 @@ def purchases_list(request):
     PurchaseItemFormSet = formset_factory(PurchaseItemForm, extra=1, can_delete=True)
     show_history = request.GET.get("show_history") == "1"
     if request.method == "POST":
+        if request.POST.get("action") == "import_purchase_pdf":
+            pdf_upload = request.FILES.get("purchase_pdf")
+            warehouse_id = (request.POST.get("pdf_warehouse_id") or "").strip()
+            supplier_id = (request.POST.get("pdf_supplier_id") or "").strip()
+            raw_date = (request.POST.get("pdf_purchase_date") or "").strip()
+            warehouse = Warehouse.objects.filter(id=warehouse_id).first() if warehouse_id else None
+            supplier = Supplier.objects.filter(id=supplier_id).first() if supplier_id else None
+            if not pdf_upload:
+                messages.error(request, "Subí un PDF para importar la compra.")
+                return redirect("inventory_purchases_list")
+            if not warehouse:
+                messages.error(request, "Seleccioná un depósito para la compra importada.")
+                return redirect("inventory_purchases_list")
+            if not supplier:
+                messages.error(request, "Seleccioná un proveedor para la compra importada.")
+                return redirect("inventory_purchases_list")
+
+            pdf_bytes = pdf_upload.read()
+            parsed_items, metadata, parse_error = _extract_purchase_items_from_pdf_bytes(pdf_bytes)
+            if parse_error:
+                messages.error(request, parse_error)
+                return redirect("inventory_purchases_list")
+
+            unresolved: list[str] = []
+            resolved_items: list[dict] = []
+            for entry in parsed_items:
+                product = _resolve_product_from_purchase_pdf(entry.get("description") or "")
+                if not product:
+                    unresolved.append(entry.get("description") or "(sin descripción)")
+                    continue
+                variants = list(ProductVariant.objects.filter(product=product).order_by("id"))
+                variant = None
+                if len(variants) == 1:
+                    variant = variants[0]
+                elif len(variants) > 1:
+                    unresolved.append(f"{entry.get('description') or product.name} (requiere variedad)")
+                    continue
+                resolved_items.append(
+                    {
+                        "product": product,
+                        "variant": variant,
+                        "quantity": entry["quantity"],
+                        "unit_cost": entry["unit_cost"],
+                        "discount_percent": entry.get("discount_percent") or Decimal("0.00"),
+                        "vat_percent": Decimal("0.00"),
+                        "supplier": supplier,
+                    }
+                )
+
+            if unresolved:
+                preview = ", ".join(unresolved[:4])
+                more = f" y {len(unresolved) - 4} más" if len(unresolved) > 4 else ""
+                messages.error(
+                    request,
+                    f"No pude mapear {len(unresolved)} ítems del PDF: {preview}{more}. "
+                    "Creá/ajustá esos productos y reintentá.",
+                )
+                return redirect("inventory_purchases_list")
+            if not resolved_items:
+                messages.error(request, "No se encontraron ítems válidos para registrar.")
+                return redirect("inventory_purchases_list")
+
+            purchase_date = None
+            date_candidate = raw_date or (metadata.get("date") or "")
+            if date_candidate:
+                try:
+                    if "/" in date_candidate:
+                        try:
+                            purchase_date = datetime.strptime(date_candidate, "%d/%m/%Y").date()
+                        except Exception:
+                            purchase_date = datetime.strptime(date_candidate, "%d/%m/%y").date()
+                    else:
+                        purchase_date = datetime.strptime(date_candidate, "%Y-%m-%d").date()
+                except Exception:
+                    purchase_date = None
+            reference = "Compra PDF"
+            if metadata.get("invoice_number"):
+                reference = f"Factura {metadata['invoice_number']}"
+
+            try:
+                with transaction.atomic():
+                    purchase = Purchase.objects.create(
+                        supplier=supplier,
+                        warehouse=warehouse,
+                        reference=reference,
+                        discount_percent=Decimal("0.00"),
+                        user=request.user,
+                    )
+                    if pdf_bytes:
+                        purchase.invoice_image.save(
+                            pdf_upload.name or f"compra_{purchase.id}.pdf",
+                            ContentFile(pdf_bytes),
+                            save=False,
+                        )
+                    if purchase_date:
+                        created_at = datetime.combine(purchase_date, time(12, 0))
+                        if timezone.is_naive(created_at):
+                            created_at = timezone.make_aware(created_at)
+                        purchase.created_at = created_at
+
+                    subtotal = Decimal("0.00")
+                    for data in resolved_items:
+                        qty = Decimal(data["quantity"])
+                        unit_cost = data["unit_cost"]
+                        discount_percent = data.get("discount_percent") or Decimal("0.00")
+                        vat_percent = data.get("vat_percent") or Decimal("0.00")
+                        effective_unit_cost = (
+                            unit_cost * (Decimal("1.00") - (discount_percent / Decimal("100.00")))
+                        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                        subtotal += qty * effective_unit_cost
+                        PurchaseItem.objects.create(
+                            purchase=purchase,
+                            product=data["product"],
+                            variant=data.get("variant"),
+                            quantity=qty,
+                            unit_cost=unit_cost,
+                            discount_percent=discount_percent,
+                            vat_percent=vat_percent,
+                        )
+                        if warehouse.type == Warehouse.WarehouseType.COMUN and data.get("variant") is not None:
+                            variant = (
+                                ProductVariant.objects.select_for_update()
+                                .filter(id=data["variant"].id, product=data["product"])
+                                .first()
+                            )
+                            if variant:
+                                variant.quantity = (variant.quantity + qty).quantize(Decimal("0.01"))
+                                variant.save(update_fields=["quantity"])
+                                _koda_sync_common_with_variants(data["product"], warehouse)
+                        services.register_entry(
+                            product=data["product"],
+                            warehouse=warehouse,
+                            quantity=qty,
+                            unit_cost=effective_unit_cost,
+                            supplier=supplier,
+                            vat_percent=vat_percent,
+                            user=request.user,
+                            reference=f"Compra #{purchase.id}",
+                            purchase=purchase,
+                        )
+
+                    purchase.total = subtotal.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                    purchase.save()
+                messages.success(request, f"Compra importada desde PDF ({len(resolved_items)} ítems).")
+                return redirect("inventory_purchases_list")
+            except Exception as exc:
+                messages.error(request, f"No se pudo importar la compra desde PDF: {exc}")
+                return redirect("inventory_purchases_list")
+
         header_form = PurchaseHeaderForm(request.POST)
         formset = PurchaseItemFormSet(request.POST)
         payload_ids = _extract_product_ids_from_payload(request.POST.get("items_payload"))
@@ -2255,6 +2551,8 @@ def purchases_list(request):
     variant_data = {}
     for row in ProductVariant.objects.values("id", "product_id", "name").order_by("name", "id"):
         variant_data.setdefault(str(row["product_id"]), []).append({"id": row["id"], "name": row["name"]})
+    warehouses = Warehouse.objects.order_by("name")
+    suppliers = Supplier.objects.order_by("name")
     return render(
         request,
         "inventory/purchases_list.html",
@@ -2265,6 +2563,9 @@ def purchases_list(request):
             "formset": formset,
             "show_history": show_history,
             "variant_data": variant_data,
+            "warehouses": warehouses,
+            "suppliers": suppliers,
+            "default_purchase_date": timezone.localdate().isoformat(),
         },
     )
 

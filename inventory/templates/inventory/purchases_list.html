@@ -11,6 +11,43 @@
 <p class="subtitle">Registrá compras y consultá el historial.</p>
 
 <div class="card" style="margin-bottom:16px;">
+    <div class="card-title">Importar compra desde PDF</div>
+    <form method="post" action="{% url 'inventory_purchases_list' %}" enctype="multipart/form-data">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="import_purchase_pdf">
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px;">
+            <p>
+                <label for="id_pdf_warehouse_id">Depósito</label>
+                <select id="id_pdf_warehouse_id" name="pdf_warehouse_id" required>
+                    <option value="">Seleccionar</option>
+                    {% for warehouse in warehouses %}
+                    <option value="{{ warehouse.id }}">{{ warehouse.name }}</option>
+                    {% endfor %}
+                </select>
+            </p>
+            <p>
+                <label for="id_pdf_supplier_id">Proveedor</label>
+                <select id="id_pdf_supplier_id" name="pdf_supplier_id" required>
+                    <option value="">Seleccionar</option>
+                    {% for supplier in suppliers %}
+                    <option value="{{ supplier.id }}">{{ supplier.name }}</option>
+                    {% endfor %}
+                </select>
+            </p>
+            <p>
+                <label for="id_pdf_purchase_date">Fecha (opcional)</label>
+                <input id="id_pdf_purchase_date" type="date" name="pdf_purchase_date" value="{{ default_purchase_date }}">
+            </p>
+            <p>
+                <label for="id_purchase_pdf">Archivo PDF</label>
+                <input id="id_purchase_pdf" type="file" name="purchase_pdf" accept=".pdf,application/pdf" required>
+            </p>
+        </div>
+        <button type="submit">Importar PDF y registrar compra</button>
+    </form>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
     <div class="card-title">Registrar compra</div>
     <form method="post" action="{% url 'inventory_purchases_list' %}">
         {% csrf_token %}
