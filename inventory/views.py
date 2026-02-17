@@ -261,11 +261,130 @@ def _extract_purchase_items_from_pdf_bytes(pdf_bytes: bytes) -> tuple[list[dict]
         )
 
     if not parsed_items:
+        layout_items = _extract_purchase_items_from_pdf_layout(pdf_bytes)
+        if layout_items:
+            return layout_items, metadata, None
         return [], metadata, (
             "No se encontraron ítems en el PDF. "
             "Verificá que tenga una tabla con columnas descripción, cantidad y precio."
         )
     return parsed_items, metadata, None
+
+
+def _extract_purchase_items_from_pdf_layout(pdf_bytes: bytes) -> list[dict]:
+    try:
+        from pdfminer.high_level import extract_pages
+        from pdfminer.layout import LTTextContainer
+    except Exception:
+        return []
+
+    def _group_rows(cells: list[tuple[float, float, str]]) -> list[list[tuple[float, float, str]]]:
+        rows: list[list[tuple[float, float, str]]] = []
+        tolerance = 3.0
+        for x0, y0, text in sorted(cells, key=lambda c: -c[1]):
+            placed = False
+            for row in rows:
+                if abs(row[0][1] - y0) <= tolerance:
+                    row.append((x0, y0, text))
+                    placed = True
+                    break
+            if not placed:
+                rows.append([(x0, y0, text)])
+        for row in rows:
+            row.sort(key=lambda c: c[0])
+        return rows
+
+    parsed_items: list[dict] = []
+    for page_layout in extract_pages(io.BytesIO(pdf_bytes)):
+        cells: list[tuple[float, float, str]] = []
+        for element in page_layout:
+            if not isinstance(element, LTTextContainer):
+                continue
+            text = re.sub(r"\s+", " ", element.get_text().replace("\u00a0", " ").strip())
+            if not text:
+                continue
+            cells.append((float(element.x0), float(element.y0), text))
+        if not cells:
+            continue
+
+        rows = _group_rows(cells)
+        header_row = None
+        x_qty = x_price = x_discount = x_amount = None
+        for row in rows:
+            joined = _normalize_lookup_text(" ".join(part[2] for part in row))
+            if "descripcion" in joined and "cantidad" in joined and "precio" in joined:
+                header_row = row
+                for x0, _, txt in row:
+                    n = _normalize_lookup_text(txt)
+                    if "cantidad" in n:
+                        x_qty = x0
+                    elif n == "precio" or "precio" in n:
+                        x_price = x0
+                    elif "dto" in n or "descuento" in n:
+                        x_discount = x0
+                    elif "importe" in n or "total" == n:
+                        x_amount = x0
+                break
+        if not header_row or x_qty is None or x_price is None:
+            continue
+
+        header_y = header_row[0][1]
+        pending_description = ""
+        for row in rows:
+            y0 = row[0][1]
+            if y0 >= header_y:
+                continue
+            line_text = _normalize_lookup_text(" ".join(part[2] for part in row))
+            if line_text.startswith("subtotal") or line_text.startswith("descuento") or line_text.startswith("total"):
+                break
+
+            desc_parts: list[str] = []
+            qty_raw = price_raw = discount_raw = amount_raw = None
+            for x0, _, txt in row:
+                if x0 < x_qty - 5:
+                    desc_parts.append(txt)
+                    continue
+                if qty_raw is None and x_price - 15 <= x0:
+                    qty_raw = txt
+                    continue
+                if price_raw is None and (x_discount is None or x0 < x_discount - 10):
+                    price_raw = txt
+                    continue
+                if x_discount is not None and discount_raw is None and (x_amount is None or x0 < x_amount - 10):
+                    discount_raw = txt
+                    continue
+                if amount_raw is None:
+                    amount_raw = txt
+
+            desc = re.sub(r"\s+", " ", " ".join(desc_parts)).strip()
+            qty = _parse_latam_decimal(qty_raw)
+            price = _parse_latam_decimal(price_raw)
+            amount = _parse_latam_decimal(amount_raw)
+            discount = _parse_latam_decimal(discount_raw) or Decimal("0.00")
+            if discount < 0:
+                discount = abs(discount)
+
+            if qty is None or price is None or amount is None:
+                if desc and re.search(r"[A-Za-z]", desc):
+                    pending_description = f"{pending_description} {desc}".strip() if pending_description else desc
+                continue
+
+            if pending_description:
+                desc = f"{pending_description} {desc}".strip()
+                pending_description = ""
+            if not desc:
+                desc = "(sin descripción)"
+            if qty <= 0 or price < 0:
+                continue
+            parsed_items.append(
+                {
+                    "description": desc,
+                    "quantity": qty,
+                    "unit_cost": price,
+                    "discount_percent": discount,
+                }
+            )
+    return parsed_items
 
 
 def _resolve_product_from_purchase_pdf(description: str) -> Product | None:
