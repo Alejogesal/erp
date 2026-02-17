@@ -167,8 +167,8 @@ def _extract_purchase_items_from_pdf_bytes(pdf_bytes: bytes) -> tuple[list[dict]
     if date_match:
         metadata["date"] = date_match.group(1)
 
-    lines = [re.sub(r"\s+", " ", (line or "").strip()) for line in text.splitlines()]
-    lines = [line for line in lines if line]
+    lines = [((line or "").replace("\u00a0", " ").rstrip()) for line in text.splitlines()]
+    lines = [line for line in lines if line.strip()]
     in_table = False
     pending_description = ""
     parsed_items: list[dict] = []
@@ -181,31 +181,73 @@ def _extract_purchase_items_from_pdf_bytes(pdf_bytes: bytes) -> tuple[list[dict]
         flags=re.IGNORECASE,
     )
 
-    for line in lines:
+    for raw_line in lines:
+        line = raw_line.strip()
         normalized = _normalize_lookup_text(line)
         if not in_table:
-            if "descripcion" in normalized and "cantidad" in normalized and "precio" in normalized:
+            header_detected = "descripcion" in normalized and "cantidad" in normalized and "precio" in normalized
+            row_candidate = bool(re.search(r"\d[\d\.,]*\s+\$?\s*\d[\d\.,]*\s+\$?\s*\d[\d\.,]*$", line))
+            if header_detected or row_candidate:
                 in_table = True
+            if not in_table:
+                continue
+        if "descripcion" in normalized and "cantidad" in normalized and "precio" in normalized:
             continue
-        if normalized.startswith("subtotal") or normalized.startswith("total") or normalized.startswith("descuento"):
+        if normalized.startswith("subtotal") or normalized.startswith("total ") or normalized == "total" or normalized.startswith("descuento"):
             break
 
-        match = row_re.match(line)
-        if not match:
+        row_parsed = None
+        parts = [part.strip() for part in re.split(r"\s{2,}", line) if part.strip()]
+        if len(parts) >= 4:
+            qty_candidate = _parse_latam_decimal(parts[1])
+            price_candidate = _parse_latam_decimal(parts[2])
+            amount_candidate = _parse_latam_decimal(parts[-1])
+            if qty_candidate is not None and price_candidate is not None and amount_candidate is not None:
+                discount_candidate = Decimal("0.00")
+                if len(parts) >= 5:
+                    discount_candidate = _parse_latam_decimal(parts[3]) or Decimal("0.00")
+                    if discount_candidate < 0:
+                        discount_candidate = abs(discount_candidate)
+                row_parsed = {
+                    "description": parts[0],
+                    "quantity": qty_candidate,
+                    "unit_cost": price_candidate,
+                    "discount_percent": discount_candidate,
+                }
+
+        if row_parsed is None:
+            collapsed = re.sub(r"\s+", " ", line)
+            match = row_re.match(collapsed)
+        else:
+            match = None
+
+        if row_parsed is None and not match:
             if re.search(r"[A-Za-z]", line):
                 pending_description = f"{pending_description} {line}".strip() if pending_description else line
             continue
 
-        desc = match.group("desc").strip()
+        if row_parsed is None and match:
+            desc = match.group("desc").strip()
+            qty = _parse_latam_decimal(match.group("qty"))
+            unit_cost = _parse_latam_decimal(match.group("price"))
+            discount_raw = (match.group("discount") or "").replace(" ", "")
+            discount = _parse_latam_decimal(discount_raw) or Decimal("0.00")
+            if discount < 0:
+                discount = abs(discount)
+            row_parsed = {
+                "description": desc,
+                "quantity": qty,
+                "unit_cost": unit_cost,
+                "discount_percent": discount,
+            }
+
+        desc = row_parsed["description"].strip()
         if pending_description:
             desc = f"{pending_description} {desc}".strip()
             pending_description = ""
-        qty = _parse_latam_decimal(match.group("qty"))
-        unit_cost = _parse_latam_decimal(match.group("price"))
-        discount_raw = (match.group("discount") or "").replace(" ", "")
-        discount = _parse_latam_decimal(discount_raw) or Decimal("0.00")
-        if discount < 0:
-            discount = abs(discount)
+        qty = row_parsed["quantity"]
+        unit_cost = row_parsed["unit_cost"]
+        discount = row_parsed["discount_percent"]
         if qty is None or qty <= 0 or unit_cost is None or unit_cost < 0:
             continue
 
