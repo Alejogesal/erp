@@ -2408,15 +2408,6 @@ def purchases_list(request):
                     }
                 )
 
-            if unresolved:
-                preview = ", ".join(unresolved[:4])
-                more = f" y {len(unresolved) - 4} más" if len(unresolved) > 4 else ""
-                messages.error(
-                    request,
-                    f"No pude mapear {len(unresolved)} ítems del PDF: {preview}{more}. "
-                    "Creá/ajustá esos productos y reintentá.",
-                )
-                return redirect("inventory_purchases_list")
             if not resolved_items:
                 messages.error(request, "No se encontraron ítems válidos para registrar.")
                 return redirect("inventory_purchases_list")
@@ -2503,6 +2494,14 @@ def purchases_list(request):
                     purchase.total = subtotal.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                     purchase.save()
                 messages.success(request, f"Compra importada desde PDF ({len(resolved_items)} ítems).")
+                if unresolved:
+                    preview = ", ".join(unresolved[:4])
+                    more = f" y {len(unresolved) - 4} más" if len(unresolved) > 4 else ""
+                    messages.warning(
+                        request,
+                        f"Se omitieron {len(unresolved)} ítems no mapeados: {preview}{more}. "
+                        "Podés crearlos/ajustarlos y cargar esos faltantes manualmente.",
+                    )
                 return redirect("inventory_purchases_list")
             except Exception as exc:
                 messages.error(request, f"No se pudo importar la compra desde PDF: {exc}")
