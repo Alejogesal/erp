@@ -36,7 +36,7 @@
         </p>
         {{ formset.non_form_errors }}
         <div style="display:flex; align-items:center; gap:10px; margin:10px 0;">
-            <button type="button" id="toggle-vat">Mostrar IVA</button>
+            <button type="button" id="toggle-vat">Mostrar/Ocultar IVA</button>
         </div>
         <h3>Productos</h3>
         {{ formset.management_form }}
@@ -509,8 +509,6 @@
                 });
                 vatHidden = Array.from(cols).every((col) => col.style.display === "none");
             });
-            document.querySelectorAll(".vat-col").forEach((col) => (col.style.display = "none"));
-            vatHidden = true;
         }
 
         document.addEventListener("click", (event) => {
