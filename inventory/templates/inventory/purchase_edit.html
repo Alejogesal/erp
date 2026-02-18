@@ -154,46 +154,12 @@
             row.dataset.autoUpdating = "0";
         };
 
-        const updateBaseFromCurrent = (row) => {
-            if (!row) return;
-            const costInput = row.querySelector("input[name$='-unit_cost']");
-            const vatInput = row.querySelector("input[name$='-vat_percent']");
-            if (!costInput || !vatInput) return;
-            const cost = parseNumber(costInput.value);
-            const vat = parseNumber(vatInput.value);
-            if (!cost) return;
-            const factor = 1 + vat / 100;
-            const base = factor > 0 ? cost / factor : cost;
-            row.dataset.baseCost = String(base);
-        };
-
-        const applyVatToCost = (row) => {
-            if (!row) return;
-            const costInput = row.querySelector("input[name$='-unit_cost']");
-            const vatInput = row.querySelector("input[name$='-vat_percent']");
-            if (!costInput || !vatInput) return;
-            const base = parseNumber(row.dataset.baseCost || "");
-            if (!base) return;
-            const vat = parseNumber(vatInput.value);
-            const total = base * (1 + vat / 100);
-            setRowCost(row, costInput, formatNumber(total));
-        };
+        const updateBaseFromCurrent = () => {};
+        const applyVatToCost = () => {};
 
         const setupRow = (row) => {
             if (!row || row.dataset.costReady === "1") return;
             row.dataset.costReady = "1";
-            const costInput = row.querySelector("input[name$='-unit_cost']");
-            const vatInput = row.querySelector("input[name$='-vat_percent']");
-            if (costInput) {
-                costInput.addEventListener("input", () => {
-                    if (row.dataset.autoUpdating === "1") return;
-                    updateBaseFromCurrent(row);
-                });
-            }
-            if (vatInput) {
-                vatInput.addEventListener("input", () => applyVatToCost(row));
-            }
-            updateBaseFromCurrent(row);
         };
 
         const fetchProductInfo = async (productId) => {
@@ -238,16 +204,9 @@
                     vatInput.value = info.vat_percent;
                 }
             }
-            if (info.avg_cost) {
-                row.dataset.baseCost = String(info.avg_cost);
-            }
-            const shouldSync = !costInput?.value || productChanged;
-            if (costInput && info.avg_cost && (!costInput.value || productChanged)) {
-                setRowCost(row, costInput, formatNumber(parseNumber(info.avg_cost)));
-            }
-            if (shouldSync) {
-                updateBaseFromCurrent(row);
-                applyVatToCost(row);
+            const defaultCost = info.cost_with_vat || info.avg_cost;
+            if (costInput && defaultCost && (!costInput.value || productChanged)) {
+                setRowCost(row, costInput, formatNumber(parseNumber(defaultCost)));
             }
             updateVariantSelect(row, productId);
         };
