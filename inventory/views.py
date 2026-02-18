@@ -1550,19 +1550,18 @@ def purchase_receipt(request, purchase_id: int):
         )
         item.discount_percent = discount_percent
         item.unit_cost_effective = effective_unit_cost
-        item.line_total = (item.quantity * effective_unit_cost).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         vat_percent = item.vat_percent or Decimal("0.00")
+        item.unit_cost_no_vat = effective_unit_cost
         if vat_percent > 0:
             has_vat = True
-            vat_factor = Decimal("1.00") + (vat_percent / Decimal("100.00"))
-            item.unit_cost_no_vat = (effective_unit_cost / vat_factor).quantize(
+            item.unit_vat = (effective_unit_cost * (vat_percent / Decimal("100.00"))).quantize(
                 Decimal("0.01"), rounding=ROUND_HALF_UP
             )
-            item.unit_vat = (effective_unit_cost - item.unit_cost_no_vat).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         else:
-            item.unit_cost_no_vat = effective_unit_cost
             item.unit_vat = Decimal("0.00")
         item.vat_percent = vat_percent
+        item.unit_cost_with_vat = (item.unit_cost_no_vat + item.unit_vat).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        item.line_total = (item.quantity * item.unit_cost_with_vat).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         item.line_vat = (item.unit_vat * item.quantity).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         subtotal_no_vat += (item.unit_cost_no_vat * item.quantity).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         vat_total += item.line_vat
@@ -1605,19 +1604,18 @@ def purchase_receipt_pdf(request, purchase_id: int):
         )
         item.discount_percent = discount_percent
         item.unit_cost_effective = effective_unit_cost
-        item.line_total = (item.quantity * effective_unit_cost).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         vat_percent = item.vat_percent or Decimal("0.00")
+        item.unit_cost_no_vat = effective_unit_cost
         if vat_percent > 0:
             has_vat = True
-            vat_factor = Decimal("1.00") + (vat_percent / Decimal("100.00"))
-            item.unit_cost_no_vat = (effective_unit_cost / vat_factor).quantize(
+            item.unit_vat = (effective_unit_cost * (vat_percent / Decimal("100.00"))).quantize(
                 Decimal("0.01"), rounding=ROUND_HALF_UP
             )
-            item.unit_vat = (effective_unit_cost - item.unit_cost_no_vat).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         else:
-            item.unit_cost_no_vat = effective_unit_cost
             item.unit_vat = Decimal("0.00")
         item.vat_percent = vat_percent
+        item.unit_cost_with_vat = (item.unit_cost_no_vat + item.unit_vat).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        item.line_total = (item.quantity * item.unit_cost_with_vat).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         item.line_vat = (item.unit_vat * item.quantity).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         subtotal_no_vat += (item.unit_cost_no_vat * item.quantity).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         vat_total += item.line_vat
@@ -2666,7 +2664,10 @@ def purchases_list(request):
                         effective_unit_cost = (
                             unit_cost * (Decimal("1.00") - (discount_percent / Decimal("100.00")))
                         ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-                        subtotal += qty * effective_unit_cost
+                        effective_unit_cost_with_vat = (
+                            effective_unit_cost * (Decimal("1.00") + (vat_percent / Decimal("100.00")))
+                        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                        subtotal += qty * effective_unit_cost_with_vat
                         PurchaseItem.objects.create(
                             purchase=purchase,
                             product=data["product"],
@@ -2964,7 +2965,10 @@ def purchases_list(request):
                         effective_unit_cost = (unit_cost * (Decimal("1.00") - (discount_percent / Decimal("100.00")))).quantize(
                             Decimal("0.01"), rounding=ROUND_HALF_UP
                         )
-                        subtotal += qty * effective_unit_cost
+                        effective_unit_cost_with_vat = (
+                            effective_unit_cost * (Decimal("1.00") + (vat_percent / Decimal("100.00")))
+                        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                        subtotal += qty * effective_unit_cost_with_vat
                         PurchaseItem.objects.create(
                             purchase=purchase,
                             product=data["product"],
@@ -3289,7 +3293,10 @@ def purchase_edit(request, purchase_id: int):
                             Decimal("0.01"), rounding=ROUND_HALF_UP
                         )
                         vat = item.get("vat_percent") or Decimal("0.00")
-                        subtotal += effective_unit_cost * qty
+                        effective_unit_cost_with_vat = (
+                            effective_unit_cost * (Decimal("1.00") + (vat / Decimal("100.00")))
+                        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                        subtotal += effective_unit_cost_with_vat * qty
                         PurchaseItem.objects.create(
                             purchase=purchase,
                             product=product,
@@ -3550,7 +3557,7 @@ def stock_list(request):
                 if qty <= 0:
                     continue
                 vat = product.vat_percent or Decimal("0.00")
-                unit_cost = product.cost_with_vat()
+                unit_cost = product.avg_cost or Decimal("0.00")
                 target = "aurill" if "aurill" in (product.group or "").lower() else "aris"
                 purchases[target]["items"].append(
                     {
@@ -3576,7 +3583,10 @@ def stock_list(request):
                     for item in data["items"]:
                         qty = item["quantity"]
                         unit_cost = item["unit_cost"]
-                        total += qty * unit_cost
+                        unit_cost_with_vat = (
+                            unit_cost * (Decimal("1.00") + ((item["vat_percent"] or Decimal("0.00")) / Decimal("100.00")))
+                        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                        total += qty * unit_cost_with_vat
                         PurchaseItem.objects.create(
                             purchase=purchase,
                             product=item["product"],

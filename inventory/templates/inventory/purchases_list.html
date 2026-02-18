@@ -81,7 +81,7 @@
                     <th>Variedad</th>
                     <th>Proveedor</th>
                     <th>Cantidad</th>
-                    <th>Costo unitario</th>
+                    <th>Costo unitario sin IVA</th>
                     <th>DTO %</th>
                     <th class="vat-col">IVA %</th>
                     <th>Eliminar</th>
@@ -264,7 +264,7 @@
             if (supplierSelect && info.default_supplier_id) {
                 supplierSelect.value = String(info.default_supplier_id);
             }
-            const defaultCost = info.cost_with_vat || info.avg_cost;
+            const defaultCost = info.avg_cost || info.cost_with_vat;
             if (costInput && defaultCost && (!manualCost || productChanged) && (!costInput.value || productChanged)) {
                 setRowCost(row, costInput, formatNumber(parseNumber(defaultCost)));
             }

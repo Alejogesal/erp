@@ -65,16 +65,17 @@ def register_entry(
     purchase=None,
 ) -> StockMovement:
     qty = _to_decimal(quantity)
-    cost_with_vat = _to_decimal(unit_cost)
+    cost_base = _to_decimal(unit_cost)
     vat = _to_decimal(vat_percent) if vat_percent is not None else Decimal("0.00")
     if qty <= 0:
         raise InvalidMovementError("Entry quantity must be positive")
 
     if vat > 0:
-        vat_factor = Decimal("1.00") + (vat / Decimal("100.00"))
-        cost_base = (cost_with_vat / vat_factor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        cost_with_vat = (cost_base * (Decimal("1.00") + (vat / Decimal("100.00")))).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
     else:
-        cost_base = cost_with_vat
+        cost_with_vat = cost_base
 
     stock = _get_stock_for_update(product, warehouse)
     current_total = _total_stock_quantity(product)
