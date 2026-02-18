@@ -593,6 +593,46 @@ def _resolve_product_from_purchase_pdf(description: str) -> Product | None:
     return best
 
 
+def _create_product_from_purchase_pdf(
+    description: str,
+    supplier: Supplier | None,
+    unit_cost_with_vat: Decimal | None = None,
+    vat_percent: Decimal | None = None,
+) -> Product | None:
+    name = (description or "").strip()
+    if not name:
+        return None
+    if len(name) > 255:
+        name = name[:255].strip()
+    normalized = _normalize_lookup_text(name)
+    if normalized:
+        for candidate in Product.objects.only("id", "name"):
+            if _normalize_lookup_text(candidate.name or "") == normalized:
+                return candidate
+    prefix = _sku_prefix("", name)
+    existing = Product.objects.filter(sku__startswith=prefix).values_list("sku", flat=True)
+    max_suffix = 0
+    for sku in existing:
+        suffix = (sku or "")[len(prefix):]
+        if suffix.isdigit():
+            max_suffix = max(max_suffix, int(suffix))
+    sku = f"{prefix}{max_suffix + 1:04d}"
+    vat = vat_percent if vat_percent is not None else Decimal("0.00")
+    gross_cost = unit_cost_with_vat if unit_cost_with_vat is not None else Decimal("0.00")
+    if vat > 0:
+        factor = Decimal("1.00") + (vat / Decimal("100.00"))
+        avg_cost = (gross_cost / factor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    else:
+        avg_cost = gross_cost.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return Product.objects.create(
+        sku=sku,
+        name=name,
+        avg_cost=avg_cost,
+        vat_percent=vat,
+        default_supplier=supplier,
+    )
+
+
 class ProductForm(forms.ModelForm):
     class Meta:
         model = Product
@@ -2533,12 +2573,22 @@ def purchases_list(request):
 
             unresolved: list[str] = []
             resolved_items: list[dict] = []
+            auto_created_products = 0
             for entry in parsed_items:
                 entry = _normalize_purchase_pdf_item_fields(entry)
                 product = _resolve_product_from_purchase_pdf(entry.get("description") or "")
                 if not product:
-                    unresolved.append(entry.get("description") or "(sin descripción)")
-                    continue
+                    product = _create_product_from_purchase_pdf(
+                        description=entry.get("description") or "",
+                        supplier=supplier,
+                        unit_cost_with_vat=entry.get("unit_cost"),
+                        vat_percent=Decimal("0.00"),
+                    )
+                    if product:
+                        auto_created_products += 1
+                    else:
+                        unresolved.append(entry.get("description") or "(sin descripción)")
+                        continue
                 variants = list(ProductVariant.objects.filter(product=product).order_by("id"))
                 variant = None
                 if len(variants) == 1:
@@ -2644,6 +2694,11 @@ def purchases_list(request):
                     purchase.total = subtotal.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                     purchase.save()
                 messages.success(request, f"Compra importada desde PDF ({len(resolved_items)} ítems).")
+                if auto_created_products:
+                    messages.success(
+                        request,
+                        f"Se crearon automáticamente {auto_created_products} productos nuevos durante la importación.",
+                    )
                 if unresolved:
                     preview = ", ".join(unresolved[:4])
                     more = f" y {len(unresolved) - 4} más" if len(unresolved) > 4 else ""
