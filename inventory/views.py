@@ -31,6 +31,7 @@ import re
 import unicodedata
 import json
 import secrets
+from difflib import SequenceMatcher
 from xml.sax.saxutils import escape
 from django.core.files.base import ContentFile
 
@@ -443,15 +444,13 @@ def _resolve_product_from_purchase_pdf(description: str) -> Product | None:
     product = Product.objects.filter(name__iexact=raw).first()
     if product:
         return product
-    product = Product.objects.filter(name__icontains=raw).order_by("id").first()
-    if product:
-        return product
 
     normalized_target = _normalize_lookup_text(raw)
     if not normalized_target:
         return None
 
-    tokens = [tok for tok in normalized_target.split() if len(tok) >= 3]
+    stopwords = {"de", "del", "con", "sin", "para", "por", "the", "la", "el", "x"}
+    tokens = [tok for tok in normalized_target.split() if len(tok) >= 3 and tok not in stopwords]
     if not tokens:
         return None
     clauses = Q()
@@ -461,18 +460,40 @@ def _resolve_product_from_purchase_pdf(description: str) -> Product | None:
     if not candidates:
         return None
 
-    best: Product | None = None
-    best_score = -1
-    token_set = set(tokens)
-    for candidate in candidates:
+    def _score(candidate: Product) -> tuple[float, float, float]:
         candidate_text = _normalize_lookup_text(f"{candidate.sku or ''} {candidate.name or ''}")
-        candidate_tokens = set(candidate_text.split())
-        score = len(token_set & candidate_tokens)
-        if score > best_score:
-            best = candidate
-            best_score = score
-    if best_score <= 0:
+        candidate_tokens = {tok for tok in candidate_text.split() if len(tok) >= 3 and tok not in stopwords}
+        overlap_count = len(set(tokens) & candidate_tokens)
+        overlap_ratio = overlap_count / max(len(set(tokens)), 1)
+        text_ratio = SequenceMatcher(None, normalized_target, candidate_text).ratio()
+        # Overlap drives precision; text ratio helps when order/spacing differs.
+        score_value = (overlap_ratio * 0.7) + (text_ratio * 0.3)
+        return score_value, overlap_ratio, text_ratio
+
+    ranked: list[tuple[float, float, float, Product]] = []
+    for candidate in candidates:
+        score_value, overlap_ratio, text_ratio = _score(candidate)
+        ranked.append((score_value, overlap_ratio, text_ratio, candidate))
+    ranked.sort(key=lambda row: row[0], reverse=True)
+
+    best_score, best_overlap, best_ratio, best = ranked[0]
+    second_score = ranked[1][0] if len(ranked) > 1 else 0.0
+
+    # Require solid confidence and a margin from the second best to avoid wrong auto-matches.
+    if best_overlap < 0.60 and best_ratio < 0.78:
         return None
+    if best_score < 0.62:
+        return None
+    if (best_score - second_score) < 0.08:
+        return None
+
+    # Prefer strict SKU token containment when available.
+    token_set = set(tokens)
+    sku_tokens = {tok for tok in _normalize_lookup_text(best.sku or "").split() if len(tok) >= 3}
+    if sku_tokens and not (sku_tokens & token_set):
+        # If matched only by a weak name similarity and SKU doesn't align at all, reject.
+        if best_ratio < 0.86:
+            return None
     return best
 
 
