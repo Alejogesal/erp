@@ -222,6 +222,13 @@
         const setupRow = (row) => {
             if (!row || row.dataset.costReady === "1") return;
             row.dataset.costReady = "1";
+            const costInput = row.querySelector("input[name$='-unit_cost']");
+            if (costInput) {
+                costInput.addEventListener("input", () => {
+                    if (row.dataset.autoUpdating === "1") return;
+                    row.dataset.manualCost = "1";
+                });
+            }
         };
 
         const fetchProductInfo = async (productId) => {
@@ -253,11 +260,12 @@
                 row.dataset.productId = String(productId);
             }
             const productChanged = previousProductId && String(previousProductId) !== String(productId);
+            const manualCost = row.dataset.manualCost === "1";
             if (supplierSelect && info.default_supplier_id) {
                 supplierSelect.value = String(info.default_supplier_id);
             }
             const defaultCost = info.cost_with_vat || info.avg_cost;
-            if (costInput && defaultCost && (!costInput.value || productChanged)) {
+            if (costInput && defaultCost && (!manualCost || productChanged) && (!costInput.value || productChanged)) {
                 setRowCost(row, costInput, formatNumber(parseNumber(defaultCost)));
             }
             updateVariantSelect(row, productId);
@@ -589,11 +597,10 @@
                 if (data.product_id) {
                     ensureSelectOption(productSelect, data.product_id, data.product_text || data.product_search);
                     updateSearchFromSelect(productSelect);
+                    applyProductDefaults(productSelect);
                 } else if (productSelect._searchInput) {
                     productSelect._searchInput.value = data.product_search || "";
                 }
-                setSupplierIfAvailable(productSelect);
-                setCostIfAvailable(productSelect);
                 updateVariantSelect(row, productSelect.value);
             }
             if (supplierSelect && data.supplier_id) supplierSelect.value = data.supplier_id;
