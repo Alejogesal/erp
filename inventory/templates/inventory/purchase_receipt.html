@@ -83,7 +83,7 @@
                 <td class="num">${{ item.line_vat|latam_number:2 }}</td>
                 <td class="num">${{ item.line_total|latam_number:2 }}</td>
                 {% else %}
-                <td class="num">${{ item.unit_cost_effective|latam_number:2 }}</td>
+                <td class="num">${{ item.unit_cost|latam_number:2 }}</td>
                 <td class="num">{{ item.discount_percent|latam_number:2 }}</td>
                 <td class="num">{{ item.vat_percent|latam_number:2 }}</td>
                 <td class="num">${{ item.line_total|latam_number:2 }}</td>

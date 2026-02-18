@@ -213,6 +213,7 @@ def _extract_purchase_items_from_pdf_bytes(pdf_bytes: bytes) -> tuple[list[dict]
                     "quantity": qty_candidate,
                     "unit_cost": price_candidate,
                     "discount_percent": discount_candidate,
+                    "line_total": amount_candidate,
                 }
 
         if row_parsed is None:
@@ -239,6 +240,7 @@ def _extract_purchase_items_from_pdf_bytes(pdf_bytes: bytes) -> tuple[list[dict]
                 "quantity": qty,
                 "unit_cost": unit_cost,
                 "discount_percent": discount,
+                "line_total": _parse_latam_decimal(match.group("amount")),
             }
 
         desc = row_parsed["description"].strip()
@@ -257,6 +259,7 @@ def _extract_purchase_items_from_pdf_bytes(pdf_bytes: bytes) -> tuple[list[dict]
                 "quantity": qty,
                 "unit_cost": unit_cost,
                 "discount_percent": discount,
+                "line_total": row_parsed.get("line_total"),
             }
         )
 
@@ -382,6 +385,7 @@ def _extract_purchase_items_from_pdf_layout(pdf_bytes: bytes) -> list[dict]:
                     "quantity": qty,
                     "unit_cost": price,
                     "discount_percent": discount,
+                    "line_total": amount,
                 }
             )
     return parsed_items
@@ -402,6 +406,30 @@ def _normalize_purchase_pdf_item_fields(item: dict) -> dict:
     if qty > Decimal("100.00") and unit_cost <= Decimal("50.00"):
         item["quantity"] = unit_cost
         item["unit_cost"] = qty
+        qty = item["quantity"]
+        unit_cost = item["unit_cost"]
+
+    line_total = item.get("line_total")
+    discount = item.get("discount_percent")
+    try:
+        line_total = Decimal(line_total) if line_total is not None else None
+    except Exception:
+        line_total = None
+    try:
+        discount = Decimal(discount) if discount is not None else Decimal("0.00")
+    except Exception:
+        discount = Decimal("0.00")
+    if line_total is not None and qty > 0:
+        net_unit = (line_total / qty).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        if discount > 0 and discount < 100:
+            factor = Decimal("1.00") - (discount / Decimal("100.00"))
+            if factor > 0:
+                gross_unit = (net_unit / factor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                if abs(unit_cost - gross_unit) >= Decimal("0.05"):
+                    item["unit_cost"] = gross_unit
+        else:
+            if abs(unit_cost - net_unit) >= Decimal("0.05"):
+                item["unit_cost"] = net_unit
     return item
 
 
