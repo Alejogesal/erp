@@ -2993,6 +2993,22 @@ def purchase_edit(request, purchase_id: int):
                         purchase.warehouse_id != new_warehouse.id
                         or current_signature != new_signature
                     )
+                    current_qty_map: dict[tuple[int, int], Decimal] = {}
+                    for current in current_items:
+                        key = (current.product_id, current.variant_id or 0)
+                        current_qty_map[key] = (current_qty_map.get(key) or Decimal("0.00")) + Decimal(current.quantity)
+                    new_qty_map: dict[tuple[int, int], Decimal] = {}
+                    for item in items:
+                        key = (item["product"].id, item.get("variant").id if item.get("variant") else 0)
+                        new_qty_map[key] = (new_qty_map.get(key) or Decimal("0.00")) + Decimal(item["quantity"])
+                    additive_update = purchase.warehouse_id == new_warehouse.id
+                    if additive_update:
+                        for key, old_qty in current_qty_map.items():
+                            if new_qty_map.get(key, Decimal("0.00")) < old_qty:
+                                additive_update = False
+                                break
+                    if additive_update:
+                        stock_changed = False
                     if stock_changed:
                         # Revert previous stock movements
                         for movement in purchase.movements.select_for_update():
@@ -3040,9 +3056,21 @@ def purchase_edit(request, purchase_id: int):
                     purchase.save(update_fields=update_fields)
 
                     subtotal = Decimal("0.00")
+                    accumulated_new_qty: dict[tuple[int, int], Decimal] = {}
                     for item in items:
                         product = item["product"]
                         qty = item["quantity"]
+                        key = (product.id, item.get("variant").id if item.get("variant") else 0)
+                        previous_accumulated = accumulated_new_qty.get(key, Decimal("0.00"))
+                        accumulated_new_qty[key] = previous_accumulated + qty
+                        delta_qty = qty
+                        if additive_update:
+                            old_total = current_qty_map.get(key, Decimal("0.00"))
+                            new_total_after_row = accumulated_new_qty[key]
+                            new_total_before_row = previous_accumulated
+                            delta_after = max(new_total_after_row - old_total, Decimal("0.00"))
+                            delta_before = max(new_total_before_row - old_total, Decimal("0.00"))
+                            delta_qty = (delta_after - delta_before).quantize(Decimal("0.01"))
                         unit_cost = item["unit_cost"]
                         discount_percent = item.get("discount_percent") or Decimal("0.00")
                         effective_unit_cost = (unit_cost * (Decimal("1.00") - (discount_percent / Decimal("100.00")))).quantize(
@@ -3059,21 +3087,23 @@ def purchase_edit(request, purchase_id: int):
                             discount_percent=discount_percent,
                             vat_percent=vat,
                         )
-                        if stock_changed and purchase.warehouse.type == Warehouse.WarehouseType.COMUN and item.get("variant") is not None:
+                        if (stock_changed or additive_update) and purchase.warehouse.type == Warehouse.WarehouseType.COMUN and item.get("variant") is not None:
                             variant = (
                                 ProductVariant.objects.select_for_update()
                                 .filter(id=item["variant"].id, product=product)
                                 .first()
                             )
                             if variant:
-                                variant.quantity = (variant.quantity + qty).quantize(Decimal("0.01"))
-                                variant.save(update_fields=["quantity"])
-                                _koda_sync_common_with_variants(product, purchase.warehouse)
-                        if stock_changed:
+                                apply_qty = qty if stock_changed else delta_qty
+                                if apply_qty > 0:
+                                    variant.quantity = (variant.quantity + apply_qty).quantize(Decimal("0.01"))
+                                    variant.save(update_fields=["quantity"])
+                                    _koda_sync_common_with_variants(product, purchase.warehouse)
+                        if stock_changed or (additive_update and delta_qty > 0):
                             services.register_entry(
                                 product=product,
                                 warehouse=purchase.warehouse,
-                                quantity=qty,
+                                quantity=qty if stock_changed else delta_qty,
                                 unit_cost=effective_unit_cost,
                                 vat_percent=vat,
                                 user=request.user,
