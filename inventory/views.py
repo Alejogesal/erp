@@ -130,6 +130,41 @@ def _normalize_lookup_text(value: str) -> str:
     return re.sub(r"\s+", " ", cleaned).strip()
 
 
+def _purchase_pdf_match_tokens(value: str) -> list[str]:
+    normalized = _normalize_lookup_text(value)
+    if not normalized:
+        return []
+    alias = {
+        "enj": "enjuague",
+        "unid": "",
+        "unidad": "",
+        "unidades": "",
+        "ml": "",
+        "lts": "",
+        "lt": "",
+        "gr": "",
+        "g": "",
+    }
+    stopwords = {"de", "del", "con", "sin", "para", "por", "the", "la", "el"}
+    tokens: list[str] = []
+    for raw_tok in normalized.split():
+        tok = alias.get(raw_tok, raw_tok)
+        if not tok:
+            continue
+        if re.fullmatch(r"x\d+[a-z]*", tok):
+            continue
+        if re.fullmatch(r"\d+[a-z]*", tok):
+            continue
+        if tok in stopwords:
+            continue
+        if len(tok) >= 5 and tok.endswith("s"):
+            tok = tok[:-1]
+        if len(tok) < 3:
+            continue
+        tokens.append(tok)
+    return tokens
+
+
 def _parse_latam_decimal(raw: str | None) -> Decimal | None:
     if raw is None:
         return None
@@ -482,15 +517,13 @@ def _resolve_product_from_purchase_pdf(description: str) -> Product | None:
         return product
 
     normalized_target = _normalize_lookup_text(raw)
-    if not normalized_target:
+    target_tokens_list = _purchase_pdf_match_tokens(raw)
+    if not normalized_target or not target_tokens_list:
         return None
 
-    stopwords = {"de", "del", "con", "sin", "para", "por", "the", "la", "el", "x"}
-    tokens = [tok for tok in normalized_target.split() if len(tok) >= 3 and tok not in stopwords]
-    if not tokens:
-        return None
+    token_set = set(target_tokens_list)
     clauses = Q()
-    for token in tokens[:4]:
+    for token in target_tokens_list[:6]:
         clauses |= Q(name__icontains=token) | Q(sku__icontains=token)
     candidates = list(Product.objects.filter(clauses).only("id", "name", "sku")[:40])
     if not candidates:
@@ -498,10 +531,10 @@ def _resolve_product_from_purchase_pdf(description: str) -> Product | None:
 
     def _score(candidate: Product) -> tuple[float, float, float]:
         candidate_text = _normalize_lookup_text(f"{candidate.sku or ''} {candidate.name or ''}")
-        candidate_tokens = {tok for tok in candidate_text.split() if len(tok) >= 3 and tok not in stopwords}
-        overlap_count = len(set(tokens) & candidate_tokens)
-        overlap_ratio = overlap_count / max(len(set(tokens)), 1)
-        text_ratio = SequenceMatcher(None, normalized_target, candidate_text).ratio()
+        candidate_tokens = set(_purchase_pdf_match_tokens(f"{candidate.sku or ''} {candidate.name or ''}"))
+        overlap_count = len(token_set & candidate_tokens)
+        overlap_ratio = overlap_count / max(len(token_set), 1)
+        text_ratio = SequenceMatcher(None, " ".join(target_tokens_list), " ".join(sorted(candidate_tokens))).ratio()
         # Overlap drives precision; text ratio helps when order/spacing differs.
         score_value = (overlap_ratio * 0.7) + (text_ratio * 0.3)
         return score_value, overlap_ratio, text_ratio
@@ -516,15 +549,14 @@ def _resolve_product_from_purchase_pdf(description: str) -> Product | None:
     second_score = ranked[1][0] if len(ranked) > 1 else 0.0
 
     # Require solid confidence and a margin from the second best to avoid wrong auto-matches.
-    if best_overlap < 0.60 and best_ratio < 0.78:
+    if best_overlap < 0.50 and best_ratio < 0.72:
         return None
-    if best_score < 0.62:
+    if best_score < 0.55:
         return None
-    if (best_score - second_score) < 0.08:
+    if (best_score - second_score) < 0.05:
         return None
 
     # Prefer strict SKU token containment when available.
-    token_set = set(tokens)
     sku_tokens = {tok for tok in _normalize_lookup_text(best.sku or "").split() if len(tok) >= 3}
     if sku_tokens and not (sku_tokens & token_set):
         # If matched only by a weak name similarity and SKU doesn't align at all, reject.
