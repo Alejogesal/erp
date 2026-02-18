@@ -206,11 +206,18 @@ def _extract_purchase_items_from_pdf_bytes(pdf_bytes: bytes) -> tuple[list[dict]
     lines = [((line or "").replace("\u00a0", " ").rstrip()) for line in text.splitlines()]
     lines = [line for line in lines if line.strip()]
     in_table = False
-    pending_description = ""
+    pending_descriptions: list[str] = []
     parsed_items: list[dict] = []
     row_re = re.compile(
         r"^(?P<desc>.+?)\s+"
         r"(?P<qty>\d[\d\.,]*)\s+"
+        r"\$?\s*(?P<price>\d[\d\.,]*)\s+"
+        r"(?:(?P<discount>-?\s*\d[\d\.,]*)\s*%?\s+)?"
+        r"\$?\s*(?P<amount>\d[\d\.,]*)\s*$",
+        flags=re.IGNORECASE,
+    )
+    numeric_row_re = re.compile(
+        r"^(?P<qty>\d[\d\.,]*)\s+"
         r"\$?\s*(?P<price>\d[\d\.,]*)\s+"
         r"(?:(?P<discount>-?\s*\d[\d\.,]*)\s*%?\s+)?"
         r"\$?\s*(?P<amount>\d[\d\.,]*)\s*$",
@@ -259,11 +266,25 @@ def _extract_purchase_items_from_pdf_bytes(pdf_bytes: bytes) -> tuple[list[dict]
             match = None
 
         if row_parsed is None and not match:
-            if re.search(r"[A-Za-z]", line):
-                pending_description = f"{pending_description} {line}".strip() if pending_description else line
-                if len(pending_description) > 140:
-                    pending_description = line[:140]
-            continue
+            numeric_only = numeric_row_re.match(re.sub(r"\s+", " ", line))
+            if numeric_only and pending_descriptions:
+                qty = _parse_latam_decimal(numeric_only.group("qty"))
+                unit_cost = _parse_latam_decimal(numeric_only.group("price"))
+                discount_raw = (numeric_only.group("discount") or "").replace(" ", "")
+                discount = _parse_latam_decimal(discount_raw) or Decimal("0.00")
+                if discount < 0:
+                    discount = abs(discount)
+                row_parsed = {
+                    "description": pending_descriptions.pop(0),
+                    "quantity": qty,
+                    "unit_cost": unit_cost,
+                    "discount_percent": discount,
+                    "line_total": _parse_latam_decimal(numeric_only.group("amount")),
+                }
+            else:
+                if re.search(r"[A-Za-z]", line):
+                    pending_descriptions.append(line[:140])
+                continue
 
         if row_parsed is None and match:
             desc = match.group("desc").strip()
@@ -282,9 +303,6 @@ def _extract_purchase_items_from_pdf_bytes(pdf_bytes: bytes) -> tuple[list[dict]
             }
 
         desc = row_parsed["description"].strip()
-        if pending_description:
-            desc = f"{pending_description} {desc}".strip()
-            pending_description = ""
         qty = row_parsed["quantity"]
         unit_cost = row_parsed["unit_cost"]
         discount = row_parsed["discount_percent"]
@@ -369,7 +387,7 @@ def _extract_purchase_items_from_pdf_layout(pdf_bytes: bytes) -> list[dict]:
             continue
 
         header_y = header_row[0][1]
-        pending_description = ""
+        pending_descriptions: list[str] = []
         for row in rows:
             y0 = row[0][1]
             if y0 >= header_y:
@@ -406,14 +424,11 @@ def _extract_purchase_items_from_pdf_layout(pdf_bytes: bytes) -> list[dict]:
 
             if qty is None or price is None or amount is None:
                 if desc and re.search(r"[A-Za-z]", desc):
-                    pending_description = f"{pending_description} {desc}".strip() if pending_description else desc
-                    if len(pending_description) > 140:
-                        pending_description = desc[:140]
+                    pending_descriptions.append(desc[:140])
                 continue
 
-            if pending_description:
-                desc = f"{pending_description} {desc}".strip()
-                pending_description = ""
+            if pending_descriptions and (not desc or desc == "(sin descripción)"):
+                desc = pending_descriptions.pop(0)
             if not desc:
                 desc = "(sin descripción)"
             if qty <= 0 or price < 0:
