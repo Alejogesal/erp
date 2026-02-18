@@ -226,6 +226,8 @@ def _extract_purchase_items_from_pdf_bytes(pdf_bytes: bytes) -> tuple[list[dict]
         if row_parsed is None and not match:
             if re.search(r"[A-Za-z]", line):
                 pending_description = f"{pending_description} {line}".strip() if pending_description else line
+                if len(pending_description) > 140:
+                    pending_description = line[:140]
             continue
 
         if row_parsed is None and match:
@@ -264,10 +266,9 @@ def _extract_purchase_items_from_pdf_bytes(pdf_bytes: bytes) -> tuple[list[dict]
             }
         )
 
+    layout_items = _extract_purchase_items_from_pdf_layout(pdf_bytes)
+    parsed_items = _pick_best_purchase_pdf_parse(parsed_items, layout_items)
     if not parsed_items:
-        layout_items = _extract_purchase_items_from_pdf_layout(pdf_bytes)
-        if layout_items:
-            return layout_items, metadata, None
         return [], metadata, (
             "No se encontraron ítems en el PDF. "
             "Verificá que tenga una tabla con columnas descripción, cantidad y precio."
@@ -371,6 +372,8 @@ def _extract_purchase_items_from_pdf_layout(pdf_bytes: bytes) -> list[dict]:
             if qty is None or price is None or amount is None:
                 if desc and re.search(r"[A-Za-z]", desc):
                     pending_description = f"{pending_description} {desc}".strip() if pending_description else desc
+                    if len(pending_description) > 140:
+                        pending_description = desc[:140]
                 continue
 
             if pending_description:
@@ -390,6 +393,39 @@ def _extract_purchase_items_from_pdf_layout(pdf_bytes: bytes) -> list[dict]:
                 }
             )
     return parsed_items
+
+
+def _purchase_pdf_parse_score(items: list[dict]) -> float:
+    if not items:
+        return -1.0
+    score = float(len(items) * 10)
+    for entry in items:
+        desc = str(entry.get("description") or "").strip()
+        qty = entry.get("quantity")
+        unit_cost = entry.get("unit_cost")
+        if not desc:
+            score -= 6
+            continue
+        words = desc.split()
+        if len(words) > 12:
+            score -= (len(words) - 12) * 0.8
+        if len(desc) > 110:
+            score -= 8
+        if qty is None:
+            score -= 4
+        if unit_cost is None:
+            score -= 4
+    return score
+
+
+def _pick_best_purchase_pdf_parse(text_items: list[dict], layout_items: list[dict]) -> list[dict]:
+    text_score = _purchase_pdf_parse_score(text_items)
+    layout_score = _purchase_pdf_parse_score(layout_items)
+    if layout_score > text_score + 5:
+        return layout_items
+    if text_score >= 0:
+        return text_items
+    return layout_items
 
 
 def _normalize_purchase_pdf_item_fields(item: dict) -> dict:
