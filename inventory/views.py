@@ -1516,6 +1516,100 @@ def purchase_receipt(request, purchase_id: int):
 
 
 @login_required
+def purchase_receipt_pdf(request, purchase_id: int):
+    purchase = get_object_or_404(
+        Purchase.objects.select_related("supplier", "warehouse").prefetch_related("items__product", "items__variant"),
+        pk=purchase_id,
+    )
+    items = list(purchase.items.all())
+    has_vat = False
+    subtotal_no_vat = Decimal("0.00")
+    vat_total = Decimal("0.00")
+    for item in items:
+        discount_percent = item.discount_percent or Decimal("0.00")
+        effective_unit_cost = (item.unit_cost * (Decimal("1.00") - (discount_percent / Decimal("100.00")))).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+        item.discount_percent = discount_percent
+        item.unit_cost_effective = effective_unit_cost
+        item.line_total = (item.quantity * effective_unit_cost).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        product_vat = item.product.vat_percent or Decimal("0.00")
+        item_vat = item.vat_percent or Decimal("0.00")
+        vat_percent = item_vat if item_vat > 0 else product_vat
+        if vat_percent > 0:
+            has_vat = True
+            vat_factor = Decimal("1.00") + (vat_percent / Decimal("100.00"))
+            item.unit_cost_no_vat = (effective_unit_cost / vat_factor).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+            item.unit_vat = (effective_unit_cost - item.unit_cost_no_vat).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        else:
+            item.unit_cost_no_vat = effective_unit_cost
+            item.unit_vat = Decimal("0.00")
+        item.vat_percent = vat_percent
+        item.line_vat = (item.unit_vat * item.quantity).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        subtotal_no_vat += (item.unit_cost_no_vat * item.quantity).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        vat_total += item.line_vat
+    subtotal = sum((item.line_total for item in items), Decimal("0.00"))
+    discount_percent = purchase.discount_percent or Decimal("0.00")
+    discount_total = (subtotal * discount_percent / Decimal("100.00")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    total = (subtotal - discount_total).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    full_page_size = 27
+    last_page_size = 20
+    pages = []
+    remaining = list(items)
+    while len(remaining) > full_page_size + last_page_size:
+        pages.append({"items": remaining[:full_page_size]})
+        remaining = remaining[full_page_size:]
+    if len(remaining) > last_page_size:
+        split_size = len(remaining) - last_page_size
+        pages.append({"items": remaining[:split_size]})
+        remaining = remaining[split_size:]
+    pages.append({"items": remaining})
+    for idx, page in enumerate(pages):
+        page["show_totals"] = idx == len(pages) - 1
+        page["page_number"] = idx + 1
+        page["page_count"] = len(pages)
+
+    from django.template.loader import render_to_string
+
+    html = render_to_string(
+        "inventory/purchase_receipt_pdf.html",
+        {
+            "purchase": purchase,
+            "items": items,
+            "pages": pages,
+            "subtotal": subtotal,
+            "subtotal_no_vat": subtotal_no_vat,
+            "vat_total": vat_total,
+            "discount_total": discount_total,
+            "discount_percent": discount_percent,
+            "total": total,
+            "invoice_number": purchase.invoice_number,
+            "has_vat": has_vat,
+        },
+        request=request,
+    )
+    try:
+        from weasyprint import HTML
+    except Exception:
+        return HttpResponse(
+            "WeasyPrint no está instalado. Instalalo con 'pip install weasyprint' para generar PDF.",
+            status=500,
+        )
+
+    pdf_bytes = HTML(string=html, base_url=request.build_absolute_uri("/")).write_pdf()
+    invoice_raw = purchase.invoice_number
+    if isinstance(invoice_raw, str) and "-" in invoice_raw:
+        invoice_raw = invoice_raw.split("-", 1)[1]
+    invoice_number = str(invoice_raw).lstrip("0") or str(purchase.id)
+    response = HttpResponse(pdf_bytes, content_type="application/pdf")
+    response["Content-Disposition"] = f'attachment; filename="COMP-{invoice_number}.pdf"'
+    return response
+
+
+@login_required
 def sales_list(request):
     SaleItemFormSet = formset_factory(SaleItemForm, extra=1, can_delete=False)
     default_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()

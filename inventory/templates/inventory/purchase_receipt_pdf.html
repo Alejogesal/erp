@@ -1,0 +1,137 @@
+{% load latam_numbers %}
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <title>Comprobante {{ invoice_number }}</title>
+    <style>
+        @page { size: A4; margin: 0; }
+        html, body { margin: 0; padding: 0; width: 210mm; }
+        body { font-family: Arial, sans-serif; color: #000; background: #fff; font-size: 12px; }
+        .page { width: 210mm; height: 297mm; page-break-after: always; }
+        .page:last-child { page-break-after: auto; }
+        .invoice-wrapper {
+            border: 1px solid #000;
+            padding: 12mm;
+            box-sizing: border-box;
+            width: 100%;
+            height: 297mm;
+        }
+        .invoice-header { display: grid; grid-template-columns: 70mm 1fr; align-items: center; gap: 8mm; }
+        .invoice-logo { text-align: center; border: 2px solid #000; padding: 14px; font-size: 26px; font-weight: 700; }
+        .invoice-meta h2 { margin: 0 0 6px; font-size: 18px; }
+        .info-row { display: grid; grid-template-columns: 1.2fr 1fr 1fr 0.8fr; gap: 6mm; margin: 6mm 0; }
+        .info-block strong { display: block; font-size: 11px; text-transform: uppercase; }
+        table.invoice-table { width: 100%; border-collapse: collapse; margin-top: 6mm; table-layout: fixed; }
+        table.invoice-table th, table.invoice-table td { border-bottom: 1px solid #000; padding: 6px 4px; }
+        table.invoice-table th.num { text-align: right; }
+        table.invoice-table th.desc, table.invoice-table td.desc { white-space: normal; }
+        table.invoice-table th.num, table.invoice-table td.num { white-space: nowrap; }
+        table.invoice-table th { text-align: left; font-size: 11px; text-transform: uppercase; }
+        table.invoice-table td.num { text-align: right; }
+        .invoice-body { width: 100%; }
+        .totals { margin-top: 6mm; border-top: 1px solid #000; padding-top: 6mm; }
+        .totals-row { display: grid; grid-template-columns: 1fr 1fr 35mm; }
+        .totals-row div { text-align: right; padding: 4px 0; }
+        .totals-row .label { text-align: left; }
+        .right { text-align: right; }
+    </style>
+</head>
+<body>
+    {% for page in pages %}
+    <div class="page">
+        <div class="invoice-wrapper">
+            <div class="invoice-header">
+                <div class="invoice-logo">X</div>
+                <div class="invoice-meta">
+                    <h2>Comprobante de compra</h2>
+                    <div>Nº {{ invoice_number }}</div>
+                    <div>Fecha: {{ purchase.created_at|date:"d/m/Y" }}</div>
+                </div>
+            </div>
+
+            <div class="info-row" style="border-top:1px solid #000; padding-top:8px; margin-top:10px;">
+                <div class="info-block"><strong>Razón Social:</strong> {{ purchase.supplier|default:"-" }}</div>
+                <div class="info-block"><strong>Dirección:</strong> </div>
+                <div class="info-block"><strong>Localidad:</strong> </div>
+                <div class="info-block right">
+                    <div><strong>I.V.A.:</strong></div>
+                    <div><strong>C.U.I.T.:</strong></div>
+                    <div><strong>Cond. Vta:</strong></div>
+                </div>
+            </div>
+
+            <div class="invoice-body">
+                <table class="invoice-table">
+                    <colgroup>
+                        <col style="width:73mm;">
+                        <col style="width:17mm;">
+                        <col style="width:24mm;">
+                        <col style="width:15mm;">
+                        <col style="width:15mm;">
+                        <col style="width:36mm;">
+                    </colgroup>
+                    <thead>
+                        <tr>
+                            <th class="desc">Descripción</th>
+                            <th class="num">Cantidad</th>
+                            <th class="num">Precio</th>
+                            <th class="num">Dto</th>
+                            <th class="num">IVA %</th>
+                            <th class="num">Importe</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in page.items %}
+                        <tr>
+                            <td class="desc">{{ item.product.name }}{% if item.variant %} · {{ item.variant.name }}{% endif %}</td>
+                            <td class="num">{{ item.quantity|latam_number:2 }}</td>
+                            <td class="num">${{ item.unit_cost|latam_number:2 }}</td>
+                            <td class="num">{{ item.discount_percent|latam_number:2 }}%</td>
+                            <td class="num">{{ item.vat_percent|latam_number:2 }}</td>
+                            <td class="num">${{ item.line_total|latam_number:2 }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            {% if page.show_totals %}
+            <div class="totals">
+                {% if has_vat %}
+                <div class="totals-row">
+                    <div class="label">Subtotal sin IVA</div>
+                    <div></div>
+                    <div>${{ subtotal_no_vat|latam_number:2 }}</div>
+                </div>
+                <div class="totals-row">
+                    <div class="label">IVA</div>
+                    <div></div>
+                    <div>${{ vat_total|latam_number:2 }}</div>
+                </div>
+                {% else %}
+                <div class="totals-row">
+                    <div class="label">Subtotal</div>
+                    <div></div>
+                    <div>${{ subtotal|latam_number:2 }}</div>
+                </div>
+                {% endif %}
+                {% if discount_total > 0 %}
+                <div class="totals-row">
+                    <div class="label">Descuento ({{ discount_percent|latam_number:2 }}%)</div>
+                    <div></div>
+                    <div>-${{ discount_total|latam_number:2 }}</div>
+                </div>
+                {% endif %}
+                <div class="totals-row" style="font-weight:700;">
+                    <div class="label">Total</div>
+                    <div></div>
+                    <div>${{ total|latam_number:2 }}</div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</body>
+</html>

@@ -26,6 +26,7 @@ urlpatterns = [
     path("compras/", views.purchases_list, name="inventory_purchases_list"),
     path("compras/<int:purchase_id>/editar/", views.purchase_edit, name="inventory_purchase_edit"),
     path("compras/<int:purchase_id>/comprobante/", views.purchase_receipt, name="inventory_purchase_receipt"),
+    path("compras/<int:purchase_id>/comprobante.pdf", views.purchase_receipt_pdf, name="inventory_purchase_receipt_pdf"),
     path("compras/<int:purchase_id>/eliminar/", views.purchase_delete, name="inventory_purchase_delete"),
     path("ventas/registrar/", views.register_sale, name="inventory_register_sale"),
     path("ventas/", views.sales_list, name="inventory_sales_list"),
