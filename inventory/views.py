@@ -521,11 +521,24 @@ def _resolve_product_from_purchase_pdf(description: str) -> Product | None:
     if not normalized_target or not target_tokens_list:
         return None
 
+    # Strong fallback: exact match on normalized label (handles punctuation/accents/case differences).
+    normalized_compact = normalized_target.replace(" ", "")
+    for candidate in Product.objects.only("id", "name", "sku"):
+        name_norm = _normalize_lookup_text(candidate.name or "")
+        sku_norm = _normalize_lookup_text(candidate.sku or "")
+        full_norm = _normalize_lookup_text(f"{candidate.sku or ''} {candidate.name or ''}")
+        if name_norm == normalized_target or full_norm == normalized_target:
+            return candidate
+        if name_norm.replace(" ", "") == normalized_compact:
+            return candidate
+        if sku_norm and sku_norm == normalized_target:
+            return candidate
+
     token_set = set(target_tokens_list)
     clauses = Q()
     for token in target_tokens_list[:6]:
         clauses |= Q(name__icontains=token) | Q(sku__icontains=token)
-    candidates = list(Product.objects.filter(clauses).only("id", "name", "sku")[:40])
+    candidates = list(Product.objects.filter(clauses).only("id", "name", "sku")[:200])
     if not candidates:
         return None
 
