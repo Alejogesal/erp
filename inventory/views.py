@@ -1476,9 +1476,7 @@ def purchase_receipt(request, purchase_id: int):
         item.discount_percent = discount_percent
         item.unit_cost_effective = effective_unit_cost
         item.line_total = (item.quantity * effective_unit_cost).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        product_vat = item.product.vat_percent or Decimal("0.00")
-        item_vat = item.vat_percent or Decimal("0.00")
-        vat_percent = item_vat if item_vat > 0 else product_vat
+        vat_percent = item.vat_percent or Decimal("0.00")
         if vat_percent > 0:
             has_vat = True
             vat_factor = Decimal("1.00") + (vat_percent / Decimal("100.00"))
@@ -1533,9 +1531,7 @@ def purchase_receipt_pdf(request, purchase_id: int):
         item.discount_percent = discount_percent
         item.unit_cost_effective = effective_unit_cost
         item.line_total = (item.quantity * effective_unit_cost).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        product_vat = item.product.vat_percent or Decimal("0.00")
-        item_vat = item.vat_percent or Decimal("0.00")
-        vat_percent = item_vat if item_vat > 0 else product_vat
+        vat_percent = item.vat_percent or Decimal("0.00")
         if vat_percent > 0:
             has_vat = True
             vat_factor = Decimal("1.00") + (vat_percent / Decimal("100.00"))
