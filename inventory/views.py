@@ -402,7 +402,7 @@ def _extract_purchase_items_from_pdf_layout(pdf_bytes: bytes) -> list[dict]:
                 if x0 < x_qty - 5:
                     desc_parts.append(txt)
                     continue
-                if qty_raw is None and x_price - 15 <= x0:
+                if qty_raw is None and x0 < x_price - 10:
                     qty_raw = txt
                     continue
                 if price_raw is None and (x_discount is None or x0 < x_discount - 10):
@@ -469,6 +469,13 @@ def _purchase_pdf_parse_score(items: list[dict]) -> float:
 
 
 def _pick_best_purchase_pdf_parse(text_items: list[dict], layout_items: list[dict]) -> list[dict]:
+    text_count = len(text_items)
+    layout_count = len(layout_items)
+    if layout_count >= text_count + 2:
+        return layout_items
+    if text_count >= layout_count + 2:
+        return text_items
+
     text_score = _purchase_pdf_parse_score(text_items)
     layout_score = _purchase_pdf_parse_score(layout_items)
     if layout_score > text_score + 5:
