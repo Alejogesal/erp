@@ -387,6 +387,24 @@ def _extract_purchase_items_from_pdf_layout(pdf_bytes: bytes) -> list[dict]:
     return parsed_items
 
 
+def _normalize_purchase_pdf_item_fields(item: dict) -> dict:
+    qty = item.get("quantity")
+    unit_cost = item.get("unit_cost")
+    if qty is None or unit_cost is None:
+        return item
+    try:
+        qty = Decimal(qty)
+        unit_cost = Decimal(unit_cost)
+    except Exception:
+        return item
+    # Some supplier PDFs can flip qty/price columns in layout extraction.
+    # If qty looks unrealistically large and unit cost looks like a small count, swap them.
+    if qty > Decimal("100.00") and unit_cost <= Decimal("50.00"):
+        item["quantity"] = unit_cost
+        item["unit_cost"] = qty
+    return item
+
+
 def _resolve_product_from_purchase_pdf(description: str) -> Product | None:
     raw = (description or "").strip()
     if not raw:
@@ -2281,6 +2299,7 @@ def purchases_list(request):
             unresolved: list[str] = []
             resolved_items: list[dict] = []
             for entry in parsed_items:
+                entry = _normalize_purchase_pdf_item_fields(entry)
                 product = _resolve_product_from_purchase_pdf(entry.get("description") or "")
                 if not product:
                     unresolved.append(entry.get("description") or "(sin descripción)")
