@@ -131,6 +131,100 @@ class DashboardViewTests(TestCase):
             response["Content-Type"], "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
+    def test_bulk_update_margins_by_group_updates_only_matching_products(self):
+        target = Product.objects.create(
+            sku="SKU-BRAND-A",
+            name="Brand A Product",
+            group="Bellissima",
+            margin_consumer=Decimal("10.00"),
+        )
+        other = Product.objects.create(
+            sku="SKU-BRAND-B",
+            name="Brand B Product",
+            group="Otra",
+            margin_consumer=Decimal("10.00"),
+        )
+
+        response = self.client.post(
+            reverse("inventory_product_costs"),
+            {
+                "action": "bulk_update_margins",
+                "group": "Bellissima",
+                "margin_consumer": "35.00",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        target.refresh_from_db()
+        other.refresh_from_db()
+        self.assertEqual(target.margin_consumer, Decimal("35.00"))
+        self.assertEqual(other.margin_consumer, Decimal("10.00"))
+
+    def test_bulk_update_margins_without_group_updates_all_products(self):
+        first = Product.objects.create(
+            sku="SKU-ALL-1",
+            name="All 1",
+            margin_barber=Decimal("8.00"),
+        )
+        second = Product.objects.create(
+            sku="SKU-ALL-2",
+            name="All 2",
+            margin_barber=Decimal("12.00"),
+        )
+
+        response = self.client.post(
+            reverse("inventory_product_costs"),
+            {
+                "action": "bulk_update_margins",
+                "margin_barber": "22.00",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(first.margin_barber, Decimal("22.00"))
+        self.assertEqual(second.margin_barber, Decimal("22.00"))
+
+    def test_product_costs_update_saves_margins_per_product(self):
+        product = Product.objects.create(
+            sku="SKU-MARGINS",
+            name="Producto margen",
+            group="Linea",
+            avg_cost=Decimal("100.00"),
+            vat_percent=Decimal("21.00"),
+            margin_consumer=Decimal("25.00"),
+            margin_barber=Decimal("20.00"),
+            margin_distributor=Decimal("15.00"),
+            default_supplier=self.supplier,
+        )
+
+        response = self.client.post(
+            reverse("inventory_product_costs"),
+            {
+                "action": "update_costs",
+                "form-TOTAL_FORMS": "1",
+                "form-INITIAL_FORMS": "1",
+                "form-MIN_NUM_FORMS": "0",
+                "form-MAX_NUM_FORMS": "1000",
+                "form-0-product_id": str(product.id),
+                "form-0-name": product.name,
+                "form-0-group": product.group,
+                "form-0-supplier": str(self.supplier.id),
+                "form-0-avg_cost": "100.00",
+                "form-0-vat_percent": "21.00",
+                "form-0-margin_consumer": "32.50",
+                "form-0-margin_barber": "24.00",
+                "form-0-margin_distributor": "18.75",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        product.refresh_from_db()
+        self.assertEqual(product.margin_consumer, Decimal("32.50"))
+        self.assertEqual(product.margin_barber, Decimal("24.00"))
+        self.assertEqual(product.margin_distributor, Decimal("18.75"))
+
     def test_delete_product_from_price_list(self):
         product_to_delete = Product.objects.create(
             sku="SKU-DEL",

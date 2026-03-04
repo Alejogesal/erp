@@ -845,6 +845,9 @@ class ProductCostRowForm(forms.Form):
         required=False,
         label="IVA %",
     )
+    margin_consumer = forms.DecimalField(required=False, decimal_places=2, label="Margen % consumidor final")
+    margin_barber = forms.DecimalField(required=False, decimal_places=2, label="Margen % peluquerías/barberías")
+    margin_distributor = forms.DecimalField(required=False, decimal_places=2, label="Margen % distribuidores")
 
 
 class ProductBulkUpdateForm(forms.Form):
@@ -4902,6 +4905,9 @@ def product_costs(request):
             "supplier": product.default_supplier,
             "avg_cost": product.avg_cost,
             "vat_percent": product.vat_percent,
+            "margin_consumer": product.margin_consumer,
+            "margin_barber": product.margin_barber,
+            "margin_distributor": product.margin_distributor,
         }
         for product in products
     ]
@@ -5051,18 +5057,39 @@ def product_costs(request):
             return redirect("inventory_product_costs")
         elif action == "quick_update_cost":
             product_id = request.POST.get("product_id")
-            avg_cost_raw = request.POST.get("avg_cost")
             if not product_id:
                 return JsonResponse({"ok": False, "error": "missing_product_id"}, status=400)
             product = Product.objects.filter(id=product_id).first()
             if not product:
                 return JsonResponse({"ok": False, "error": "product_not_found"}, status=404)
-            try:
-                avg_cost = _parse_decimal(avg_cost_raw)
-            except Exception:
-                avg_cost = Decimal("0.00")
-            product.avg_cost = avg_cost
-            product.save(update_fields=["avg_cost"])
+            update_fields = []
+            if "avg_cost" in request.POST:
+                avg_cost = _parse_decimal(request.POST.get("avg_cost"))
+                if product.avg_cost != avg_cost:
+                    product.avg_cost = avg_cost
+                    update_fields.append("avg_cost")
+            if "vat_percent" in request.POST:
+                vat_percent = _parse_decimal(request.POST.get("vat_percent"))
+                if product.vat_percent != vat_percent:
+                    product.vat_percent = vat_percent
+                    update_fields.append("vat_percent")
+            if "margin_consumer" in request.POST:
+                margin_consumer = _parse_decimal(request.POST.get("margin_consumer"))
+                if product.margin_consumer != margin_consumer:
+                    product.margin_consumer = margin_consumer
+                    update_fields.append("margin_consumer")
+            if "margin_barber" in request.POST:
+                margin_barber = _parse_decimal(request.POST.get("margin_barber"))
+                if product.margin_barber != margin_barber:
+                    product.margin_barber = margin_barber
+                    update_fields.append("margin_barber")
+            if "margin_distributor" in request.POST:
+                margin_distributor = _parse_decimal(request.POST.get("margin_distributor"))
+                if product.margin_distributor != margin_distributor:
+                    product.margin_distributor = margin_distributor
+                    update_fields.append("margin_distributor")
+            if update_fields:
+                product.save(update_fields=update_fields)
             return JsonResponse({"ok": True})
         elif action == "bulk_update":
             bulk_form = ProductBulkUpdateForm(request.POST)
@@ -5174,6 +5201,9 @@ def product_costs(request):
                     name = form.cleaned_data.get("name") or product.name
                     group = (form.cleaned_data.get("group") or "").strip()
                     vat_percent = form.cleaned_data.get("vat_percent")
+                    margin_consumer = form.cleaned_data.get("margin_consumer")
+                    margin_barber = form.cleaned_data.get("margin_barber")
+                    margin_distributor = form.cleaned_data.get("margin_distributor")
                     if vat_percent is None:
                         vat_percent = Decimal("0.00")
                     update_fields = []
@@ -5189,6 +5219,15 @@ def product_costs(request):
                     if product.vat_percent != vat_percent:
                         product.vat_percent = vat_percent
                         update_fields.append("vat_percent")
+                    if margin_consumer is not None and product.margin_consumer != margin_consumer:
+                        product.margin_consumer = margin_consumer
+                        update_fields.append("margin_consumer")
+                    if margin_barber is not None and product.margin_barber != margin_barber:
+                        product.margin_barber = margin_barber
+                        update_fields.append("margin_barber")
+                    if margin_distributor is not None and product.margin_distributor != margin_distributor:
+                        product.margin_distributor = margin_distributor
+                        update_fields.append("margin_distributor")
                     if supplier and product.default_supplier_id != supplier.id:
                         product.default_supplier = supplier
                         update_fields.append("default_supplier")
@@ -5200,7 +5239,7 @@ def product_costs(request):
                             product=product,
                             defaults={"last_cost": avg_cost, "last_purchase_at": timezone.now()},
                         )
-                messages.success(request, "Costos y proveedores actualizados.")
+                messages.success(request, "Costos, márgenes y proveedores actualizados.")
                 return redirect("inventory_product_costs")
             messages.error(request, "Revisá los costos ingresados.")
     return render(
