@@ -200,6 +200,20 @@ class CustomerGroupDiscount(models.Model):
         return f"{self.customer} - {self.group} ({self.discount_percent}%)"
 
 
+class CustomerProductPrice(models.Model):
+    customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name="custom_prices")
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="customer_custom_prices")
+    unit_price = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    unit_cost = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+
+    class Meta:
+        unique_together = ("customer", "product")
+        ordering = ["customer__name", "product__sku"]
+
+    def __str__(self) -> str:
+        return f"{self.customer} - {self.product.sku} (precio: {self.unit_price}, costo: {self.unit_cost})"
+
+
 class Stock(models.Model):
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="stocks")
     warehouse = models.ForeignKey(Warehouse, on_delete=models.CASCADE, related_name="stocks")

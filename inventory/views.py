@@ -41,6 +41,7 @@ from .models import (
     Customer,
     CustomerGroupDiscount,
     CustomerProductDiscount,
+    CustomerProductPrice,
     CustomerPayment,
     MercadoLibreNotification,
     MercadoLibreConnection,
@@ -90,6 +91,40 @@ def _product_label_with_last_cost(obj: Product) -> str:
         if last_cost is None:
             last_cost = obj.last_purchase_cost()
     return f"{obj.sku or 'Sin SKU'} - {obj.name} (último costo: {last_cost:.2f})"
+
+
+def _resolve_sale_item_pricing(
+    *,
+    product: Product,
+    audience: str,
+    customer: Customer | None,
+    requested_discount: Decimal | None = None,
+) -> tuple[Decimal, Decimal, Decimal | None]:
+    base_price = {
+        Customer.Audience.CONSUMER: product.consumer_price,
+        Customer.Audience.BARBER: product.barber_price,
+        Customer.Audience.DISTRIBUTOR: product.distributor_price,
+    }.get(audience, product.consumer_price)
+    if customer:
+        custom_price = CustomerProductPrice.objects.filter(customer=customer, product=product).first()
+        if custom_price:
+            base_price = custom_price.unit_price if custom_price.unit_price is not None else base_price
+            discount = requested_discount if requested_discount is not None else Decimal("0.00")
+            return base_price, discount, custom_price.unit_cost
+    if requested_discount is not None:
+        return base_price, requested_discount, None
+    discount = Decimal("0.00")
+    if customer:
+        discount_obj = CustomerProductDiscount.objects.filter(customer=customer, product=product).first()
+        if discount_obj:
+            discount = discount_obj.discount_percent
+        else:
+            group_key = (product.group or "").strip()
+            if group_key:
+                group_discount = CustomerGroupDiscount.objects.filter(customer=customer, group__iexact=group_key).first()
+                if group_discount:
+                    discount = group_discount.discount_percent
+    return base_price, discount, None
 
 
 def _apply_product_queryset_to_formset(formset, products_qs):
@@ -773,6 +808,18 @@ class SaleHeaderForm(forms.Form):
 class SaleItemForm(forms.Form):
     product = forms.ModelChoiceField(queryset=Product.objects.all())
     quantity = forms.IntegerField(min_value=1)
+    unit_price_override = forms.DecimalField(
+        label="Precio unitario",
+        min_value=Decimal("0.00"),
+        decimal_places=2,
+        required=False,
+    )
+    cost_unit_override = forms.DecimalField(
+        label="Costo unitario",
+        min_value=Decimal("0.00"),
+        decimal_places=2,
+        required=False,
+    )
     discount_percent = forms.DecimalField(
         label="DTO %",
         min_value=Decimal("0.00"),
@@ -1345,28 +1392,15 @@ def sale_edit(request, sale_id: int):
                     discount_total = Decimal("0.00")
                     base_subtotal = Decimal("0.00")
                     for data in items:
-                        base_price = {
-                            Customer.Audience.CONSUMER: data["product"].consumer_price,
-                            Customer.Audience.BARBER: data["product"].barber_price,
-                            Customer.Audience.DISTRIBUTOR: data["product"].distributor_price,
-                        }.get(audience, data["product"].consumer_price)
-                        discount = data.get("discount_percent")
-                        if discount is None:
-                            discount = Decimal("0.00")
-                            if customer:
-                                discount_obj = CustomerProductDiscount.objects.filter(
-                                    customer=customer, product=data["product"]
-                                ).first()
-                                if discount_obj:
-                                    discount = discount_obj.discount_percent
-                                else:
-                                    group_key = (data["product"].group or "").strip()
-                                    if group_key:
-                                        group_discount = CustomerGroupDiscount.objects.filter(
-                                            customer=customer, group__iexact=group_key
-                                        ).first()
-                                        if group_discount:
-                                            discount = group_discount.discount_percent
+                        base_price, discount, custom_cost = _resolve_sale_item_pricing(
+                            product=data["product"],
+                            audience=audience,
+                            customer=customer,
+                            requested_discount=data.get("discount_percent"),
+                        )
+                        manual_unit_price = data.get("unit_price_override")
+                        if manual_unit_price is not None:
+                            base_price = manual_unit_price
                         if discount < 0 or discount > 100:
                             raise ValueError("Descuento por ítem inválido (0 a 100).")
                         vat_value = data.get("vat_percent") or Decimal("0.00")
@@ -1389,14 +1423,20 @@ def sale_edit(request, sale_id: int):
                                 variant.save(update_fields=["quantity"])
                                 if comun_wh:
                                     _koda_sync_common_with_variants(data["product"], comun_wh)
-                        kit_cost = data["product"].cost_with_vat() if data["product"].is_kit else data["product"].last_purchase_cost()
+                        default_cost = data["product"].cost_with_vat()
+                        manual_cost = data.get("cost_unit_override")
+                        cost_unit = (
+                            manual_cost
+                            if manual_cost is not None
+                            else (custom_cost if custom_cost is not None else default_cost)
+                        )
                         SaleItem.objects.create(
                             sale=sale,
                             product=data["product"],
                             variant=variant,
                             quantity=qty,
                             unit_price=base_price,
-                            cost_unit=kit_cost,
+                            cost_unit=cost_unit,
                             discount_percent=discount,
                             final_unit_price=final_price,
                             line_total=line_total,
@@ -1508,6 +1548,8 @@ def sale_edit(request, sale_id: int):
             {
                 "product": item.product,
                 "quantity": int(item.quantity),
+                "unit_price_override": item.unit_price,
+                "cost_unit_override": item.cost_unit,
                 "discount_percent": item.discount_percent,
                 "vat_percent": item.vat_percent,
             }
@@ -2246,26 +2288,15 @@ def sales_list(request):
                         discount_total = Decimal("0.00")
                         base_subtotal = Decimal("0.00")
                         for data in items:
-                            base_price = {
-                                Customer.Audience.CONSUMER: data["product"].consumer_price,
-                                Customer.Audience.BARBER: data["product"].barber_price,
-                                Customer.Audience.DISTRIBUTOR: data["product"].distributor_price,
-                            }.get(audience, data["product"].consumer_price)
-                            discount = Decimal("0.00")
-                            if customer:
-                                discount_obj = CustomerProductDiscount.objects.filter(
-                                    customer=customer, product=data["product"]
-                                ).first()
-                                if discount_obj:
-                                    discount = discount_obj.discount_percent
-                                else:
-                                    group_key = (data["product"].group or "").strip()
-                                    if group_key:
-                                        group_discount = CustomerGroupDiscount.objects.filter(
-                                            customer=customer, group__iexact=group_key
-                                        ).first()
-                                        if group_discount:
-                                            discount = group_discount.discount_percent
+                            base_price, discount, custom_cost = _resolve_sale_item_pricing(
+                                product=data["product"],
+                                audience=audience,
+                                customer=customer,
+                                requested_discount=None,
+                            )
+                            manual_unit_price = data.get("unit_price_override")
+                            if manual_unit_price is not None:
+                                base_price = manual_unit_price
                             if discount < 0 or discount > 100:
                                 raise ValueError("Descuento por ítem inválido (0 a 100).")
                             vat_value = data.get("vat_percent") or Decimal("0.00")
@@ -2288,14 +2319,20 @@ def sales_list(request):
                                     variant.save(update_fields=["quantity"])
                                     if comun_wh:
                                         _koda_sync_common_with_variants(data["product"], comun_wh)
-                            kit_cost = data["product"].cost_with_vat() if data["product"].is_kit else data["product"].last_purchase_cost()
+                            default_cost = data["product"].cost_with_vat()
+                            manual_cost = data.get("cost_unit_override")
+                            cost_unit = (
+                                manual_cost
+                                if manual_cost is not None
+                                else (custom_cost if custom_cost is not None else default_cost)
+                            )
                             SaleItem.objects.create(
                                 sale=sale,
                                 product=data["product"],
                                 variant=variant,
                                 quantity=qty,
                                 unit_price=base_price,
-                                cost_unit=kit_cost,
+                                cost_unit=cost_unit,
                                 discount_percent=discount,
                                 final_unit_price=final_price,
                                 line_total=line_total,
@@ -6205,6 +6242,31 @@ class CustomerGroupDiscountForm(forms.ModelForm):
         return
 
 
+class CustomerProductPriceForm(forms.ModelForm):
+    class Meta:
+        model = CustomerProductPrice
+        fields = ["customer", "product", "unit_price", "unit_cost"]
+        labels = {
+            "customer": "Cliente",
+            "product": "Producto",
+            "unit_price": "Precio fijo (opcional)",
+            "unit_cost": "Costo fijo (opcional)",
+        }
+
+    def validate_unique(self):
+        return
+
+    def clean(self):
+        cleaned_data = super().clean()
+        unit_price = cleaned_data.get("unit_price")
+        unit_cost = cleaned_data.get("unit_cost")
+        if unit_price is not None and unit_price < 0:
+            self.add_error("unit_price", "El precio no puede ser negativo.")
+        if unit_cost is not None and unit_cost < 0:
+            self.add_error("unit_cost", "El costo no puede ser negativo.")
+        return cleaned_data
+
+
 class CustomerPaymentForm(forms.ModelForm):
     class Meta:
         model = CustomerPayment
@@ -6243,6 +6305,7 @@ def customers_view(request):
     customer_form = CustomerForm()
     discount_form = CustomerDiscountForm()
     group_discount_form = CustomerGroupDiscountForm()
+    custom_price_form = CustomerProductPriceForm()
 
     if request.method == "POST":
         action = request.POST.get("action")
@@ -6283,6 +6346,25 @@ def customers_view(request):
                 messages.success(request, "Descuento por grupo asignado.")
                 return redirect("inventory_customers")
             messages.error(request, "Revisá los datos del descuento por grupo.")
+        elif action == "create_custom_price":
+            custom_price_form = CustomerProductPriceForm(request.POST)
+            if custom_price_form.is_valid():
+                customer = custom_price_form.cleaned_data["customer"]
+                product = custom_price_form.cleaned_data["product"]
+                unit_price = custom_price_form.cleaned_data["unit_price"]
+                unit_cost = custom_price_form.cleaned_data["unit_cost"]
+                if unit_price is None and unit_cost is None:
+                    CustomerProductPrice.objects.filter(customer=customer, product=product).delete()
+                    messages.success(request, "Regla específica eliminada. Se vuelve al precio/costo predeterminado.")
+                    return redirect("inventory_customers")
+                CustomerProductPrice.objects.update_or_create(
+                    customer=customer,
+                    product=product,
+                    defaults={"unit_price": unit_price, "unit_cost": unit_cost},
+                )
+                messages.success(request, "Precio/costo específico asignado.")
+                return redirect("inventory_customers")
+            messages.error(request, "Revisá los datos del precio/costo específico.")
         elif action == "update_customer_audience":
             customer_id = request.POST.get("customer_id")
             audience = request.POST.get("audience")
@@ -6301,7 +6383,7 @@ def customers_view(request):
                 return redirect("inventory_customers")
             messages.error(request, "No se pudo actualizar el teléfono.")
 
-    customers = Customer.objects.prefetch_related("discounts__product", "group_discounts").order_by("name")
+    customers = Customer.objects.prefetch_related("discounts__product", "group_discounts", "custom_prices__product").order_by("name")
     sales_totals = {
         row["customer_id"]: row["total"] or Decimal("0.00")
         for row in Sale.objects.filter(customer__isnull=False)
@@ -6345,6 +6427,7 @@ def customers_view(request):
             "customer_form": customer_form,
             "discount_form": discount_form,
             "group_discount_form": group_discount_form,
+            "custom_price_form": custom_price_form,
             "customers": customers,
             "audience_choices": Customer.Audience.choices,
             "group_options": group_options,

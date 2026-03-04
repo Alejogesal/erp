@@ -3,7 +3,7 @@
 {% block title %}Clientes{% endblock %}
 {% block content %}
 <h1>Clientes</h1>
-<p class="subtitle">Registrá clientes y descuentos específicos por producto.</p>
+<p class="subtitle">Registrá clientes, descuentos y precios específicos por producto.</p>
 
 <div class="cards">
     <div class="card">
@@ -31,6 +31,15 @@
             <input type="hidden" name="action" value="create_group_discount">
             {{ group_discount_form.as_p }}
             <button type="submit">Asignar descuento</button>
+        </form>
+    </div>
+    <div class="card">
+        <div class="card-title">Precio específico por producto</div>
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="create_custom_price">
+            {{ custom_price_form.as_p }}
+            <button type="submit">Asignar precio</button>
         </form>
     </div>
 </div>
@@ -71,7 +80,7 @@
                 <th>Nombre</th>
                 <th>Teléfono</th>
                 <th>Tipo</th>
-                <th>Descuentos</th>
+                <th>Precios / Descuentos</th>
             </tr>
         </thead>
         <tbody id="customers-body">
@@ -105,7 +114,15 @@
                     </form>
                 </td>
                 <td>
-                    {% if customer.discounts.all or customer.group_discounts.all %}
+                    {% if customer.custom_prices.all or customer.discounts.all or customer.group_discounts.all %}
+                        {% for cp in customer.custom_prices.all %}
+                            <div>
+                                <strong>Regla</strong> {{ cp.product.sku }} -
+                                {% if cp.unit_price != None %}Precio ${{ cp.unit_price|latam_number:2 }}{% else %}Precio default{% endif %}
+                                |
+                                {% if cp.unit_cost != None %}Costo ${{ cp.unit_cost|latam_number:2 }}{% else %}Costo default{% endif %}
+                            </div>
+                        {% endfor %}
                         {% for d in customer.discounts.all %}
                             <div>{{ d.product.sku }} - {{ d.discount_percent }}%</div>
                         {% endfor %}
@@ -113,7 +130,7 @@
                             <div>{{ g.group }} - {{ g.discount_percent }}%</div>
                         {% endfor %}
                     {% else %}
-                        Sin descuentos
+                        Sin reglas comerciales
                     {% endif %}
                 </td>
             </tr>
@@ -301,8 +318,10 @@
 
         var discountAction = document.querySelector("input[name='action'][value='create_discount']");
         var groupDiscountAction = document.querySelector("input[name='action'][value='create_group_discount']");
+        var customPriceAction = document.querySelector("input[name='action'][value='create_custom_price']");
         var discountForm = discountAction ? discountAction.form : null;
         var groupDiscountForm = groupDiscountAction ? groupDiscountAction.form : null;
+        var customPriceForm = customPriceAction ? customPriceAction.form : null;
 
         if (discountForm) {
             setupSearchableSelect(discountForm.querySelector("select[name='customer']"), { placeholder: "Buscar cliente..." });
@@ -310,6 +329,10 @@
         }
         if (groupDiscountForm) {
             setupSearchableSelect(groupDiscountForm.querySelector("select[name='customer']"), { placeholder: "Buscar cliente..." });
+        }
+        if (customPriceForm) {
+            setupSearchableSelect(customPriceForm.querySelector("select[name='customer']"), { placeholder: "Buscar cliente..." });
+            setupSearchableSelect(customPriceForm.querySelector("select[name='product']"), { placeholder: "Buscar producto..." });
         }
     })();
 </script>

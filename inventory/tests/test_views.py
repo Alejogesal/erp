@@ -5,7 +5,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from inventory import services
-from inventory.models import Customer, Product, Sale, SaleItem, Supplier, Warehouse
+from inventory.models import Customer, CustomerProductPrice, Product, Sale, SaleItem, Supplier, Warehouse
 
 
 class DashboardViewTests(TestCase):
@@ -260,6 +260,122 @@ class DashboardViewTests(TestCase):
         self.assertEqual(product.margin_consumer, Decimal("33.00"))
         self.assertEqual(product.margin_barber, Decimal("27.50"))
         self.assertEqual(product.margin_distributor, Decimal("18.25"))
+
+    def test_create_customer_product_price(self):
+        customer = Customer.objects.create(name="Cliente precio", audience=Customer.Audience.CONSUMER)
+        product = Product.objects.create(sku="SKU-CP", name="Prod CP")
+        response = self.client.post(
+            reverse("inventory_customers"),
+            {
+                "action": "create_custom_price",
+                "customer": str(customer.id),
+                "product": str(product.id),
+                "unit_price": "1234.50",
+                "unit_cost": "777.25",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        custom = CustomerProductPrice.objects.get(customer=customer, product=product)
+        self.assertEqual(custom.unit_price, Decimal("1234.50"))
+        self.assertEqual(custom.unit_cost, Decimal("777.25"))
+
+    def test_register_sale_uses_customer_specific_product_price(self):
+        product = Product.objects.create(
+            sku="SKU-CUSTOM-PRICE",
+            name="Prod precio especial",
+            avg_cost=Decimal("10.00"),
+            margin_consumer=Decimal("20.00"),
+        )
+        customer = Customer.objects.create(name="Cliente especial", audience=Customer.Audience.CONSUMER)
+        CustomerProductPrice.objects.create(
+            customer=customer,
+            product=product,
+            unit_price=Decimal("99.00"),
+            unit_cost=Decimal("55.00"),
+        )
+        response = self.client.post(
+            reverse("inventory_register_sale"),
+            {
+                "warehouse": self.comun.id,
+                "cliente": customer.id,
+                "audiencia": Customer.Audience.CONSUMER,
+                "form-TOTAL_FORMS": "1",
+                "form-INITIAL_FORMS": "0",
+                "form-MIN_NUM_FORMS": "0",
+                "form-MAX_NUM_FORMS": "1000",
+                "form-0-product": product.id,
+                "form-0-quantity": "2",
+                "form-0-vat_percent": "0",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        sale = Sale.objects.order_by("-id").first()
+        self.assertIsNotNone(sale)
+        item = sale.items.get(product=product)
+        self.assertEqual(item.unit_price, Decimal("99.00"))
+        self.assertEqual(item.final_unit_price, Decimal("99.00"))
+        self.assertEqual(item.line_total, Decimal("198.00"))
+        self.assertEqual(item.cost_unit, Decimal("55.00"))
+
+    def test_register_sale_manual_price_and_cost_overrides_defaults(self):
+        product = Product.objects.create(
+            sku="SKU-MANUAL",
+            name="Prod manual",
+            avg_cost=Decimal("100.00"),
+            vat_percent=Decimal("21.00"),
+            margin_consumer=Decimal("20.00"),
+        )
+        response = self.client.post(
+            reverse("inventory_register_sale"),
+            {
+                "warehouse": self.comun.id,
+                "audiencia": Customer.Audience.CONSUMER,
+                "form-TOTAL_FORMS": "1",
+                "form-INITIAL_FORMS": "0",
+                "form-MIN_NUM_FORMS": "0",
+                "form-MAX_NUM_FORMS": "1000",
+                "form-0-product": product.id,
+                "form-0-quantity": "3",
+                "form-0-unit_price_override": "250.00",
+                "form-0-cost_unit_override": "180.00",
+                "form-0-vat_percent": "0",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        sale = Sale.objects.order_by("-id").first()
+        self.assertIsNotNone(sale)
+        item = sale.items.get(product=product)
+        self.assertEqual(item.unit_price, Decimal("250.00"))
+        self.assertEqual(item.final_unit_price, Decimal("250.00"))
+        self.assertEqual(item.cost_unit, Decimal("180.00"))
+
+    def test_register_sale_without_manual_cost_uses_product_cost_with_vat(self):
+        product = Product.objects.create(
+            sku="SKU-COST-VAT",
+            name="Prod costo iva",
+            avg_cost=Decimal("3297.00"),
+            vat_percent=Decimal("21.00"),
+            margin_consumer=Decimal("10.00"),
+        )
+        response = self.client.post(
+            reverse("inventory_register_sale"),
+            {
+                "warehouse": self.comun.id,
+                "audiencia": Customer.Audience.CONSUMER,
+                "form-TOTAL_FORMS": "1",
+                "form-INITIAL_FORMS": "0",
+                "form-MIN_NUM_FORMS": "0",
+                "form-MAX_NUM_FORMS": "1000",
+                "form-0-product": product.id,
+                "form-0-quantity": "1",
+                "form-0-vat_percent": "0",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        sale = Sale.objects.order_by("-id").first()
+        self.assertIsNotNone(sale)
+        item = sale.items.get(product=product)
+        self.assertEqual(item.cost_unit, product.cost_with_vat())
 
     def test_delete_product_from_price_list(self):
         product_to_delete = Product.objects.create(

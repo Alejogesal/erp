@@ -24,6 +24,8 @@
                     <th>Producto</th>
                     <th>Variedad</th>
                     <th>Cantidad</th>
+                    <th>Precio unitario (manual)</th>
+                    <th>Costo unitario (manual)</th>
                     <th>DTO %</th>
                     <th>IVA %</th>
                     <th>Eliminar</th>
@@ -38,6 +40,8 @@
                         <select name="{{ row.form.prefix }}-variant_id" class="variant-select" data-selected="{{ row.variant_id|default_if_none:'' }}"></select>
                     </td>
                     <td>{{ row.form.quantity }}</td>
+                    <td>{{ row.form.unit_price_override }}</td>
+                    <td>{{ row.form.cost_unit_override }}</td>
                     <td>{{ row.form.discount_percent }}</td>
                     <td>{{ row.form.vat_percent }}</td>
                     <td>
@@ -49,7 +53,7 @@
                 </tr>
                 {% if row.form.errors %}
                 <tr>
-                    <td colspan="6">{{ row.form.errors }}</td>
+                    <td colspan="8">{{ row.form.errors }}</td>
                 </tr>
                 {% endif %}
                 {% endfor %}
@@ -61,6 +65,8 @@
                         <select name="{{ item_form.prefix }}-variant_id" class="variant-select" data-selected=""></select>
                     </td>
                     <td>{{ item_form.quantity }}</td>
+                    <td>{{ item_form.unit_price_override }}</td>
+                    <td>{{ item_form.cost_unit_override }}</td>
                     <td>{{ item_form.discount_percent }}</td>
                     <td>{{ item_form.vat_percent }}</td>
                     <td>
@@ -72,7 +78,7 @@
                 </tr>
                 {% if item_form.errors %}
                 <tr>
-                    <td colspan="6">{{ item_form.errors }}</td>
+                    <td colspan="8">{{ item_form.errors }}</td>
                 </tr>
                 {% endif %}
                 {% endfor %}
@@ -275,11 +281,13 @@
             variant.className = "variant-select";
             variant.dataset.selected = "";
             const qty = container.querySelector("[name$='-quantity']");
+            const unitPrice = container.querySelector("[name$='-unit_price_override']");
+            const unitCost = container.querySelector("[name$='-cost_unit_override']");
             const discount = container.querySelector("[name$='-discount_percent']");
             const vat = container.querySelector("[name$='-vat_percent']");
             const deleteField = container.querySelector("[name$='-DELETE']");
 
-            [product, variant, qty, discount, vat].forEach(field => {
+            [product, variant, qty, unitPrice, unitCost, discount, vat].forEach(field => {
                 const td = document.createElement("td");
                 if (field) td.appendChild(field);
                 tr.appendChild(td);
