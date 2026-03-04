@@ -4883,6 +4883,29 @@ def product_prices(request):
 
 @login_required
 @require_http_methods(["GET", "POST"])
+def product_margins(request):
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "update_margin_row":
+            product_id = request.POST.get("product_id")
+            product = Product.objects.filter(id=product_id).first()
+            if not product:
+                return JsonResponse({"ok": False, "error": "product_not_found"}, status=404)
+            margin_consumer = _parse_decimal(request.POST.get("margin_consumer"))
+            margin_barber = _parse_decimal(request.POST.get("margin_barber"))
+            margin_distributor = _parse_decimal(request.POST.get("margin_distributor"))
+            product.margin_consumer = margin_consumer
+            product.margin_barber = margin_barber
+            product.margin_distributor = margin_distributor
+            product.save(update_fields=["margin_consumer", "margin_barber", "margin_distributor"])
+            return JsonResponse({"ok": True})
+
+    products = Product.objects.order_by("sku")
+    return render(request, "inventory/product_margins.html", {"products": products})
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
 def product_costs(request):
     ProductCostFormSet = formset_factory(ProductCostRowForm, extra=0)
     products_qs = Product.objects.select_related("default_supplier").order_by("sku")

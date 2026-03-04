@@ -225,6 +225,42 @@ class DashboardViewTests(TestCase):
         self.assertEqual(product.margin_barber, Decimal("24.00"))
         self.assertEqual(product.margin_distributor, Decimal("18.75"))
 
+    def test_product_margins_screen_loads(self):
+        Product.objects.create(
+            sku="SKU-MARG-VIEW",
+            name="Vista margenes",
+            margin_consumer=Decimal("20.00"),
+            margin_barber=Decimal("15.00"),
+            margin_distributor=Decimal("10.00"),
+        )
+        response = self.client.get(reverse("inventory_product_margins"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Márgenes por producto")
+
+    def test_product_margins_row_update(self):
+        product = Product.objects.create(
+            sku="SKU-MARG-EDIT",
+            name="Editar margenes",
+            margin_consumer=Decimal("20.00"),
+            margin_barber=Decimal("15.00"),
+            margin_distributor=Decimal("10.00"),
+        )
+        response = self.client.post(
+            reverse("inventory_product_margins"),
+            {
+                "action": "update_margin_row",
+                "product_id": str(product.id),
+                "margin_consumer": "33.00",
+                "margin_barber": "27.50",
+                "margin_distributor": "18.25",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        product.refresh_from_db()
+        self.assertEqual(product.margin_consumer, Decimal("33.00"))
+        self.assertEqual(product.margin_barber, Decimal("27.50"))
+        self.assertEqual(product.margin_distributor, Decimal("18.25"))
+
     def test_delete_product_from_price_list(self):
         product_to_delete = Product.objects.create(
             sku="SKU-DEL",

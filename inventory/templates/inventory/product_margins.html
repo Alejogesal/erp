@@ -1,0 +1,216 @@
+{% extends "inventory/base.html" %}
+{% load latam_numbers %}
+{% block title %}Márgenes{% endblock %}
+{% block content %}
+<style>
+    .margin-filter {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        border-radius: 12px;
+        background: #0f1622;
+        border: 1px solid #2a313c;
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+        margin: 8px 0 14px;
+    }
+    .margin-filter input {
+        background: transparent;
+        border: none;
+        color: var(--text);
+        width: 100%;
+        padding: 4px 2px;
+        font-size: 14px;
+    }
+    .margin-filter input:focus { outline: none; }
+    .margin-filter .hint {
+        font-size: 12px;
+        color: var(--muted);
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
+        white-space: nowrap;
+    }
+    .margin-input {
+        width: 90px;
+        padding: 7px 8px;
+        border-radius: 8px;
+        border: 1px solid #2a313c;
+        background: #0f1622;
+        color: var(--text);
+        font-size: 13px;
+    }
+    .margin-meta {
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.35;
+    }
+    .cost-meta {
+        color: var(--muted);
+        font-size: 12px;
+        margin-top: 2px;
+    }
+    .status {
+        font-size: 11px;
+        color: var(--muted);
+        margin-top: 10px;
+    }
+</style>
+
+<h1>Márgenes por producto</h1>
+<p class="subtitle">Cada columna es una lista de precio. Editá el porcentaje y se recalcula en vivo.</p>
+
+<div class="card table-card" id="margenes">
+    <div class="card-title">Márgenes y listas</div>
+    <div class="margin-filter">
+        <span class="hint">Buscar</span>
+        <input id="margin-search" type="text" placeholder="SKU, producto o marca">
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th>SKU</th>
+                <th>Producto</th>
+                <th>Marca</th>
+                <th>Costo c/IVA</th>
+                <th>Consumidor final</th>
+                <th>Peluquerías / Barberías</th>
+                <th>Distribuidores</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for product in products %}
+            <tr data-cost="{{ product.cost_with_vat|floatformat:2 }}">
+                <td>{{ product.sku|default:"-" }}</td>
+                <td>{{ product.name }}</td>
+                <td>{{ product.group|default:"-" }}</td>
+                <td>
+                    {{ product.cost_with_vat|latam_number:2 }}
+                    <div class="cost-meta">Base para cálculo</div>
+                </td>
+                <td>
+                    <form id="margin-form-{{ product.id }}" method="post" action="{% url 'inventory_product_margins' %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="update_margin_row">
+                        <input type="hidden" name="product_id" value="{{ product.id }}">
+                    </form>
+                    <input form="margin-form-{{ product.id }}" class="margin-input margin-consumer" name="margin_consumer" value="{{ product.margin_consumer|floatformat:2 }}">
+                    <div class="margin-meta meta-consumer"></div>
+                </td>
+                <td>
+                    <input form="margin-form-{{ product.id }}" class="margin-input margin-barber" name="margin_barber" value="{{ product.margin_barber|floatformat:2 }}">
+                    <div class="margin-meta meta-barber"></div>
+                </td>
+                <td>
+                    <input form="margin-form-{{ product.id }}" class="margin-input margin-distributor" name="margin_distributor" value="{{ product.margin_distributor|floatformat:2 }}">
+                    <div class="margin-meta meta-distributor"></div>
+                </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="7">Aún no hay productos cargados.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div id="margin-status" class="status">Auto-guardado activo.</div>
+</div>
+
+<script>
+    (function() {
+        const rows = Array.from(document.querySelectorAll("#margenes tbody tr"));
+        const status = document.getElementById("margin-status");
+        const timers = new Map();
+
+        const parseNumber = (value) => {
+            if (!value) return 0;
+            const raw = String(value).trim().replace(/\s/g, "");
+            const hasComma = raw.includes(",");
+            const hasDot = raw.includes(".");
+            let normalized = raw;
+            if (hasComma && hasDot) {
+                normalized = raw.replace(/\./g, "").replace(",", ".");
+            } else if (hasComma) {
+                normalized = raw.replace(",", ".");
+            }
+            const parsed = parseFloat(normalized);
+            return Number.isNaN(parsed) ? 0 : parsed;
+        };
+
+        const format = (value) => Number(value || 0).toFixed(2).replace(".", ",");
+
+        const renderMeta = (row, inputSelector, metaSelector) => {
+            const input = row.querySelector(inputSelector);
+            const meta = row.querySelector(metaSelector);
+            if (!input || !meta) return;
+            const cost = parseNumber(row.dataset.cost);
+            const margin = parseNumber(input.value);
+            const price = cost * (1 + margin / 100);
+            const profit = price - cost;
+            meta.textContent = `Precio: ${format(price)} | Ganancia: ${format(profit)} | Margen: ${format(margin)}%`;
+        };
+
+        const renderRow = (row) => {
+            renderMeta(row, ".margin-consumer", ".meta-consumer");
+            renderMeta(row, ".margin-barber", ".meta-barber");
+            renderMeta(row, ".margin-distributor", ".meta-distributor");
+        };
+
+        const getCookie = (name) => {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(";").shift();
+            return "";
+        };
+        const csrfToken = getCookie("csrftoken");
+
+        const autosave = (row) => {
+            const form = row.querySelector("form[id^='margin-form-']");
+            if (!form) return;
+            const payload = new FormData(form);
+            fetch(form.action, {
+                method: "POST",
+                headers: { "X-CSRFToken": csrfToken || "" },
+                body: payload,
+                credentials: "same-origin",
+            }).then(() => {
+                if (status) status.textContent = "Auto-guardado activo.";
+            }).catch(() => {
+                if (status) status.textContent = "No se pudo auto-guardar.";
+            });
+        };
+
+        rows.forEach((row) => {
+            const inputs = row.querySelectorAll(".margin-input");
+            if (!inputs.length) return;
+            renderRow(row);
+            inputs.forEach((input) => {
+                input.addEventListener("input", () => {
+                    renderRow(row);
+                    if (status) status.textContent = "Guardando...";
+                    clearTimeout(timers.get(row));
+                    timers.set(row, setTimeout(() => autosave(row), 450));
+                });
+                input.addEventListener("blur", () => autosave(row));
+            });
+        });
+
+        const search = document.getElementById("margin-search");
+        if (search) {
+            const rowText = (row) => {
+                const sku = row.children[0]?.textContent || "";
+                const name = row.children[1]?.textContent || "";
+                const group = row.children[2]?.textContent || "";
+                return `${sku} ${name} ${group}`.toLowerCase();
+            };
+            const applyFilter = () => {
+                const query = search.value.trim().toLowerCase();
+                rows.forEach((row) => {
+                    if (!row.querySelector("td")) return;
+                    const show = !query || rowText(row).includes(query);
+                    row.style.display = show ? "" : "none";
+                });
+            };
+            search.addEventListener("input", applyFilter);
+        }
+    })();
+</script>
+{% endblock %}
