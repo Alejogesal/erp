@@ -83,15 +83,6 @@
         width: 100%;
         min-width: 320px;
     }
-    .margin-analysis {
-        font-size: 12px;
-        line-height: 1.45;
-        color: var(--muted);
-    }
-    .margin-analysis strong {
-        color: var(--text);
-        font-weight: 600;
-    }
 </style>
 <h1>Productos</h1>
 <p class="subtitle">Cargá productos y editá costos, nombre y proveedor. El SKU se genera automáticamente.</p>
@@ -281,10 +272,6 @@
                 <th>IVA %</th>
                 <th>Costo unitario sin IVA</th>
                 <th>Costo unitario con IVA</th>
-                <th>Margen consumidor %</th>
-                <th>Margen barberías %</th>
-                <th>Margen distribuidores %</th>
-                <th>Análisis por lista</th>
                 <th>Acciones</th>
             </tr>
         </thead>
@@ -311,22 +298,12 @@
                     <td>
                         <input type="text" class="cost-with-vat" readonly>
                     </td>
-                    <td>{{ form.margin_consumer }}</td>
-                    <td>{{ form.margin_barber }}</td>
-                    <td>{{ form.margin_distributor }}</td>
-                    <td>
-                        <div class="margin-analysis">
-                            <div><strong>Consumidor:</strong> <span class="analysis-consumer">-</span></div>
-                            <div><strong>Barberías:</strong> <span class="analysis-barber">-</span></div>
-                            <div><strong>Distribuidores:</strong> <span class="analysis-distributor">-</span></div>
-                        </div>
-                    </td>
                     <td>
                         <button type="button" class="danger small" data-product-id="{{ form.product_id.value }}">Eliminar</button>
                     </td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="11">Aún no hay productos cargados.</td></tr>
+                <tr><td colspan="7">Aún no hay productos cargados.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -417,55 +394,13 @@
             withVatInput.value = formatNumber(total);
         };
 
-        const updateMarginAnalysis = (row) => {
-            const baseInput = row.querySelector("input[name$='-avg_cost']");
-            const vatInput = row.querySelector("input[name$='-vat_percent']");
-            const consumerInput = row.querySelector("input[name$='-margin_consumer']");
-            const barberInput = row.querySelector("input[name$='-margin_barber']");
-            const distributorInput = row.querySelector("input[name$='-margin_distributor']");
-            const consumerOutput = row.querySelector(".analysis-consumer");
-            const barberOutput = row.querySelector(".analysis-barber");
-            const distributorOutput = row.querySelector(".analysis-distributor");
-            if (
-                !baseInput || !vatInput || !consumerInput || !barberInput || !distributorInput ||
-                !consumerOutput || !barberOutput || !distributorOutput
-            ) {
-                return;
-            }
-            const base = parseNumber(baseInput.value);
-            const vat = parseNumber(vatInput.value);
-            const costWithVat = base * (1 + vat / 100);
-
-            const renderLine = (marginInput, output) => {
-                const margin = parseNumber(marginInput.value);
-                const price = costWithVat * (1 + margin / 100);
-                const profit = price - costWithVat;
-                output.textContent = `${formatNumber(price)} | +${formatNumber(profit)} (${formatNumber(margin)}%)`;
-            };
-
-            renderLine(consumerInput, consumerOutput);
-            renderLine(barberInput, barberOutput);
-            renderLine(distributorInput, distributorOutput);
-        };
-
         document.querySelectorAll("#productos tbody tr").forEach((row) => {
             const baseInput = row.querySelector("input[name$='-avg_cost']");
             const vatInput = row.querySelector("input[name$='-vat_percent']");
-            const consumerInput = row.querySelector("input[name$='-margin_consumer']");
-            const barberInput = row.querySelector("input[name$='-margin_barber']");
-            const distributorInput = row.querySelector("input[name$='-margin_distributor']");
             if (baseInput && vatInput) {
-                const recalc = () => {
-                    updateVatCosts(row);
-                    updateMarginAnalysis(row);
-                };
-                baseInput.addEventListener("input", recalc);
-                vatInput.addEventListener("input", recalc);
-                consumerInput?.addEventListener("input", recalc);
-                barberInput?.addEventListener("input", recalc);
-                distributorInput?.addEventListener("input", recalc);
+                baseInput.addEventListener("input", () => updateVatCosts(row));
+                vatInput.addEventListener("input", () => updateVatCosts(row));
                 updateVatCosts(row);
-                updateMarginAnalysis(row);
             }
         });
 
@@ -498,18 +433,12 @@
             const productId = row.querySelector("input[name$='-product_id']")?.value;
             const avgCostInput = row.querySelector("input[name$='-avg_cost']");
             const vatInput = row.querySelector("input[name$='-vat_percent']");
-            const marginConsumerInput = row.querySelector("input[name$='-margin_consumer']");
-            const marginBarberInput = row.querySelector("input[name$='-margin_barber']");
-            const marginDistributorInput = row.querySelector("input[name$='-margin_distributor']");
             if (!productId || !avgCostInput) return;
             const payload = new FormData();
             payload.append("action", "quick_update_cost");
             payload.append("product_id", productId);
             payload.append("avg_cost", avgCostInput.value || "");
             payload.append("vat_percent", vatInput?.value || "");
-            payload.append("margin_consumer", marginConsumerInput?.value || "");
-            payload.append("margin_barber", marginBarberInput?.value || "");
-            payload.append("margin_distributor", marginDistributorInput?.value || "");
             fetch(window.location.href, {
                 method: "POST",
                 headers: {
@@ -526,7 +455,7 @@
 
         document.querySelectorAll("#productos tbody tr").forEach((row) => {
             const autosaveInputs = row.querySelectorAll(
-                "input[name$='-avg_cost'], input[name$='-vat_percent'], input[name$='-margin_consumer'], input[name$='-margin_barber'], input[name$='-margin_distributor']"
+                "input[name$='-avg_cost'], input[name$='-vat_percent']"
             );
             if (!autosaveInputs.length) return;
             autosaveInputs.forEach((input) => {
