@@ -158,6 +158,12 @@ def _extract_product_ids_from_payload(raw_payload: str | None) -> set[int]:
     return ids
 
 
+def _shipping_cost_per_unit(shipping_cost: Decimal, total_units: Decimal) -> Decimal:
+    if shipping_cost <= 0 or total_units <= 0:
+        return Decimal("0.00")
+    return (shipping_cost / total_units).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+
+
 def _normalize_lookup_text(value: str) -> str:
     cleaned = unicodedata.normalize("NFKD", (value or "").strip().lower())
     cleaned = "".join(ch for ch in cleaned if not unicodedata.combining(ch))
@@ -713,6 +719,13 @@ class PurchaseHeaderForm(forms.Form):
         label="Descuento %",
         min_value=Decimal("0.00"),
         max_value=Decimal("100.00"),
+        decimal_places=2,
+        required=False,
+        initial=Decimal("0.00"),
+    )
+    costo_envio = forms.DecimalField(
+        label="Costo de envío",
+        min_value=Decimal("0.00"),
         decimal_places=2,
         required=False,
         initial=Decimal("0.00"),
@@ -1612,8 +1625,12 @@ def purchase_receipt(request, purchase_id: int):
         vat_total += item.line_vat
     subtotal = sum((item.line_total for item in items), Decimal("0.00"))
     discount_percent = purchase.discount_percent or Decimal("0.00")
-    discount_total = (subtotal * discount_percent / Decimal("100.00")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    total = (subtotal - discount_total).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    shipping_cost = purchase.shipping_cost or Decimal("0.00")
+    subtotal_with_shipping = (subtotal + shipping_cost).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    discount_total = (subtotal_with_shipping * discount_percent / Decimal("100.00")).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
+    total = (subtotal_with_shipping - discount_total).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     if purchase.total != total:
         purchase.total = total
         purchase.save(update_fields=["total"])
@@ -1623,6 +1640,8 @@ def purchase_receipt(request, purchase_id: int):
         "subtotal": subtotal,
         "subtotal_no_vat": subtotal_no_vat,
         "vat_total": vat_total,
+        "shipping_cost": shipping_cost,
+        "subtotal_with_shipping": subtotal_with_shipping,
         "discount_total": discount_total,
         "discount_percent": discount_percent,
         "total": total,
@@ -1666,8 +1685,12 @@ def purchase_receipt_pdf(request, purchase_id: int):
         vat_total += item.line_vat
     subtotal = sum((item.line_total for item in items), Decimal("0.00"))
     discount_percent = purchase.discount_percent or Decimal("0.00")
-    discount_total = (subtotal * discount_percent / Decimal("100.00")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    total = (subtotal - discount_total).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    shipping_cost = purchase.shipping_cost or Decimal("0.00")
+    subtotal_with_shipping = (subtotal + shipping_cost).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    discount_total = (subtotal_with_shipping * discount_percent / Decimal("100.00")).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
+    total = (subtotal_with_shipping - discount_total).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     full_page_size = 27
     last_page_size = 20
@@ -1697,6 +1720,8 @@ def purchase_receipt_pdf(request, purchase_id: int):
             "subtotal": subtotal,
             "subtotal_no_vat": subtotal_no_vat,
             "vat_total": vat_total,
+            "shipping_cost": shipping_cost,
+            "subtotal_with_shipping": subtotal_with_shipping,
             "discount_total": discount_total,
             "discount_percent": discount_percent,
             "total": total,
@@ -2973,7 +2998,8 @@ def purchases_list(request):
                 items = []
             warehouse = header_form.cleaned_data["warehouse"]
             purchase_date = header_form.cleaned_data.get("purchase_date")
-            discount_percent = header_form.cleaned_data.get("descuento_total") or Decimal("0.00")
+            header_discount_percent = header_form.cleaned_data.get("descuento_total") or Decimal("0.00")
+            shipping_cost = header_form.cleaned_data.get("costo_envio") or Decimal("0.00")
             if not items:
                 messages.error(request, "Agregá al menos un producto.")
                 return redirect("inventory_purchases_list")
@@ -2984,7 +3010,8 @@ def purchases_list(request):
                         supplier=purchase_supplier,
                         warehouse=warehouse,
                         reference="Compra",
-                        discount_percent=discount_percent,
+                        discount_percent=header_discount_percent,
+                        shipping_cost=shipping_cost,
                         user=request.user,
                     )
                     if purchase_date:
@@ -2992,17 +3019,22 @@ def purchases_list(request):
                         if timezone.is_naive(created_at):
                             created_at = timezone.make_aware(created_at)
                         Purchase.objects.filter(pk=purchase.pk).update(created_at=created_at)
+                    total_units = sum((Decimal(item["quantity"]) for item in items), Decimal("0.00"))
+                    shipping_per_unit = _shipping_cost_per_unit(shipping_cost, total_units)
                     subtotal = Decimal("0.00")
                     for data in items:
                         qty = Decimal(data["quantity"])
                         unit_cost = data["unit_cost"]
-                        discount_percent = data.get("discount_percent")
-                        if discount_percent is None:
-                            discount_percent = Decimal("0.00")
+                        item_discount_percent = data.get("discount_percent")
+                        if item_discount_percent is None:
+                            item_discount_percent = Decimal("0.00")
                         vat_percent = data.get("vat_percent")
                         if vat_percent is None:
                             vat_percent = Decimal("0.00")
-                        effective_unit_cost = (unit_cost * (Decimal("1.00") - (discount_percent / Decimal("100.00")))).quantize(
+                        effective_unit_cost = (
+                            unit_cost * (Decimal("1.00") - (item_discount_percent / Decimal("100.00")))
+                        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                        effective_unit_cost_for_stock = (effective_unit_cost + shipping_per_unit).quantize(
                             Decimal("0.01"), rounding=ROUND_HALF_UP
                         )
                         effective_unit_cost_with_vat = (
@@ -3015,7 +3047,7 @@ def purchases_list(request):
                             variant=data.get("variant"),
                             quantity=qty,
                             unit_cost=unit_cost,
-                            discount_percent=discount_percent,
+                            discount_percent=item_discount_percent,
                             vat_percent=vat_percent,
                         )
                         if warehouse.type == Warehouse.WarehouseType.COMUN and data.get("variant") is not None:
@@ -3032,19 +3064,20 @@ def purchases_list(request):
                             product=data["product"],
                             warehouse=warehouse,
                             quantity=qty,
-                            unit_cost=effective_unit_cost,
+                            unit_cost=effective_unit_cost_for_stock,
                             supplier=data["supplier"],
                             vat_percent=vat_percent,
                             user=request.user,
                             reference=f"Compra #{purchase.id}",
                             purchase=purchase,
                         )
-                    discount_total = (subtotal * discount_percent / Decimal("100.00")).quantize(
+                    subtotal_with_shipping = (subtotal + shipping_cost).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                    discount_total = (subtotal_with_shipping * header_discount_percent / Decimal("100.00")).quantize(
                         Decimal("0.01"), rounding=ROUND_HALF_UP
                     )
-                    total = (subtotal - discount_total).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                    total = (subtotal_with_shipping - discount_total).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                     purchase.total = total
-                    purchase.save(update_fields=["total", "discount_percent"])
+                    purchase.save(update_fields=["total", "discount_percent", "shipping_cost"])
                 messages.success(request, "Compra registrada.")
                 return redirect("inventory_purchases_list")
             except Exception as exc:
@@ -3300,9 +3333,11 @@ def purchase_edit(request, purchase_id: int):
                     purchase.warehouse = new_warehouse
                     purchase.supplier = items[0].get("supplier")
                     purchase_date = header_form.cleaned_data.get("purchase_date")
-                    discount_percent = header_form.cleaned_data.get("descuento_total") or Decimal("0.00")
-                    purchase.discount_percent = discount_percent
-                    update_fields = ["warehouse", "supplier", "discount_percent"]
+                    header_discount_percent = header_form.cleaned_data.get("descuento_total") or Decimal("0.00")
+                    shipping_cost = header_form.cleaned_data.get("costo_envio") or Decimal("0.00")
+                    purchase.discount_percent = header_discount_percent
+                    purchase.shipping_cost = shipping_cost
+                    update_fields = ["warehouse", "supplier", "discount_percent", "shipping_cost"]
                     if purchase_date:
                         created_at = datetime.combine(purchase_date, time(12, 0))
                         if timezone.is_naive(created_at):
@@ -3311,6 +3346,8 @@ def purchase_edit(request, purchase_id: int):
                         update_fields.append("created_at")
                     purchase.save(update_fields=update_fields)
 
+                    total_units = sum((Decimal(item["quantity"]) for item in items), Decimal("0.00"))
+                    shipping_per_unit = _shipping_cost_per_unit(shipping_cost, total_units)
                     subtotal = Decimal("0.00")
                     accumulated_new_qty: dict[tuple[int, int], Decimal] = {}
                     for item in items:
@@ -3328,8 +3365,11 @@ def purchase_edit(request, purchase_id: int):
                             delta_before = max(new_total_before_row - old_total, Decimal("0.00"))
                             delta_qty = (delta_after - delta_before).quantize(Decimal("0.01"))
                         unit_cost = item["unit_cost"]
-                        discount_percent = item.get("discount_percent") or Decimal("0.00")
-                        effective_unit_cost = (unit_cost * (Decimal("1.00") - (discount_percent / Decimal("100.00")))).quantize(
+                        item_discount_percent = item.get("discount_percent") or Decimal("0.00")
+                        effective_unit_cost = (
+                            unit_cost * (Decimal("1.00") - (item_discount_percent / Decimal("100.00")))
+                        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                        effective_unit_cost_for_stock = (effective_unit_cost + shipping_per_unit).quantize(
                             Decimal("0.01"), rounding=ROUND_HALF_UP
                         )
                         vat = item.get("vat_percent") or Decimal("0.00")
@@ -3343,7 +3383,7 @@ def purchase_edit(request, purchase_id: int):
                             variant=item.get("variant"),
                             quantity=qty,
                             unit_cost=unit_cost,
-                            discount_percent=discount_percent,
+                            discount_percent=item_discount_percent,
                             vat_percent=vat,
                         )
                         if (stock_changed or additive_update) and purchase.warehouse.type == Warehouse.WarehouseType.COMUN and item.get("variant") is not None:
@@ -3363,17 +3403,18 @@ def purchase_edit(request, purchase_id: int):
                                 product=product,
                                 warehouse=purchase.warehouse,
                                 quantity=qty if stock_changed else delta_qty,
-                                unit_cost=effective_unit_cost,
+                                unit_cost=effective_unit_cost_for_stock,
                                 vat_percent=vat,
                                 user=request.user,
                                 reference=f"Compra #{purchase.id}",
                                 supplier=purchase.supplier,
                                 purchase=purchase,
                             )
-                    discount_total = (subtotal * discount_percent / Decimal("100.00")).quantize(
+                    subtotal_with_shipping = (subtotal + shipping_cost).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                    discount_total = (subtotal_with_shipping * header_discount_percent / Decimal("100.00")).quantize(
                         Decimal("0.01"), rounding=ROUND_HALF_UP
                     )
-                    total = (subtotal - discount_total).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                    total = (subtotal_with_shipping - discount_total).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                     purchase.total = total
                     purchase.save(update_fields=["total"])
                 messages.success(request, "Compra actualizada.")
@@ -3392,6 +3433,7 @@ def purchase_edit(request, purchase_id: int):
                 "warehouse": purchase.warehouse,
                 "purchase_date": timezone.localtime(purchase.created_at).date(),
                 "descuento_total": purchase.discount_percent,
+                "costo_envio": purchase.shipping_cost,
             }
         )
         purchase_items = list(purchase.items.select_related("variant", "product"))

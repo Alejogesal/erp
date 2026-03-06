@@ -34,6 +34,11 @@
             {{ form.descuento_total }}
             {{ form.descuento_total.errors }}
         </p>
+        <p>
+            {{ form.costo_envio.label_tag }}
+            {{ form.costo_envio }}
+            {{ form.costo_envio.errors }}
+        </p>
         {{ formset.non_form_errors }}
         <div style="display:flex; align-items:center; gap:10px; margin:10px 0;">
             <button type="button" id="toggle-vat">Mostrar/Ocultar IVA</button>
@@ -539,10 +544,12 @@
             if (suppressDraftSave) return;
             if (!formEl) return;
             const warehouseSelect = formEl.querySelector("select[name='warehouse']");
+            const shippingInput = formEl.querySelector("input[name='costo_envio']");
             const rows = Array.from(body.querySelectorAll("tr"));
             const items = rows.map(serializeRow).filter(Boolean);
             const payload = {
                 warehouse: warehouseSelect?.value || "",
+                costo_envio: shippingInput?.value || "",
                 items,
             };
             localStorage.setItem(storageKey, JSON.stringify(payload));
@@ -593,8 +600,12 @@
                 return;
             }
             const warehouseSelect = formEl?.querySelector("select[name='warehouse']");
+            const shippingInput = formEl?.querySelector("input[name='costo_envio']");
             if (warehouseSelect && draft?.warehouse) {
                 warehouseSelect.value = draft.warehouse;
+            }
+            if (shippingInput && draft?.costo_envio) {
+                shippingInput.value = draft.costo_envio;
             }
             const items = Array.isArray(draft?.items) ? draft.items : [];
             if (!items.length) return;
@@ -639,11 +650,15 @@
         });
         formEl?.addEventListener("submit", () => {
             suppressDraftSave = true;
-            document.querySelectorAll("input[name$='-unit_cost'], input[name$='-vat_percent'], input[name$='-discount_percent']").forEach((input) => {
-                if (typeof input.value === "string" && input.value.includes(",")) {
-                    input.value = input.value.replace(",", ".");
-                }
-            });
+            document
+                .querySelectorAll(
+                    "input[name$='-unit_cost'], input[name$='-vat_percent'], input[name$='-discount_percent'], input[name='descuento_total'], input[name='costo_envio']"
+                )
+                .forEach((input) => {
+                    if (typeof input.value === "string" && input.value.includes(",")) {
+                        input.value = input.value.replace(",", ".");
+                    }
+                });
             const payloadInput = document.getElementById("items-payload");
             if (payloadInput) {
                 const rows = Array.from(body.querySelectorAll("tr"));

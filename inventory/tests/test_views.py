@@ -5,7 +5,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from inventory import services
-from inventory.models import Customer, CustomerProductPrice, Product, Sale, SaleItem, Supplier, Warehouse
+from inventory.models import Customer, CustomerProductPrice, Product, Purchase, Sale, SaleItem, Supplier, Warehouse
 
 
 class DashboardViewTests(TestCase):
@@ -93,6 +93,33 @@ class DashboardViewTests(TestCase):
         product.refresh_from_db()
         stock_qty = product.stocks.get(warehouse=self.comun).quantity
         self.assertEqual(stock_qty, Decimal("1.00"))
+
+    def test_register_purchase_distributes_shipping_cost_per_unit(self):
+        product = Product.objects.create(sku="SKU-SHIP", name="Flow Shipping", target_margin=Decimal("10.00"))
+        response = self.client.post(
+            reverse("inventory_register_purchase"),
+            {
+                "warehouse": self.comun.id,
+                "costo_envio": "6.00",
+                "form-TOTAL_FORMS": "1",
+                "form-INITIAL_FORMS": "0",
+                "form-MIN_NUM_FORMS": "0",
+                "form-MAX_NUM_FORMS": "1000",
+                "form-0-product": product.id,
+                "form-0-quantity": "2",
+                "form-0-unit_cost": "5.00",
+                "form-0-supplier": self.supplier.id,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        purchase = Purchase.objects.order_by("-id").first()
+        self.assertIsNotNone(purchase)
+        self.assertEqual(purchase.shipping_cost, Decimal("6.00"))
+        self.assertEqual(purchase.total, Decimal("16.00"))
+
+        product.refresh_from_db()
+        self.assertEqual(product.avg_cost, Decimal("8.00"))
 
     def test_stock_list_per_warehouse(self):
         services.register_entry(self.product, self.comun, Decimal("3"), Decimal("2.00"), self.user)

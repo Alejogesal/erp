@@ -351,6 +351,7 @@ class Purchase(models.Model):
     warehouse = models.ForeignKey(Warehouse, on_delete=models.PROTECT, related_name="purchases")
     total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     discount_percent = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0.00"))
+    shipping_cost = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     reference = models.CharField(max_length=255, blank=True, default="")
     invoice_image = models.FileField(upload_to="purchase_invoices/", blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)

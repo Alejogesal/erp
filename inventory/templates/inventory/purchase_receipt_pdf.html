@@ -109,12 +109,26 @@
                     <div></div>
                     <div>${{ vat_total|latam_number:2 }}</div>
                 </div>
+                {% if shipping_cost > 0 %}
+                <div class="totals-row">
+                    <div class="label">Envío</div>
+                    <div></div>
+                    <div>${{ shipping_cost|latam_number:2 }}</div>
+                </div>
+                {% endif %}
                 {% else %}
                 <div class="totals-row">
                     <div class="label">Subtotal</div>
                     <div></div>
                     <div>${{ subtotal|latam_number:2 }}</div>
                 </div>
+                {% if shipping_cost > 0 %}
+                <div class="totals-row">
+                    <div class="label">Envío</div>
+                    <div></div>
+                    <div>${{ shipping_cost|latam_number:2 }}</div>
+                </div>
+                {% endif %}
                 {% endif %}
                 {% if discount_total > 0 %}
                 <div class="totals-row">
