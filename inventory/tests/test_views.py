@@ -13,6 +13,7 @@ from inventory.models import (
     Sale,
     SaleItem,
     Supplier,
+    SupplierPayment,
     SupplierProduct,
     Warehouse,
 )
@@ -324,6 +325,44 @@ class DashboardViewTests(TestCase):
         )
         self.assertEqual(response.status_code, 302)
         self.assertTrue(SupplierProduct.objects.filter(supplier=self.supplier, product=product).exists())
+
+    def test_supplier_history_view_loads_with_purchase_balance(self):
+        purchase = Purchase.objects.create(
+            supplier=self.supplier,
+            warehouse=self.comun,
+            total=Decimal("500.00"),
+            user=self.user,
+        )
+        response = self.client.get(reverse("inventory_supplier_history", args=[self.supplier.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, purchase.invoice_number)
+        self.assertContains(response, "Saldo actual")
+        self.assertEqual(response.context["current_balance"], Decimal("500.00"))
+
+    def test_supplier_history_register_payment_updates_balance(self):
+        purchase = Purchase.objects.create(
+            supplier=self.supplier,
+            warehouse=self.comun,
+            total=Decimal("1000.00"),
+            user=self.user,
+        )
+        response = self.client.post(
+            reverse("inventory_supplier_history", args=[self.supplier.id]),
+            {
+                "action": "add_payment",
+                "purchase": str(purchase.id),
+                "amount": "250.00",
+                "method": "TRANSFER",
+                "kind": "PAYMENT",
+                "paid_at": "2026-03-09",
+                "notes": "Pago parcial",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        payment = SupplierPayment.objects.get(supplier=self.supplier)
+        self.assertEqual(payment.amount, Decimal("250.00"))
+        follow = self.client.get(reverse("inventory_supplier_history", args=[self.supplier.id]))
+        self.assertEqual(follow.context["current_balance"], Decimal("750.00"))
 
     def test_product_costs_update_saves_margins_per_product(self):
         product = Product.objects.create(

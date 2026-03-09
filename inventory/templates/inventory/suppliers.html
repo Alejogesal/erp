@@ -44,6 +44,31 @@
     </div>
 </div>
 
+<div class="card table-card" style="margin-top:16px;">
+    <div class="card-title" style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+        <span>Deuda pendiente a proveedores</span>
+        <span style="font-size:12px; color:var(--muted);">Total adeudado: ${{ total_debt|latam_number:2 }}</span>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th>Proveedor</th>
+                <th>Saldo</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in debtors %}
+            <tr>
+                <td>{{ row.supplier.name }}</td>
+                <td>${{ row.balance|latam_number:2 }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="2">No hay saldos pendientes.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
 <div class="card table-card">
     <div class="card-title">Listado de proveedores</div>
     <table>
@@ -51,15 +76,19 @@
             <tr>
                 <th>Nombre</th>
                 <th>Teléfono</th>
+                <th>Saldo CC</th>
                 <th>Acciones</th>
             </tr>
         </thead>
         <tbody>
-            {% for supplier in suppliers %}
+            {% for row in supplier_rows %}
+            {% with supplier=row.supplier %}
             <tr>
                 <td>{{ supplier.name }}</td>
                 <td>{{ supplier.phone }}</td>
+                <td>${{ row.balance|latam_number:2 }}</td>
                 <td>
+                    <a class="pill" href="{% url 'inventory_supplier_history' supplier.id %}" style="font-size:11px; padding:3px 6px; margin-right:4px;">Cuenta corriente</a>
                     <form method="post" onsubmit="return confirm('¿Eliminar proveedor?');">
                         {% csrf_token %}
                         <input type="hidden" name="action" value="delete_supplier">
@@ -68,8 +97,9 @@
                     </form>
                 </td>
             </tr>
+            {% endwith %}
             {% empty %}
-            <tr><td colspan="3">Aún no hay proveedores.</td></tr>
+            <tr><td colspan="4">Aún no hay proveedores.</td></tr>
             {% endfor %}
         </tbody>
     </table>

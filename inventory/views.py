@@ -58,6 +58,7 @@ from .models import (
     Warehouse,
     Sale,
     SaleItem,
+    SupplierPayment,
     TaxExpense,
 )
 
@@ -3640,6 +3641,41 @@ def suppliers(request):
         "unlink_group_form": unlink_group_form,
         "suppliers": suppliers_qs,
     }
+    purchases_totals = {
+        row["supplier_id"]: row["total"] or Decimal("0.00")
+        for row in Purchase.objects.filter(supplier__isnull=False)
+        .values("supplier_id")
+        .annotate(total=Sum("total"))
+    }
+    payments_totals = {
+        row["supplier_id"]: row["total"] or Decimal("0.00")
+        for row in SupplierPayment.objects.filter(kind=SupplierPayment.Kind.PAYMENT)
+        .values("supplier_id")
+        .annotate(total=Sum("amount"))
+    }
+    adjustments_totals = {
+        row["supplier_id"]: row["total"] or Decimal("0.00")
+        for row in SupplierPayment.objects.filter(kind=SupplierPayment.Kind.ADJUSTMENT)
+        .values("supplier_id")
+        .annotate(total=Sum("amount"))
+    }
+    supplier_rows = []
+    debtors = []
+    total_debt = Decimal("0.00")
+    for supplier in suppliers_qs.order_by("name"):
+        purchases_total = purchases_totals.get(supplier.id, Decimal("0.00"))
+        payments_total = payments_totals.get(supplier.id, Decimal("0.00"))
+        adjustments_total = adjustments_totals.get(supplier.id, Decimal("0.00"))
+        balance = purchases_total - payments_total + adjustments_total
+        supplier_rows.append({"supplier": supplier, "balance": balance})
+        if balance > 0:
+            debtors.append({"supplier": supplier, "balance": balance})
+            total_debt += balance
+    debtors.sort(key=lambda item: item["balance"], reverse=True)
+    debtors = debtors[:8]
+    context["supplier_rows"] = supplier_rows
+    context["debtors"] = debtors
+    context["total_debt"] = total_debt
     return render(request, "inventory/suppliers.html", context)
 
 
@@ -6428,6 +6464,31 @@ class CustomerPaymentForm(forms.ModelForm):
         self.fields["sale"].empty_label = "Cuenta corriente"
 
 
+class SupplierPaymentForm(forms.ModelForm):
+    class Meta:
+        model = SupplierPayment
+        fields = ["purchase", "amount", "method", "kind", "paid_at", "notes"]
+        labels = {
+            "purchase": "Compra",
+            "amount": "Monto",
+            "method": "Método",
+            "kind": "Tipo",
+            "paid_at": "Fecha",
+            "notes": "Notas",
+        }
+        widgets = {"paid_at": forms.DateInput(attrs={"type": "date"})}
+
+    def __init__(self, *args, **kwargs):
+        supplier = kwargs.pop("supplier", None)
+        super().__init__(*args, **kwargs)
+        self.fields["amount"].min_value = Decimal("0.01")
+        self.fields["purchase"].required = False
+        self.fields["notes"].required = False
+        if supplier is not None:
+            self.fields["purchase"].queryset = Purchase.objects.filter(supplier=supplier).order_by("-created_at")
+        self.fields["purchase"].empty_label = "Cuenta corriente"
+
+
 class TaxExpenseForm(forms.ModelForm):
     class Meta:
         model = TaxExpense
@@ -6699,6 +6760,137 @@ def customer_history_view(request, customer_id):
             "total_sales": total_sales,
             "total_payments": total_payments,
             "total_refunds": total_refunds,
+            "current_balance": current_balance,
+        },
+    )
+
+
+@login_required
+def supplier_history_view(request, supplier_id):
+    supplier = get_object_or_404(Supplier, id=supplier_id)
+    payment_form = SupplierPaymentForm(supplier=supplier)
+
+    if request.method == "POST":
+        action = request.POST.get("action") or ""
+        if action == "add_payment":
+            payment_form = SupplierPaymentForm(request.POST, supplier=supplier)
+            if payment_form.is_valid():
+                payment = payment_form.save(commit=False)
+                payment.supplier = supplier
+                payment.save()
+                messages.success(request, "Pago registrado.")
+                return redirect("inventory_supplier_history", supplier_id=supplier.id)
+            messages.error(request, "Revisá los datos del pago.")
+
+    purchases = list(
+        Purchase.objects.filter(supplier=supplier)
+        .select_related("warehouse")
+        .order_by("-created_at", "-id")
+    )
+    payments = list(
+        SupplierPayment.objects.filter(supplier=supplier)
+        .select_related("purchase")
+        .order_by("-paid_at", "-id")
+    )
+
+    payment_by_purchase = {}
+    for payment in payments:
+        if not payment.purchase_id:
+            continue
+        purchase_id = payment.purchase_id
+        info = payment_by_purchase.setdefault(
+            purchase_id,
+            {"paid_total": Decimal("0.00"), "methods": []},
+        )
+        signed = payment.amount if payment.kind == SupplierPayment.Kind.PAYMENT else -payment.amount
+        info["paid_total"] += signed
+        info["methods"].append(payment.get_method_display())
+
+    purchase_rows = []
+    for purchase in purchases:
+        paid_info = payment_by_purchase.get(purchase.id) or {"paid_total": Decimal("0.00"), "methods": []}
+        paid_total = paid_info["paid_total"]
+        balance = purchase.total - paid_total
+        methods = ", ".join(dict.fromkeys([m for m in paid_info["methods"] if m])) or "-"
+        purchase_rows.append(
+            {
+                "purchase": purchase,
+                "paid_total": paid_total,
+                "methods": methods,
+                "balance": balance,
+            }
+        )
+
+    ledger_entries = []
+    for purchase in purchases:
+        purchase_date = purchase.created_at
+        if timezone.is_naive(purchase_date):
+            purchase_date = timezone.make_aware(purchase_date, timezone.get_current_timezone())
+        ledger_entries.append(
+            {
+                "date": purchase_date,
+                "date_display": purchase.created_at,
+                "kind": "PURCHASE",
+                "label": purchase.invoice_number,
+                "detail": f"Compra ({purchase.warehouse.name})",
+                "debit": purchase.total,
+                "credit": Decimal("0.00"),
+            }
+        )
+    for payment in payments:
+        is_payment = payment.kind == SupplierPayment.Kind.PAYMENT
+        debit = Decimal("0.00") if is_payment else payment.amount
+        credit = payment.amount if is_payment else Decimal("0.00")
+        label = payment.get_method_display()
+        detail_parts = [label]
+        if payment.purchase_id:
+            detail_parts.append(payment.purchase.invoice_number)
+        if payment.notes:
+            detail_parts.append(payment.notes)
+        payment_date = datetime.combine(payment.paid_at, time.min)
+        payment_date = timezone.make_aware(payment_date, timezone.get_current_timezone())
+        ledger_entries.append(
+            {
+                "date": payment_date,
+                "date_display": payment.paid_at,
+                "kind": "PAYMENT" if is_payment else "ADJUSTMENT",
+                "label": "Pago" if is_payment else "Ajuste/Devolución",
+                "detail": " · ".join([part for part in detail_parts if part]),
+                "debit": debit,
+                "credit": credit,
+            }
+        )
+
+    ledger_entries.sort(key=lambda item: item["date"])
+    balance = Decimal("0.00")
+    for entry in ledger_entries:
+        balance += entry["debit"]
+        balance -= entry["credit"]
+        entry["balance"] = balance
+
+    total_purchases = sum((purchase.total for purchase in purchases), Decimal("0.00"))
+    total_payments = sum(
+        (payment.amount for payment in payments if payment.kind == SupplierPayment.Kind.PAYMENT),
+        Decimal("0.00"),
+    )
+    total_adjustments = sum(
+        (payment.amount for payment in payments if payment.kind == SupplierPayment.Kind.ADJUSTMENT),
+        Decimal("0.00"),
+    )
+    current_balance = total_purchases - total_payments + total_adjustments
+
+    return render(
+        request,
+        "inventory/supplier_history.html",
+        {
+            "supplier": supplier,
+            "purchase_rows": purchase_rows,
+            "payments": payments,
+            "payment_form": payment_form,
+            "ledger_entries": ledger_entries,
+            "total_purchases": total_purchases,
+            "total_payments": total_payments,
+            "total_adjustments": total_adjustments,
             "current_balance": current_balance,
         },
     )
