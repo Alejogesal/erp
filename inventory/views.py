@@ -891,6 +891,11 @@ class SupplierGroupForm(forms.Form):
     )
 
 
+class SupplierUnlinkGroupForm(forms.Form):
+    supplier = forms.ModelChoiceField(queryset=Supplier.objects.all(), label="Proveedor")
+    group = forms.CharField(label="Marca / Grupo")
+
+
 class ProductVariantForm(forms.Form):
     name = forms.CharField(label="Variedad")
     quantity = forms.DecimalField(min_value=Decimal("0.00"), decimal_places=2, label="Stock")
@@ -3516,6 +3521,7 @@ def suppliers(request):
     supplier_form = SupplierForm()
     link_form = SupplierProductForm()
     link_group_form = SupplierGroupForm()
+    unlink_group_form = SupplierUnlinkGroupForm()
     suppliers_qs = Supplier.objects.prefetch_related("supplier_products__product")
 
     if request.method == "POST":
@@ -3575,6 +3581,47 @@ def suppliers(request):
                 else:
                     messages.warning(request, f"No hay productos para la marca/grupo '{group}'.")
                 return redirect("inventory_suppliers")
+        elif action == "remove_supplier_group":
+            unlink_group_form = SupplierUnlinkGroupForm(request.POST)
+            if unlink_group_form.is_valid():
+                supplier = unlink_group_form.cleaned_data["supplier"]
+                group = (unlink_group_form.cleaned_data["group"] or "").strip()
+                products = Product.objects.filter(group__iexact=group).order_by("id")
+                if not products.exists():
+                    messages.warning(request, f"No hay productos para la marca/grupo '{group}'.")
+                    return redirect("inventory_suppliers")
+
+                links_qs = SupplierProduct.objects.filter(supplier=supplier, product__in=products)
+                removed_links = links_qs.count()
+                links_qs.delete()
+
+                default_cleared_count = 0
+                default_reassigned_count = 0
+                affected_products = products.filter(default_supplier=supplier)
+                for product in affected_products:
+                    replacement_supplier_id = (
+                        SupplierProduct.objects.filter(product=product)
+                        .exclude(supplier=supplier)
+                        .order_by("-last_purchase_at", "-id")
+                        .values_list("supplier_id", flat=True)
+                        .first()
+                    )
+                    if replacement_supplier_id:
+                        product.default_supplier_id = replacement_supplier_id
+                        default_reassigned_count += 1
+                    else:
+                        product.default_supplier = None
+                        default_cleared_count += 1
+                    product.save(update_fields=["default_supplier"])
+
+                messages.success(
+                    request,
+                    (
+                        f"Se eliminaron {removed_links} vínculos del proveedor en la marca/grupo '{group}'. "
+                        f"Proveedor principal reasignado en {default_reassigned_count} y limpiado en {default_cleared_count}."
+                    ),
+                )
+                return redirect("inventory_suppliers")
         elif action == "delete_supplier":
             supplier_id = request.POST.get("supplier_id")
             Supplier.objects.filter(pk=supplier_id).delete()
@@ -3590,6 +3637,7 @@ def suppliers(request):
         "supplier_form": supplier_form,
         "link_form": link_form,
         "link_group_form": link_group_form,
+        "unlink_group_form": unlink_group_form,
         "suppliers": suppliers_qs,
     }
     return render(request, "inventory/suppliers.html", context)

@@ -264,6 +264,67 @@ class DashboardViewTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertFalse(SupplierProduct.objects.filter(supplier=self.supplier).exists())
 
+    def test_suppliers_remove_supplier_group_removes_links_and_updates_defaults(self):
+        backup_supplier = Supplier.objects.create(name="Proveedor Backup")
+        product_a = Product.objects.create(
+            sku="SKU-UNLINK-1",
+            name="Producto unlink 1",
+            group="Bellissima",
+            default_supplier=self.supplier,
+        )
+        product_b = Product.objects.create(
+            sku="SKU-UNLINK-2",
+            name="Producto unlink 2",
+            group="Bellissima",
+            default_supplier=self.supplier,
+        )
+        product_c = Product.objects.create(
+            sku="SKU-UNLINK-3",
+            name="Producto unlink 3",
+            group="Otra",
+            default_supplier=self.supplier,
+        )
+        SupplierProduct.objects.create(supplier=self.supplier, product=product_a, last_cost=Decimal("100.00"))
+        SupplierProduct.objects.create(supplier=backup_supplier, product=product_a, last_cost=Decimal("120.00"))
+        SupplierProduct.objects.create(supplier=self.supplier, product=product_b, last_cost=Decimal("90.00"))
+        SupplierProduct.objects.create(supplier=self.supplier, product=product_c, last_cost=Decimal("80.00"))
+
+        response = self.client.post(
+            reverse("inventory_suppliers"),
+            {
+                "action": "remove_supplier_group",
+                "supplier": str(self.supplier.id),
+                "group": "Bellissima",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        self.assertFalse(SupplierProduct.objects.filter(supplier=self.supplier, product=product_a).exists())
+        self.assertFalse(SupplierProduct.objects.filter(supplier=self.supplier, product=product_b).exists())
+        self.assertTrue(SupplierProduct.objects.filter(supplier=self.supplier, product=product_c).exists())
+
+        product_a.refresh_from_db()
+        product_b.refresh_from_db()
+        product_c.refresh_from_db()
+        self.assertEqual(product_a.default_supplier_id, backup_supplier.id)
+        self.assertIsNone(product_b.default_supplier_id)
+        self.assertEqual(product_c.default_supplier_id, self.supplier.id)
+
+    def test_suppliers_remove_supplier_group_without_products_does_not_remove_links(self):
+        product = Product.objects.create(sku="SKU-KEEP", name="Producto keep", group="Otra")
+        SupplierProduct.objects.create(supplier=self.supplier, product=product, last_cost=Decimal("10.00"))
+
+        response = self.client.post(
+            reverse("inventory_suppliers"),
+            {
+                "action": "remove_supplier_group",
+                "supplier": str(self.supplier.id),
+                "group": "Marca inexistente",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(SupplierProduct.objects.filter(supplier=self.supplier, product=product).exists())
+
     def test_product_costs_update_saves_margins_per_product(self):
         product = Product.objects.create(
             sku="SKU-MARGINS",
