@@ -5,7 +5,17 @@ from django.test import TestCase
 from django.urls import reverse
 
 from inventory import services
-from inventory.models import Customer, CustomerProductPrice, Product, Purchase, Sale, SaleItem, Supplier, Warehouse
+from inventory.models import (
+    Customer,
+    CustomerProductPrice,
+    Product,
+    Purchase,
+    Sale,
+    SaleItem,
+    Supplier,
+    SupplierProduct,
+    Warehouse,
+)
 
 
 class DashboardViewTests(TestCase):
@@ -212,6 +222,47 @@ class DashboardViewTests(TestCase):
         second.refresh_from_db()
         self.assertEqual(first.margin_barber, Decimal("22.00"))
         self.assertEqual(second.margin_barber, Decimal("22.00"))
+
+    def test_suppliers_link_supplier_group_creates_links_for_matching_brand(self):
+        product_a = Product.objects.create(sku="SKU-GROUP-1", name="Producto A", group="Bellissima")
+        product_b = Product.objects.create(sku="SKU-GROUP-2", name="Producto B", group="Bellissima")
+        product_c = Product.objects.create(sku="SKU-GROUP-3", name="Producto C", group="Otra")
+
+        response = self.client.post(
+            reverse("inventory_suppliers"),
+            {
+                "action": "link_supplier_group",
+                "supplier": str(self.supplier.id),
+                "group": "Bellissima",
+                "last_cost": "321.50",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        links = SupplierProduct.objects.filter(supplier=self.supplier)
+        self.assertEqual(links.count(), 2)
+        self.assertTrue(links.filter(product=product_a, last_cost=Decimal("321.50")).exists())
+        self.assertTrue(links.filter(product=product_b, last_cost=Decimal("321.50")).exists())
+        self.assertFalse(links.filter(product=product_c).exists())
+
+        product_a.refresh_from_db()
+        product_b.refresh_from_db()
+        product_c.refresh_from_db()
+        self.assertEqual(product_a.default_supplier_id, self.supplier.id)
+        self.assertEqual(product_b.default_supplier_id, self.supplier.id)
+        self.assertIsNone(product_c.default_supplier_id)
+
+    def test_suppliers_link_supplier_group_without_products_does_not_create_links(self):
+        response = self.client.post(
+            reverse("inventory_suppliers"),
+            {
+                "action": "link_supplier_group",
+                "supplier": str(self.supplier.id),
+                "group": "Marca inexistente",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(SupplierProduct.objects.filter(supplier=self.supplier).exists())
 
     def test_product_costs_update_saves_margins_per_product(self):
         product = Product.objects.create(

@@ -880,6 +880,17 @@ class SupplierProductForm(forms.Form):
     )
 
 
+class SupplierGroupForm(forms.Form):
+    supplier = forms.ModelChoiceField(queryset=Supplier.objects.all(), label="Proveedor")
+    group = forms.CharField(label="Marca / Grupo")
+    last_cost = forms.DecimalField(
+        label="Último costo (opcional)",
+        min_value=Decimal("0.00"),
+        decimal_places=2,
+        required=False,
+    )
+
+
 class ProductVariantForm(forms.Form):
     name = forms.CharField(label="Variedad")
     quantity = forms.DecimalField(min_value=Decimal("0.00"), decimal_places=2, label="Stock")
@@ -3504,6 +3515,7 @@ def purchase_delete(request, purchase_id: int):
 def suppliers(request):
     supplier_form = SupplierForm()
     link_form = SupplierProductForm()
+    link_group_form = SupplierGroupForm()
     suppliers_qs = Supplier.objects.prefetch_related("supplier_products__product")
 
     if request.method == "POST":
@@ -3530,6 +3542,39 @@ def suppliers(request):
                     product.save(update_fields=["default_supplier"])
                 messages.success(request, "Proveedor vinculado al producto.")
                 return redirect("inventory_suppliers")
+        elif action == "link_supplier_group":
+            link_group_form = SupplierGroupForm(request.POST)
+            if link_group_form.is_valid():
+                supplier = link_group_form.cleaned_data["supplier"]
+                group = (link_group_form.cleaned_data["group"] or "").strip()
+                override_last_cost = link_group_form.cleaned_data.get("last_cost")
+                products = Product.objects.filter(group__iexact=group).order_by("id")
+                linked_count = 0
+                default_updated_count = 0
+                for product in products:
+                    last_cost = override_last_cost if override_last_cost is not None else product.avg_cost
+                    _, created = SupplierProduct.objects.update_or_create(
+                        supplier=supplier,
+                        product=product,
+                        defaults={"last_cost": last_cost, "last_purchase_at": timezone.now()},
+                    )
+                    linked_count += 1 if created else 0
+                    if product.default_supplier_id is None:
+                        product.default_supplier = supplier
+                        product.save(update_fields=["default_supplier"])
+                        default_updated_count += 1
+                if products.exists():
+                    messages.success(
+                        request,
+                        (
+                            f"Proveedor vinculado a {products.count()} productos de la marca/grupo '{group}'. "
+                            f"Nuevos vínculos: {linked_count}. "
+                            f"Proveedor principal actualizado en {default_updated_count}."
+                        ),
+                    )
+                else:
+                    messages.warning(request, f"No hay productos para la marca/grupo '{group}'.")
+                return redirect("inventory_suppliers")
         elif action == "delete_supplier":
             supplier_id = request.POST.get("supplier_id")
             Supplier.objects.filter(pk=supplier_id).delete()
@@ -3544,6 +3589,7 @@ def suppliers(request):
     context = {
         "supplier_form": supplier_form,
         "link_form": link_form,
+        "link_group_form": link_group_form,
         "suppliers": suppliers_qs,
     }
     return render(request, "inventory/suppliers.html", context)
