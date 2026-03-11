@@ -15,6 +15,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from .. import services
+from ..services import update_product_avg_costs
 from ..models import (
     Product,
     ProductVariant,
@@ -310,6 +311,7 @@ def purchases_list(request):
                         purchase.created_at = created_at
 
                     subtotal = Decimal("0.00")
+                    avg_cost_tracker = []
                     for data in resolved_items:
                         qty = Decimal(data["quantity"])
                         unit_cost = data["unit_cost"]
@@ -322,6 +324,11 @@ def purchases_list(request):
                             effective_unit_cost * (Decimal("1.00") + (vat_percent / Decimal("100.00")))
                         ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                         subtotal += qty * effective_unit_cost_with_vat
+                        avg_cost_tracker.append({
+                            "product": data["product"],
+                            "qty": qty,
+                            "cost_with_vat": effective_unit_cost_with_vat,
+                        })
                         PurchaseItem.objects.create(
                             purchase=purchase,
                             product=data["product"],
@@ -352,6 +359,7 @@ def purchases_list(request):
                             reference=f"Compra #{purchase.id}",
                             purchase=purchase,
                         )
+                    update_product_avg_costs(avg_cost_tracker)
 
                     purchase.total = subtotal.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                     purchase.save()
@@ -611,6 +619,7 @@ def purchases_list(request):
                     total_units = sum((Decimal(item["quantity"]) for item in items), Decimal("0.00"))
                     shipping_per_unit = _shipping_cost_per_unit(shipping_cost, total_units)
                     subtotal = Decimal("0.00")
+                    avg_cost_tracker = []
                     for data in items:
                         qty = Decimal(data["quantity"])
                         unit_cost = data["unit_cost"]
@@ -630,6 +639,14 @@ def purchases_list(request):
                             effective_unit_cost * (Decimal("1.00") + (vat_percent / Decimal("100.00")))
                         ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                         subtotal += qty * effective_unit_cost_with_vat
+                        cost_with_vat_for_stock = (
+                            effective_unit_cost_for_stock * (Decimal("1.00") + (vat_percent / Decimal("100.00")))
+                        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                        avg_cost_tracker.append({
+                            "product": data["product"],
+                            "qty": qty,
+                            "cost_with_vat": cost_with_vat_for_stock,
+                        })
                         PurchaseItem.objects.create(
                             purchase=purchase,
                             product=data["product"],
@@ -660,6 +677,7 @@ def purchases_list(request):
                             reference=f"Compra #{purchase.id}",
                             purchase=purchase,
                         )
+                    update_product_avg_costs(avg_cost_tracker)
                     subtotal_with_shipping = (subtotal + shipping_cost).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                     discount_total = (subtotal_with_shipping * header_discount_percent / Decimal("100.00")).quantize(
                         Decimal("0.01"), rounding=ROUND_HALF_UP
@@ -937,6 +955,7 @@ def purchase_edit(request, purchase_id: int):
                     total_units = sum((Decimal(item["quantity"]) for item in items), Decimal("0.00"))
                     shipping_per_unit = _shipping_cost_per_unit(shipping_cost, total_units)
                     subtotal = Decimal("0.00")
+                    avg_cost_tracker = []
                     accumulated_new_qty: dict[tuple[int, int], Decimal] = {}
                     for item in items:
                         product = item["product"]
@@ -965,6 +984,14 @@ def purchase_edit(request, purchase_id: int):
                             effective_unit_cost * (Decimal("1.00") + (vat / Decimal("100.00")))
                         ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                         subtotal += effective_unit_cost_with_vat * qty
+                        cost_with_vat_for_stock = (
+                            effective_unit_cost_for_stock * (Decimal("1.00") + (vat / Decimal("100.00")))
+                        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                        avg_cost_tracker.append({
+                            "product": product,
+                            "qty": qty,
+                            "cost_with_vat": cost_with_vat_for_stock,
+                        })
                         PurchaseItem.objects.create(
                             purchase=purchase,
                             product=product,
@@ -998,6 +1025,7 @@ def purchase_edit(request, purchase_id: int):
                                 supplier=purchase.supplier,
                                 purchase=purchase,
                             )
+                    update_product_avg_costs(avg_cost_tracker)
                     subtotal_with_shipping = (subtotal + shipping_cost).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                     discount_total = (subtotal_with_shipping * header_discount_percent / Decimal("100.00")).quantize(
                         Decimal("0.01"), rounding=ROUND_HALF_UP

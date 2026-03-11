@@ -119,12 +119,8 @@ class Product(models.Model):
             for component in self.kit_components.select_related("component").all():
                 total += (component.component.cost_with_vat() * component.quantity)
             return total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        base_cost = self.avg_cost or Decimal("0.00")
-        vat = self.vat_percent or Decimal("0.00")
-        if vat <= 0:
-            return base_cost
-        multiplier = Decimal("1.00") + (vat / Decimal("100.00"))
-        return (base_cost * multiplier).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        # avg_cost already includes VAT (stored as all-in purchase cost).
+        return self.avg_cost or Decimal("0.00")
 
     @property
     def consumer_price(self) -> Decimal:

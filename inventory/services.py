@@ -52,6 +52,27 @@ def _weighted_average(current_avg: Decimal, current_qty: Decimal, unit_cost: Dec
     return (total_cost / new_total_qty).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
+def update_product_avg_costs(items: list[dict]) -> None:
+    """Recalculate avg_cost (with VAT) as weighted average for products in a purchase.
+
+    Call this after all register_entry() calls for a purchase so that products
+    appearing on multiple lines with different VAT rates get the correct blended cost.
+
+    items: list of {'product': Product, 'qty': Decimal, 'cost_with_vat': Decimal}
+    """
+    by_product: dict[int, dict] = {}
+    for item in items:
+        pid = item["product"].pk
+        if pid not in by_product:
+            by_product[pid] = {"total_cost": Decimal("0.00"), "total_qty": Decimal("0.00")}
+        by_product[pid]["total_cost"] += item["cost_with_vat"] * item["qty"]
+        by_product[pid]["total_qty"] += item["qty"]
+    for pid, data in by_product.items():
+        if data["total_qty"] > 0:
+            avg = (data["total_cost"] / data["total_qty"]).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            Product.objects.filter(pk=pid).update(avg_cost=avg)
+
+
 @transaction.atomic
 def register_entry(
     product: Product,
@@ -80,8 +101,11 @@ def register_entry(
     stock = _get_stock_for_update(product, warehouse)
     current_total = _total_stock_quantity(product)
 
-    # Use last purchase cost as the product cost (not weighted average).
-    product.avg_cost = cost_base
+    # Store avg_cost as all-in cost (with VAT already included).
+    # For purchases with the same product on multiple lines with different VAT rates,
+    # purchases.py calls update_product_avg_costs() after the loop to recalculate the
+    # correct weighted average across all lines.
+    product.avg_cost = cost_with_vat
     update_fields = ["avg_cost"]
     if vat_percent is not None:
         product.vat_percent = vat
