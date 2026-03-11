@@ -488,6 +488,7 @@ class CustomerPayment(models.Model):
     class Kind(models.TextChoices):
         PAYMENT = "PAYMENT", "Pago"
         REFUND = "REFUND", "Devolución/Ajuste"
+        CREDIT_NOTE = "CREDIT_NOTE", "Nota de crédito"
 
     customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name="payments")
     sale = models.ForeignKey(Sale, on_delete=models.SET_NULL, null=True, blank=True, related_name="payments")

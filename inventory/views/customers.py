@@ -18,6 +18,7 @@ from ..models import (
     Sale,
 )
 from .forms import (
+    CustomerCreditNoteForm,
     CustomerDiscountForm,
     CustomerForm,
     CustomerGroupDiscountForm,
@@ -128,13 +129,20 @@ def customers_view(request):
         .values("customer_id")
         .annotate(total=Sum("amount"))
     }
+    credit_notes_totals = {
+        row["customer_id"]: row["total"] or Decimal("0.00")
+        for row in CustomerPayment.objects.filter(kind=CustomerPayment.Kind.CREDIT_NOTE)
+        .values("customer_id")
+        .annotate(total=Sum("amount"))
+    }
     debtors = []
     total_debt = Decimal("0.00")
     for customer in customers:
         sales_total = sales_totals.get(customer.id, Decimal("0.00"))
         payments_total = payments_totals.get(customer.id, Decimal("0.00"))
         refunds_total = refunds_totals.get(customer.id, Decimal("0.00"))
-        balance = sales_total - payments_total + refunds_total
+        credit_notes_total = credit_notes_totals.get(customer.id, Decimal("0.00"))
+        balance = sales_total - payments_total + refunds_total - credit_notes_total
         if balance > 0:
             debtors.append({"customer": customer, "balance": balance})
             total_debt += balance
@@ -167,6 +175,7 @@ def customers_view(request):
 def customer_history_view(request, customer_id):
     customer = get_object_or_404(Customer, id=customer_id)
     payment_form = CustomerPaymentForm(customer=customer)
+    credit_note_form = CustomerCreditNoteForm(customer=customer)
 
     if request.method == "POST":
         action = request.POST.get("action") or ""
@@ -179,6 +188,17 @@ def customer_history_view(request, customer_id):
                 messages.success(request, "Pago registrado.")
                 return redirect("inventory_customer_history", customer_id=customer.id)
             messages.error(request, "Revisá los datos del pago.")
+        elif action == "add_credit_note":
+            credit_note_form = CustomerCreditNoteForm(request.POST, customer=customer)
+            if credit_note_form.is_valid():
+                note = credit_note_form.save(commit=False)
+                note.customer = customer
+                note.kind = CustomerPayment.Kind.CREDIT_NOTE
+                note.method = CustomerPayment.Method.OTHER
+                note.save()
+                messages.success(request, "Nota de crédito registrada.")
+                return redirect("inventory_customer_history", customer_id=customer.id)
+            messages.error(request, "Revisá los datos de la nota de crédito.")
 
     sales = list(
         Sale.objects.filter(customer=customer)
@@ -236,11 +256,20 @@ def customer_history_view(request, customer_id):
             }
         )
     for payment in payments:
-        is_payment = payment.kind == CustomerPayment.Kind.PAYMENT
-        debit = Decimal("0.00") if is_payment else payment.amount
-        credit = payment.amount if is_payment else Decimal("0.00")
-        label = payment.get_method_display()
-        detail_parts = [label]
+        kind = payment.kind
+        is_credit = kind in (CustomerPayment.Kind.PAYMENT, CustomerPayment.Kind.CREDIT_NOTE)
+        debit = Decimal("0.00") if is_credit else payment.amount
+        credit = payment.amount if is_credit else Decimal("0.00")
+        if kind == CustomerPayment.Kind.PAYMENT:
+            label = "Pago"
+            detail_prefix = payment.get_method_display()
+        elif kind == CustomerPayment.Kind.CREDIT_NOTE:
+            label = "Nota de crédito"
+            detail_prefix = "NC"
+        else:
+            label = "Devolución/Ajuste"
+            detail_prefix = payment.get_method_display()
+        detail_parts = [detail_prefix]
         if payment.sale_id:
             detail_parts.append(payment.sale.ml_order_id or payment.sale.invoice_number)
         if payment.notes:
@@ -251,8 +280,8 @@ def customer_history_view(request, customer_id):
             {
                 "date": payment_date,
                 "date_display": payment.paid_at,
-                "kind": "PAYMENT" if is_payment else "REFUND",
-                "label": "Pago" if is_payment else "Devolución/Ajuste",
+                "kind": kind,
+                "label": label,
                 "detail": " · ".join([part for part in detail_parts if part]),
                 "debit": debit,
                 "credit": credit,
@@ -268,14 +297,18 @@ def customer_history_view(request, customer_id):
 
     total_sales = sum((sale.total for sale in sales), Decimal("0.00"))
     total_payments = sum(
-        (payment.amount for payment in payments if payment.kind == CustomerPayment.Kind.PAYMENT),
+        (p.amount for p in payments if p.kind == CustomerPayment.Kind.PAYMENT),
         Decimal("0.00"),
     )
     total_refunds = sum(
-        (payment.amount for payment in payments if payment.kind == CustomerPayment.Kind.REFUND),
+        (p.amount for p in payments if p.kind == CustomerPayment.Kind.REFUND),
         Decimal("0.00"),
     )
-    current_balance = total_sales - total_payments + total_refunds
+    total_credit_notes = sum(
+        (p.amount for p in payments if p.kind == CustomerPayment.Kind.CREDIT_NOTE),
+        Decimal("0.00"),
+    )
+    current_balance = total_sales - total_payments + total_refunds - total_credit_notes
 
     return render(
         request,
@@ -285,10 +318,12 @@ def customer_history_view(request, customer_id):
             "sales_rows": sales_rows,
             "payments": payments,
             "payment_form": payment_form,
+            "credit_note_form": credit_note_form,
             "ledger_entries": ledger_entries,
             "total_sales": total_sales,
             "total_payments": total_payments,
             "total_refunds": total_refunds,
+            "total_credit_notes": total_credit_notes,
             "current_balance": current_balance,
         },
     )

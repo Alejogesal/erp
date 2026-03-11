@@ -379,6 +379,28 @@ class CustomerPaymentForm(forms.ModelForm):
         self.fields["sale"].empty_label = "Cuenta corriente"
 
 
+class CustomerCreditNoteForm(forms.ModelForm):
+    class Meta:
+        model = CustomerPayment
+        fields = ["sale", "amount", "paid_at", "notes"]
+        labels = {
+            "sale": "Venta relacionada (opcional)",
+            "amount": "Monto",
+            "paid_at": "Fecha",
+            "notes": "Motivo",
+        }
+        widgets = {"paid_at": forms.DateInput(attrs={"type": "date"})}
+
+    def __init__(self, *args, customer=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["amount"].min_value = Decimal("0.01")
+        self.fields["sale"].required = False
+        self.fields["notes"].required = False
+        if customer is not None:
+            self.fields["sale"].queryset = Sale.objects.filter(customer=customer).order_by("-created_at")
+        self.fields["sale"].empty_label = "Sin venta específica"
+
+
 class SupplierPaymentForm(forms.ModelForm):
     class Meta:
         model = SupplierPayment

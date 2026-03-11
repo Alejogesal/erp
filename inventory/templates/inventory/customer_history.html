@@ -11,7 +11,8 @@
         <div style="display:flex; flex-direction:column; gap:8px; font-size:14px;">
             <div><strong>Total ventas:</strong> ${{ total_sales|latam_number:2 }}</div>
             <div><strong>Pagos:</strong> ${{ total_payments|latam_number:2 }}</div>
-            <div><strong>Devoluciones/Ajustes:</strong> ${{ total_refunds|latam_number:2 }}</div>
+            {% if total_refunds %}<div><strong>Devoluciones/Ajustes:</strong> ${{ total_refunds|latam_number:2 }}</div>{% endif %}
+            {% if total_credit_notes %}<div><strong>Notas de crédito:</strong> ${{ total_credit_notes|latam_number:2 }}</div>{% endif %}
             <div><strong>Saldo actual:</strong> ${{ current_balance|latam_number:2 }}</div>
         </div>
     </div>
@@ -22,6 +23,15 @@
             <input type="hidden" name="action" value="add_payment">
             {{ payment_form.as_p }}
             <button type="submit">Guardar pago</button>
+        </form>
+    </div>
+    <div class="card">
+        <div class="card-title">Emitir nota de crédito</div>
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="add_credit_note">
+            {{ credit_note_form.as_p }}
+            <button type="submit">Emitir nota de crédito</button>
         </form>
     </div>
 </div>
