@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Product, Stock, StockMovement, Warehouse
+from .models import AuditLog, Product, Stock, StockMovement, Warehouse
 
 
 @admin.register(Warehouse)
@@ -28,6 +28,23 @@ class StockAdmin(admin.ModelAdmin):
     list_display = ("product", "warehouse", "quantity")
     list_filter = ("warehouse",)
     search_fields = ("product__sku", "product__name")
+
+
+@admin.register(AuditLog)
+class AuditLogAdmin(admin.ModelAdmin):
+    list_display = ("timestamp", "action", "model_name", "object_repr", "user")
+    list_filter = ("action", "model_name")
+    search_fields = ("object_repr", "model_name")
+    readonly_fields = ("timestamp", "action", "model_name", "object_id", "object_repr", "changes", "user")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(StockMovement)

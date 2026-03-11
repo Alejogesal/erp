@@ -20,6 +20,33 @@ class Warehouse(models.Model):
         return f"{self.name} ({self.type})"
 
 
+class AuditLog(models.Model):
+    class Action(models.TextChoices):
+        CREATE = "CREATE", "Creación"
+        UPDATE = "UPDATE", "Edición"
+        DELETE = "DELETE", "Eliminación"
+
+    timestamp = models.DateTimeField(auto_now_add=True)
+    action = models.CharField(max_length=10, choices=Action.choices)
+    model_name = models.CharField(max_length=100)
+    object_id = models.PositiveIntegerField(null=True, blank=True)
+    object_repr = models.CharField(max_length=255)
+    changes = models.JSONField(null=True, blank=True)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_logs",
+    )
+
+    class Meta:
+        ordering = ["-timestamp"]
+
+    def __str__(self) -> str:
+        return f"{self.timestamp:%Y-%m-%d %H:%M} | {self.action} | {self.model_name} #{self.object_id}"
+
+
 class Product(models.Model):
     sku = models.CharField(max_length=64, unique=True, blank=True, null=True)
     name = models.CharField(max_length=255)
@@ -68,6 +95,7 @@ class Product(models.Model):
         blank=True,
     )
     is_kit = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["sku"]
@@ -166,6 +194,7 @@ class Customer(models.Model):
     name = models.CharField(max_length=255)
     email = models.CharField(max_length=255, blank=True)
     audience = models.CharField(max_length=20, choices=Audience.choices, default=Audience.CONSUMER)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["name"]
@@ -269,6 +298,7 @@ class Supplier(models.Model):
     name = models.CharField(max_length=255, unique=True)
     phone = models.CharField(max_length=50, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["name"]
@@ -355,6 +385,7 @@ class Purchase(models.Model):
     reference = models.CharField(max_length=255, blank=True, default="")
     invoice_image = models.FileField(upload_to="purchase_invoices/", blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="purchases")
 
     class Meta:
@@ -411,6 +442,7 @@ class Sale(models.Model):
     ml_commission_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     ml_tax_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="sales")
 
     class Meta:
