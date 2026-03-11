@@ -22,6 +22,7 @@ urlpatterns = [
     path("productos/importar-costos/", views.import_costs_xlsx, name="inventory_import_costs"),
     path("clientes/", views.customers_view, name="inventory_customers"),
     path("clientes/<int:customer_id>/historial/", views.customer_history_view, name="inventory_customer_history"),
+    path("clientes/<int:customer_id>/nota-de-credito/", views.create_credit_note, name="inventory_create_credit_note"),
     path("proveedores/", views.suppliers, name="inventory_suppliers"),
     path("proveedores/<int:supplier_id>/historial/", views.supplier_history_view, name="inventory_supplier_history"),
     path("compras/registrar/", views.register_purchase, name="inventory_register_purchase"),

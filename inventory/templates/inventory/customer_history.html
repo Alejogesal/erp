@@ -26,13 +26,9 @@
         </form>
     </div>
     <div class="card">
-        <div class="card-title">Emitir nota de crédito</div>
-        <form method="post">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="add_credit_note">
-            {{ credit_note_form.as_p }}
-            <button type="submit">Emitir nota de crédito</button>
-        </form>
+        <div class="card-title">Nota de crédito</div>
+        <p style="font-size:14px; margin-bottom:12px;">Emitir una nota de crédito por ítems específicos de una venta.</p>
+        <a href="{% url 'inventory_create_credit_note' customer.id %}" class="btn">Nueva nota de crédito</a>
     </div>
 </div>
 

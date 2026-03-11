@@ -1,14 +1,17 @@
 """Customer views."""
 from datetime import datetime, time
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.db import transaction
 from django.db.models import Sum
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
 from ..models import (
+    CreditNote,
+    CreditNoteItem,
     Customer,
     CustomerGroupDiscount,
     CustomerPayment,
@@ -325,5 +328,101 @@ def customer_history_view(request, customer_id):
             "total_refunds": total_refunds,
             "total_credit_notes": total_credit_notes,
             "current_balance": current_balance,
+        },
+    )
+
+
+@login_required
+def create_credit_note(request, customer_id):
+    customer = get_object_or_404(Customer, id=customer_id)
+    sales = Sale.objects.filter(customer=customer).order_by("-created_at")
+
+    selected_sale = None
+    sale_items_data = []
+    step = "select_sale"
+    today = timezone.localdate().isoformat()
+
+    if request.method == "POST":
+        action = request.POST.get("action") or ""
+
+        if action == "load_items":
+            sale_id = request.POST.get("sale_id")
+            if sale_id:
+                selected_sale = get_object_or_404(Sale, id=sale_id, customer=customer)
+                sale_items_data = list(selected_sale.items.select_related("product").all())
+                step = "select_items"
+            else:
+                messages.error(request, "Seleccioná una venta.")
+
+        elif action == "create":
+            sale_id = request.POST.get("sale_id")
+            selected_sale = get_object_or_404(Sale, id=sale_id, customer=customer)
+            sale_items_data = list(selected_sale.items.select_related("product").all())
+            date_str = request.POST.get("date") or today
+            notes = (request.POST.get("notes") or "").strip()
+
+            cn_items = []
+            total = Decimal("0.00")
+            for item in sale_items_data:
+                qty_str = (request.POST.get(f"qty_{item.id}") or "0").replace(",", ".")
+                try:
+                    qty = Decimal(qty_str).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                except InvalidOperation:
+                    qty = Decimal("0.00")
+                if qty <= 0:
+                    continue
+                qty = min(qty, item.quantity)
+                line_total = (qty * item.final_unit_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                cn_items.append({
+                    "product": item.product,
+                    "quantity": qty,
+                    "unit_price": item.final_unit_price,
+                    "line_total": line_total,
+                })
+                total += line_total
+
+            if not cn_items:
+                messages.error(request, "Seleccioná al menos un ítem con cantidad mayor a 0.")
+                step = "select_items"
+            else:
+                with transaction.atomic():
+                    cn = CreditNote.objects.create(
+                        customer=customer,
+                        sale=selected_sale,
+                        date=date_str,
+                        notes=notes,
+                        total=total,
+                        user=request.user,
+                    )
+                    for cn_item in cn_items:
+                        CreditNoteItem.objects.create(
+                            credit_note=cn,
+                            product=cn_item["product"],
+                            quantity=cn_item["quantity"],
+                            unit_price=cn_item["unit_price"],
+                            line_total=cn_item["line_total"],
+                        )
+                    CustomerPayment.objects.create(
+                        customer=customer,
+                        sale=selected_sale,
+                        amount=total,
+                        method=CustomerPayment.Method.OTHER,
+                        kind=CustomerPayment.Kind.CREDIT_NOTE,
+                        paid_at=date_str,
+                        notes=f"NC #{cn.id}" + (f" · {notes}" if notes else ""),
+                    )
+                messages.success(request, f"Nota de crédito #{cn.id} emitida.")
+                return redirect("inventory_customer_history", customer_id=customer.id)
+
+    return render(
+        request,
+        "inventory/credit_note_create.html",
+        {
+            "customer": customer,
+            "sales": sales,
+            "selected_sale": selected_sale,
+            "sale_items_data": sale_items_data,
+            "step": step,
+            "today": today,
         },
     )

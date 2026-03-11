@@ -1,0 +1,129 @@
+{% extends "inventory/base.html" %}
+{% load latam_numbers %}
+{% block title %}Nota de crédito — {{ customer.name }}{% endblock %}
+{% block content %}
+<h1>Nota de crédito</h1>
+<p class="subtitle">Cliente: <strong>{{ customer.name }}</strong></p>
+
+{% if step == "select_sale" %}
+<div class="card" style="max-width:480px;">
+    <div class="card-title">Seleccioná la venta</div>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="load_items">
+        <p>
+            <label>Venta</label>
+            <select name="sale_id" required style="width:100%;">
+                <option value="">— Elegí una venta —</option>
+                {% for sale in sales %}
+                <option value="{{ sale.id }}">
+                    {{ sale.created_at|date:"d/m/Y" }} — {{ sale.ml_order_id|default:sale.invoice_number }} — ${{ sale.total|latam_number:2 }}
+                </option>
+                {% empty %}
+                <option disabled>No hay ventas registradas</option>
+                {% endfor %}
+            </select>
+        </p>
+        <button type="submit">Ver ítems</button>
+        <a href="{% url 'inventory_customer_history' customer.id %}" style="margin-left:12px;">Cancelar</a>
+    </form>
+</div>
+
+{% elif step == "select_items" %}
+<div class="card">
+    <div class="card-title">Venta {{ selected_sale.ml_order_id|default:selected_sale.invoice_number }} — {{ selected_sale.created_at|date:"d/m/Y" }}</div>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="create">
+        <input type="hidden" name="sale_id" value="{{ selected_sale.id }}">
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Producto</th>
+                    <th>Cantidad vendida</th>
+                    <th>Precio unitario</th>
+                    <th>Cantidad a acreditar</th>
+                    <th>Subtotal</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in sale_items_data %}
+                <tr>
+                    <td>{{ item.product.sku }} — {{ item.product.name }}</td>
+                    <td>{{ item.quantity|latam_number:2 }}</td>
+                    <td>${{ item.final_unit_price|latam_number:2 }}</td>
+                    <td>
+                        <input
+                            type="number"
+                            name="qty_{{ item.id }}"
+                            value="0"
+                            min="0"
+                            max="{{ item.quantity }}"
+                            step="0.01"
+                            style="width:90px;"
+                        >
+                    </td>
+                    <td class="subtotal-{{ item.id }}">$0,00</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="5">No hay ítems en esta venta.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <div style="margin-top:16px; display:flex; flex-direction:column; gap:10px; max-width:360px;">
+            <p>
+                <label>Fecha de la nota</label>
+                <input type="date" name="date" value="{{ today }}" required style="width:100%;">
+            </p>
+            <p>
+                <label>Motivo</label>
+                <input type="text" name="notes" placeholder="Ej: devolución por producto dañado" style="width:100%;">
+            </p>
+            <div style="font-size:15px;">
+                <strong>Total nota de crédito: $<span id="cn-total">0,00</span></strong>
+            </div>
+        </div>
+
+        <div style="margin-top:16px; display:flex; gap:12px; align-items:center;">
+            <button type="submit">Emitir nota de crédito</button>
+            <a href="{% url 'inventory_customer_history' customer.id %}">Cancelar</a>
+        </div>
+    </form>
+</div>
+
+<script>
+(function () {
+    const prices = {
+        {% for item in sale_items_data %}
+        "{{ item.id }}": {{ item.final_unit_price }},
+        {% endfor %}
+    };
+
+    function fmt(n) {
+        return n.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    }
+
+    function recalc() {
+        let total = 0;
+        Object.keys(prices).forEach(function (id) {
+            const input = document.querySelector('input[name="qty_' + id + '"]');
+            if (!input) return;
+            const qty = parseFloat(input.value.replace(',', '.')) || 0;
+            const subtotal = qty * prices[id];
+            total += subtotal;
+            const cell = document.querySelector('.subtotal-' + id);
+            if (cell) cell.textContent = '$' + fmt(subtotal);
+        });
+        document.getElementById('cn-total').textContent = fmt(total);
+    }
+
+    document.querySelectorAll('input[type="number"]').forEach(function (inp) {
+        inp.addEventListener('input', recalc);
+    });
+    recalc();
+})();
+</script>
+{% endif %}
+{% endblock %}

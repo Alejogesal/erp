@@ -506,6 +506,36 @@ class CustomerPayment(models.Model):
         return f"{self.customer} - {self.amount} ({self.method})"
 
 
+class CreditNote(models.Model):
+    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="credit_notes")
+    sale = models.ForeignKey(Sale, on_delete=models.SET_NULL, null=True, blank=True, related_name="credit_notes")
+    date = models.DateField(default=timezone.localdate)
+    notes = models.CharField(max_length=255, blank=True, default="")
+    total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="credit_notes")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-date", "-id"]
+
+    def __str__(self) -> str:
+        return f"NC #{self.pk} - {self.customer}"
+
+
+class CreditNoteItem(models.Model):
+    credit_note = models.ForeignKey(CreditNote, on_delete=models.CASCADE, related_name="items")
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="credit_note_items")
+    quantity = models.DecimalField(max_digits=12, decimal_places=2)
+    unit_price = models.DecimalField(max_digits=12, decimal_places=2)
+    line_total = models.DecimalField(max_digits=12, decimal_places=2)
+
+    class Meta:
+        ordering = ["credit_note__id", "id"]
+
+    def __str__(self) -> str:
+        return f"{self.product.sku} x {self.quantity}"
+
+
 class SupplierPayment(models.Model):
     class Method(models.TextChoices):
         CASH = "CASH", "Efectivo"
