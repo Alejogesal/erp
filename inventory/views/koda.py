@@ -21,6 +21,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from .. import services
+from ..services import update_product_avg_costs
 from ..models import (
     Customer,
     KitComponent,
@@ -78,9 +79,12 @@ def _koda_system_prompt() -> str:
         "- transfer_to_ml: {items:[{product, quantity, variant?}]}\n"
         "- register_sale: {warehouse, audience?, customer?, items:[{product, quantity, unit_price?, vat_percent?}]}\n"
         "- update_sale: {sale_id? or invoice_number?, sale_date?, total?, ml_commission_total?, ml_tax_total?}\n"
-        "- register_purchase: {warehouse?, supplier, reference?, items:[{product, quantity, unit_cost?, vat_percent?}], has_invoice_image?}\n"
-        "Para compras a proveedor, extraé items con {product: descripcion, quantity} y dejá unit_cost vacío.\n"
-        "El backend completará el costo con el precio de lista/costo del ERP.\n"
+        "- register_purchase: {warehouse?, supplier, reference?, items:[{product, quantity, unit_cost, vat_percent, discount_percent?}]}\n"
+        "Para compras con imagen/PDF de factura: extraé TODOS los ítems con {product: descripcion_exacta, quantity, unit_cost: precio_unitario_sin_iva, vat_percent: porcentaje_iva_numerico, discount_percent: descuento_porcentaje_o_0}.\n"
+        "unit_cost es el precio neto unitario SIN IVA tal como figura en la factura. vat_percent es el número (ej: 21, 10.5, 0). Si hay bonificación/descuento, ponelo en discount_percent.\n"
+        "Si un ítem tiene 100% de descuento, unit_cost=0 y discount_percent=100.\n"
+        "supplier debe ser el nombre del proveedor tal como figura en la factura. reference puede ser el número de factura.\n"
+        "Si no podés leer el precio de un ítem, dejá unit_cost=null (el sistema usará el costo histórico).\n"
         "Usá identificadores de producto por SKU si es posible, sino por nombre exacto. "
         "Si el producto tiene variedades, pedí o incluí la variedad."
     )
@@ -335,14 +339,14 @@ def _koda_try_local_response(message: str) -> str | None:
     return _koda_try_math(message)
 
 
-def _koda_call_openai(messages, image_data_url: str | None = None) -> dict:
+def _koda_call_openai(messages, image_data_urls: list[str] | None = None) -> dict:
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not api_key:
         return {"reply": "Falta configurar OPENAI_API_KEY.", "actions": [], "needs_confirmation": False}
 
     user_content = [{"type": "text", "text": messages[-1]["content"]}]
-    if image_data_url:
-        user_content.append({"type": "image_url", "image_url": {"url": image_data_url}})
+    for data_url in (image_data_urls or []):
+        user_content.append({"type": "image_url", "image_url": {"url": data_url}})
 
     payload_messages = [{"role": "system", "content": _koda_system_prompt()}]
     payload_messages.extend(messages[:-1])
@@ -378,6 +382,26 @@ def _koda_call_openai(messages, image_data_url: str | None = None) -> dict:
         }
     except Exception:
         return {"reply": content, "actions": [], "needs_confirmation": False}
+
+
+def _koda_pdf_to_images(pdf_bytes: bytes, max_pages: int = 4) -> list[str]:
+    """Render PDF pages to base64 JPEG data URLs using pymupdf. Returns [] if unavailable."""
+    try:
+        import fitz  # pymupdf
+    except ImportError:
+        return []
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        data_urls = []
+        mat = fitz.Matrix(2.0, 2.0)  # 2x zoom for readability
+        for page_num in range(min(doc.page_count, max_pages)):
+            pix = doc[page_num].get_pixmap(matrix=mat)
+            encoded = base64.b64encode(pix.tobytes("jpeg")).decode("utf-8")
+            data_urls.append(f"data:image/jpeg;base64,{encoded}")
+        doc.close()
+        return data_urls
+    except Exception:
+        return []
 
 
 def _koda_extract_pdf_text(path: str) -> tuple[str | None, str | None]:
@@ -717,35 +741,66 @@ def _koda_execute_actions(actions: list[dict], user, invoice_path: str | None) -
                     user=user,
                 )
                 total = Decimal("0.00")
+                avg_cost_tracker: list[dict] = []
                 for item in items:
                     product = _koda_resolve_product(item.get("product", ""))
                     if not product:
-                        raise ValueError("Producto no encontrado.")
+                        raise ValueError(f"Producto no encontrado: {item.get('product', '')!r}")
                     quantity = Decimal(str(item.get("quantity") or "0"))
                     if quantity <= 0:
                         raise ValueError("Cantidad inválida.")
                     unit_cost_raw = item.get("unit_cost")
-                    if unit_cost_raw is None:
-                        unit_cost = product.cost_with_vat()
+                    vat_raw = item.get("vat_percent")
+                    discount_raw = item.get("discount_percent") or "0"
+                    discount = Decimal(str(discount_raw)).quantize(Decimal("0.01"))
+
+                    if unit_cost_raw is not None:
+                        unit_cost_base = Decimal(str(unit_cost_raw)).quantize(Decimal("0.01"))
+                        vat = Decimal(str(vat_raw or "0.00")).quantize(Decimal("0.01"))
                     else:
-                        unit_cost = Decimal(str(unit_cost_raw))
-                    vat_percent = Decimal(str(item.get("vat_percent") or "0.00"))
+                        # Fallback: use existing avg_cost (already includes VAT), no re-apply
+                        unit_cost_base = product.avg_cost or Decimal("0.00")
+                        vat = Decimal("0.00")
+
+                    if discount >= Decimal("100.00"):
+                        effective_base = Decimal("0.00")
+                        vat = Decimal("0.00")
+                    elif discount > 0:
+                        effective_base = (unit_cost_base * (1 - discount / 100)).quantize(
+                            Decimal("0.01"), rounding=ROUND_HALF_UP
+                        )
+                    else:
+                        effective_base = unit_cost_base
+
+                    cost_with_vat = (
+                        (effective_base * (1 + vat / 100)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                        if vat > 0
+                        else effective_base
+                    )
+
                     PurchaseItem.objects.create(
                         purchase=purchase,
                         product=product,
                         quantity=quantity,
-                        unit_cost=unit_cost,
-                        vat_percent=vat_percent,
+                        unit_cost=effective_base,
+                        discount_percent=discount,
+                        vat_percent=vat,
                     )
                     services.register_entry(
                         product=product,
                         warehouse=warehouse,
                         quantity=quantity,
-                        unit_cost=unit_cost,
+                        unit_cost=effective_base,
+                        vat_percent=vat if vat_raw is not None else None,
                         user=user,
                         reference=f"Koda: compra #{purchase.id}",
+                        supplier=supplier,
+                        purchase=purchase,
                     )
-                    total += (quantity * unit_cost).quantize(Decimal("0.01"))
+                    avg_cost_tracker.append({"product": product, "qty": quantity, "cost_with_vat": cost_with_vat})
+                    total += (quantity * cost_with_vat).quantize(Decimal("0.01"))
+
+                update_product_avg_costs(avg_cost_tracker)
                 purchase.total = total
                 if invoice_path:
                     with open(invoice_path, "rb") as handle:
@@ -755,7 +810,7 @@ def _koda_execute_actions(actions: list[dict], user, invoice_path: str | None) -
                             save=False,
                         )
                 purchase.save()
-            results.append(f"Compra registrada #{purchase.id}.")
+            results.append(f"Compra registrada #{purchase.id}: {len(items)} ítems, total {_koda_format_amount(total)}.")
         else:
             raise ValueError(f"Acción desconocida: {action_type}")
     return results
@@ -792,7 +847,7 @@ def koda_chat(request):
             request.session["koda_history"] = history[-10:]
             return JsonResponse({"reply": local_reply, "needs_confirmation": False, "summary": ""})
 
-    image_data_url = None
+    image_data_urls: list[str] = []
     pending_file_path = None
     if image_file:
         from django.conf import settings as django_settings
@@ -806,25 +861,32 @@ def koda_chat(request):
 
         if image_file.content_type and image_file.content_type.startswith("image/"):
             encoded = base64.b64encode(raw).decode("utf-8")
-            image_data_url = f"data:{image_file.content_type};base64,{encoded}"
+            image_data_urls = [f"data:{image_file.content_type};base64,{encoded}"]
             if not message:
-                message = "Analizá la imagen adjunta y respondé."
-            elif "imagen" not in message.lower():
+                message = "Registrá esta factura de compra: extraé proveedor, número, todos los ítems con cantidad, precio unitario sin IVA y porcentaje de IVA por línea."
+            elif "imagen" not in message.lower() and "factura" not in message.lower():
                 message = f"{message}\n\nUsá la imagen adjunta para extraer los datos."
         elif image_file.content_type == "application/pdf":
             pdf_text, pdf_error = _koda_extract_pdf_text(pending_file_path)
             if pdf_error:
                 return JsonResponse({"reply": pdf_error, "actions": []})
-            if not pdf_text:
-                return JsonResponse(
-                    {"reply": "El PDF no tiene texto legible. Subí una imagen o pegá el contenido.", "actions": []}
-                )
-            message = f"{message}\n\nContenido del PDF:\n{pdf_text}".strip()
+            if pdf_text:
+                # Text-based PDF: send content as text
+                message = f"{message}\n\nContenido del PDF:\n{pdf_text}".strip()
+            else:
+                # Scanned PDF: render pages as images for vision
+                image_data_urls = _koda_pdf_to_images(raw)
+                if not image_data_urls:
+                    return JsonResponse(
+                        {"reply": "El PDF no tiene texto legible y no pude renderizarlo como imagen. Intentá subir una foto de la factura.", "actions": []}
+                    )
+                if not message:
+                    message = "Registrá esta factura de compra: extraé proveedor, número, todos los ítems con cantidad, precio unitario sin IVA y porcentaje de IVA por línea."
 
     history = request.session.get("koda_history", [])
     history = history[-8:]
     messages = history + [{"role": "user", "content": message}]
-    result = _koda_call_openai(messages, image_data_url=image_data_url)
+    result = _koda_call_openai(messages, image_data_urls=image_data_urls or None)
 
     actions = result.get("actions") or []
     needs_confirmation = bool(result.get("needs_confirmation")) and bool(actions)

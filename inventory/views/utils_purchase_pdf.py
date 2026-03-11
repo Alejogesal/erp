@@ -506,12 +506,8 @@ def _create_product_from_purchase_pdf(
             max_suffix = max(max_suffix, int(suffix))
     sku = f"{prefix}{max_suffix + 1:04d}"
     vat = vat_percent if vat_percent is not None else Decimal("0.00")
-    gross_cost = unit_cost_with_vat if unit_cost_with_vat is not None else Decimal("0.00")
-    if vat > 0:
-        factor = Decimal("1.00") + (vat / Decimal("100.00"))
-        avg_cost = (gross_cost / factor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    else:
-        avg_cost = gross_cost.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    # avg_cost stores the all-in cost (with VAT already included).
+    avg_cost = (unit_cost_with_vat or Decimal("0.00")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     return Product.objects.create(
         sku=sku,
         name=name,
