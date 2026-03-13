@@ -264,6 +264,16 @@ def product_prices(request):
     )
 
 
+def _parse_margin(value: str | None) -> Decimal:
+    """Parse a margin percentage from a web form input (handles both dot and comma as decimal separator)."""
+    if not value:
+        return Decimal("0")
+    try:
+        return Decimal(str(value).strip().replace(",", ".")).quantize(Decimal("0.01"))
+    except Exception:
+        return Decimal("0")
+
+
 @login_required
 @require_http_methods(["GET", "POST"])
 def product_margins(request):
@@ -274,17 +284,46 @@ def product_margins(request):
             product = Product.objects.filter(id=product_id).first()
             if not product:
                 return JsonResponse({"ok": False, "error": "product_not_found"}, status=404)
-            margin_consumer = _parse_decimal(request.POST.get("margin_consumer"))
-            margin_barber = _parse_decimal(request.POST.get("margin_barber"))
-            margin_distributor = _parse_decimal(request.POST.get("margin_distributor"))
-            product.margin_consumer = margin_consumer
-            product.margin_barber = margin_barber
-            product.margin_distributor = margin_distributor
+            product.margin_consumer = _parse_margin(request.POST.get("margin_consumer"))
+            product.margin_barber = _parse_margin(request.POST.get("margin_barber"))
+            product.margin_distributor = _parse_margin(request.POST.get("margin_distributor"))
             product.save(update_fields=["margin_consumer", "margin_barber", "margin_distributor"])
             return JsonResponse({"ok": True})
 
+        if action == "bulk_update_all_margins":
+            updates = {}
+            if request.POST.get("bulk_consumer", "").strip():
+                updates["margin_consumer"] = _parse_margin(request.POST.get("bulk_consumer"))
+            if request.POST.get("bulk_barber", "").strip():
+                updates["margin_barber"] = _parse_margin(request.POST.get("bulk_barber"))
+            if request.POST.get("bulk_distributor", "").strip():
+                updates["margin_distributor"] = _parse_margin(request.POST.get("bulk_distributor"))
+            count = Product.objects.update(**updates) if updates else 0
+            return JsonResponse({"ok": True, "count": count})
+
+        if action == "bulk_update_brand_margins":
+            brand = request.POST.get("brand", "").strip()
+            if not brand:
+                return JsonResponse({"ok": False, "error": "no_brand"}, status=400)
+            updates = {}
+            if request.POST.get("bulk_consumer", "").strip():
+                updates["margin_consumer"] = _parse_margin(request.POST.get("bulk_consumer"))
+            if request.POST.get("bulk_barber", "").strip():
+                updates["margin_barber"] = _parse_margin(request.POST.get("bulk_barber"))
+            if request.POST.get("bulk_distributor", "").strip():
+                updates["margin_distributor"] = _parse_margin(request.POST.get("bulk_distributor"))
+            count = Product.objects.filter(group=brand).update(**updates) if updates else 0
+            return JsonResponse({"ok": True, "count": count})
+
     products = Product.objects.order_by("sku")
-    return render(request, "inventory/product_margins.html", {"products": products})
+    brands = list(
+        Product.objects.exclude(group="")
+        .exclude(group__isnull=True)
+        .values_list("group", flat=True)
+        .distinct()
+        .order_by("group")
+    )
+    return render(request, "inventory/product_margins.html", {"products": products, "brands": brands})
 
 
 @login_required

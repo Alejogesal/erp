@@ -55,10 +55,147 @@
         color: var(--muted);
         margin-top: 10px;
     }
+    .bulk-panel {
+        display: flex;
+        gap: 24px;
+        flex-wrap: wrap;
+        padding: 16px 0 4px;
+    }
+    .bulk-section {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        flex: 1;
+        min-width: 260px;
+    }
+    .bulk-section-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+    }
+    .bulk-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+    .bulk-row select {
+        padding: 7px 8px;
+        border-radius: 8px;
+        border: 1px solid #2a313c;
+        background: #0f1622;
+        color: var(--text);
+        font-size: 13px;
+        min-width: 140px;
+    }
+    .bulk-label {
+        font-size: 11px;
+        color: var(--muted);
+        white-space: nowrap;
+    }
+    .bulk-field {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+    }
+    .bulk-field input {
+        width: 72px;
+        padding: 7px 8px;
+        border-radius: 8px;
+        border: 1px solid #2a313c;
+        background: #0f1622;
+        color: var(--text);
+        font-size: 13px;
+    }
+    .bulk-apply-btn {
+        padding: 7px 14px;
+        border-radius: 8px;
+        border: none;
+        background: var(--accent, #3b82f6);
+        color: #fff;
+        font-size: 13px;
+        cursor: pointer;
+        white-space: nowrap;
+        align-self: flex-end;
+    }
+    .bulk-apply-btn:disabled { opacity: 0.5; cursor: default; }
+    .bulk-status {
+        font-size: 11px;
+        color: var(--muted);
+        margin-top: 4px;
+        min-height: 16px;
+    }
+    .divider {
+        width: 1px;
+        background: #2a313c;
+        margin: 0 4px;
+        align-self: stretch;
+    }
+    @media (max-width: 700px) { .divider { display: none; } }
 </style>
 
 <h1>Márgenes por producto</h1>
 <p class="subtitle">Cada columna es una lista de precio. Editá el porcentaje y se recalcula en vivo.</p>
+
+<div class="card" id="bulk-card">
+    <div class="card-title">Actualización masiva</div>
+    <div class="bulk-panel">
+        <!-- Todos los productos -->
+        <div class="bulk-section">
+            <div class="bulk-section-title">Todos los productos</div>
+            <div class="bulk-row">
+                <div class="bulk-field">
+                    <span class="bulk-label">Consumidor final</span>
+                    <input type="number" step="0.01" min="0" max="999" id="bulk-all-consumer" placeholder="—">
+                </div>
+                <div class="bulk-field">
+                    <span class="bulk-label">Peluquerías</span>
+                    <input type="number" step="0.01" min="0" max="999" id="bulk-all-barber" placeholder="—">
+                </div>
+                <div class="bulk-field">
+                    <span class="bulk-label">Distribuidores</span>
+                    <input type="number" step="0.01" min="0" max="999" id="bulk-all-distributor" placeholder="—">
+                </div>
+                <button class="bulk-apply-btn" id="bulk-all-btn">Aplicar a todos</button>
+            </div>
+            <div class="bulk-status" id="bulk-all-status"></div>
+        </div>
+
+        <div class="divider"></div>
+
+        <!-- Por marca -->
+        <div class="bulk-section">
+            <div class="bulk-section-title">Por marca</div>
+            <div class="bulk-row">
+                <div class="bulk-field">
+                    <span class="bulk-label">Marca</span>
+                    <select id="bulk-brand-select">
+                        <option value="">Elegir marca…</option>
+                        {% for brand in brands %}
+                        <option value="{{ brand }}">{{ brand }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="bulk-field">
+                    <span class="bulk-label">Consumidor final</span>
+                    <input type="number" step="0.01" min="0" max="999" id="bulk-brand-consumer" placeholder="—">
+                </div>
+                <div class="bulk-field">
+                    <span class="bulk-label">Peluquerías</span>
+                    <input type="number" step="0.01" min="0" max="999" id="bulk-brand-barber" placeholder="—">
+                </div>
+                <div class="bulk-field">
+                    <span class="bulk-label">Distribuidores</span>
+                    <input type="number" step="0.01" min="0" max="999" id="bulk-brand-distributor" placeholder="—">
+                </div>
+                <button class="bulk-apply-btn" id="bulk-brand-btn">Aplicar a marca</button>
+            </div>
+            <div class="bulk-status" id="bulk-brand-status"></div>
+        </div>
+    </div>
+</div>
 
 <div class="card table-card" id="margenes">
     <div class="card-title">Márgenes y listas</div>
@@ -80,7 +217,7 @@
         </thead>
         <tbody>
             {% for product in products %}
-            <tr data-cost="{{ product.cost_with_vat|floatformat:2 }}">
+            <tr data-cost="{{ product.cost_with_vat|floatformat:2 }}" data-brand="{{ product.group|default:'' }}">
                 <td>{{ product.sku|default:"-" }}</td>
                 <td>{{ product.name }}</td>
                 <td>{{ product.group|default:"-" }}</td>
@@ -165,14 +302,22 @@
         const autosave = (row) => {
             const form = row.querySelector("form[id^='margin-form-']");
             if (!form) return;
+            // Build payload manually to normalize decimal values (avoid dot-stripping in _parse_margin)
             const payload = new FormData(form);
+            const normalize = (name, cls) => {
+                const input = row.querySelector(cls);
+                if (input) payload.set(name, String(parseNumber(input.value)));
+            };
+            normalize("margin_consumer", ".margin-consumer");
+            normalize("margin_barber", ".margin-barber");
+            normalize("margin_distributor", ".margin-distributor");
             fetch(form.action, {
                 method: "POST",
                 headers: { "X-CSRFToken": csrfToken || "" },
                 body: payload,
                 credentials: "same-origin",
-            }).then(() => {
-                if (status) status.textContent = "Auto-guardado activo.";
+            }).then((res) => {
+                if (status) status.textContent = res.ok ? "Auto-guardado activo." : "Error al guardar.";
             }).catch(() => {
                 if (status) status.textContent = "No se pudo auto-guardar.";
             });
@@ -210,6 +355,69 @@
                 });
             };
             search.addEventListener("input", applyFilter);
+        }
+
+        // ---- Bulk update helpers ----
+        const postBulk = (action, data, statusEl, btn) => {
+            const payload = new FormData();
+            payload.append("action", action);
+            payload.append("csrfmiddlewaretoken", csrfToken);
+            for (const [k, v] of Object.entries(data)) payload.append(k, v);
+            btn.disabled = true;
+            statusEl.textContent = "Aplicando…";
+            fetch(window.location.pathname, {
+                method: "POST",
+                headers: { "X-CSRFToken": csrfToken },
+                body: payload,
+                credentials: "same-origin",
+            }).then(r => r.json()).then(data => {
+                if (data.ok) {
+                    statusEl.textContent = `✓ ${data.count} producto${data.count !== 1 ? "s" : ""} actualizado${data.count !== 1 ? "s" : ""}. Recargando…`;
+                    setTimeout(() => location.reload(), 800);
+                } else {
+                    statusEl.textContent = "Error al aplicar.";
+                    btn.disabled = false;
+                }
+            }).catch(() => {
+                statusEl.textContent = "Error de red.";
+                btn.disabled = false;
+            });
+        };
+
+        // Bulk: all products
+        const bulkAllBtn = document.getElementById("bulk-all-btn");
+        const bulkAllStatus = document.getElementById("bulk-all-status");
+        if (bulkAllBtn) {
+            bulkAllBtn.addEventListener("click", () => {
+                const c = document.getElementById("bulk-all-consumer").value.trim();
+                const b = document.getElementById("bulk-all-barber").value.trim();
+                const d = document.getElementById("bulk-all-distributor").value.trim();
+                if (!c && !b && !d) { bulkAllStatus.textContent = "Ingresá al menos un margen."; return; }
+                const data = {};
+                if (c) data.bulk_consumer = c;
+                if (b) data.bulk_barber = b;
+                if (d) data.bulk_distributor = d;
+                postBulk("bulk_update_all_margins", data, bulkAllStatus, bulkAllBtn);
+            });
+        }
+
+        // Bulk: by brand
+        const bulkBrandBtn = document.getElementById("bulk-brand-btn");
+        const bulkBrandStatus = document.getElementById("bulk-brand-status");
+        if (bulkBrandBtn) {
+            bulkBrandBtn.addEventListener("click", () => {
+                const brand = document.getElementById("bulk-brand-select").value.trim();
+                const c = document.getElementById("bulk-brand-consumer").value.trim();
+                const b = document.getElementById("bulk-brand-barber").value.trim();
+                const d = document.getElementById("bulk-brand-distributor").value.trim();
+                if (!brand) { bulkBrandStatus.textContent = "Elegí una marca."; return; }
+                if (!c && !b && !d) { bulkBrandStatus.textContent = "Ingresá al menos un margen."; return; }
+                const data = { brand };
+                if (c) data.bulk_consumer = c;
+                if (b) data.bulk_barber = b;
+                if (d) data.bulk_distributor = d;
+                postBulk("bulk_update_brand_margins", data, bulkBrandStatus, bulkBrandBtn);
+            });
         }
     })();
 </script>
