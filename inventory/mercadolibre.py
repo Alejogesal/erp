@@ -647,20 +647,31 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
         return False, "no_matches"
 
     total_amount = Decimal(str(order.get("total_amount", 0) or 0))
-    payments = order.get("payments") or []
-    if not payments:
-        try:
+
+    # fee_details in the order object is the authoritative source for ML fees
+    fee_total = Decimal("0.00")
+    tax_total = Decimal("0.00")
+    for fee in order.get("fee_details") or []:
+        ftype = str(fee.get("type", "") or "").lower()
+        amount = Decimal(str(fee.get("amount", 0) or 0)).copy_abs()
+        if "tax" in ftype or "iva" in ftype or "iibb" in ftype or "impuesto" in ftype:
+            tax_total += amount
+        else:
+            fee_total += amount
+
+    # fallback: try payment-level data if fee_details is empty
+    if fee_total == Decimal("0.00"):
+        payments = order.get("payments") or []
+        if not payments:
             try:
                 payments_data = _call_with_refresh(connection, get_order_payments, order_id, access_token=access_token)
-            except HTTPError:
-                payments_data = []
-            if isinstance(payments_data, dict):
-                payments = payments_data.get("payments") or payments_data.get("results") or []
-            elif isinstance(payments_data, list):
-                payments = payments_data
-        except Exception:
-            payments = []
-    fee_total, tax_total = _sum_payment_details(payments)
+                if isinstance(payments_data, dict):
+                    payments = payments_data.get("payments") or payments_data.get("results") or []
+                elif isinstance(payments_data, list):
+                    payments = payments_data
+            except Exception:
+                payments = []
+        fee_total, tax_total = _sum_payment_details(payments)
 
     if existing_sale:
         existing_sale.ml_commission_total = fee_total.quantize(Decimal("0.01"))

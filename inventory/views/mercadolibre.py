@@ -243,6 +243,7 @@ def mercadolibre_dashboard(request):
                     debug_info = {
                         "order_status": order.get("status"),
                         "total_amount": order.get("total_amount"),
+                        "fee_details": order.get("fee_details"),
                         "payments_in_order_count": len(payments_in_order),
                         "payments_in_order_sample": payments_in_order[:1],
                         "payments_api_raw": payments_api if isinstance(payments_api, list) else payments_api,
