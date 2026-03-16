@@ -196,17 +196,20 @@ def _sum_payment_details(payments: list[dict]) -> tuple[Decimal, Decimal]:
     tax_total = Decimal("0.00")
     charges_fee = Decimal("0.00")
     charges_tax = Decimal("0.00")
-    fee_types = {"fee", "commission", "marketplace_fee"}
-    tax_types = {"tax"}
+    fee_keywords = {"fee", "commission", "marketplace_fee", "mp_fee"}
+    tax_keywords = {"tax", "iva", "impuesto", "ingresos_brutos", "iibb"}
     for payment in payments:
-        fee_total += Decimal(str(payment.get("fee_amount", 0) or 0)).copy_abs()
+        # marketplace_fee is the primary ML commission field
+        mkt_fee = Decimal(str(payment.get("marketplace_fee", 0) or 0)).copy_abs()
+        fee_amount = Decimal(str(payment.get("fee_amount", 0) or 0)).copy_abs()
+        fee_total += max(mkt_fee, fee_amount)
         tax_total += Decimal(str(payment.get("taxes_amount", 0) or 0)).copy_abs()
         for charge in payment.get("charges_details") or []:
             ctype = str(charge.get("type", "") or "").lower()
-            amount = Decimal(str(charge.get("amount", 0) or 0)).copy_abs()
-            if ctype in fee_types:
+            amount = Decimal(str(charge.get("amount", {}).get("value", 0) if isinstance(charge.get("amount"), dict) else charge.get("amount", 0) or 0)).copy_abs()
+            if any(k in ctype for k in fee_keywords):
                 charges_fee += amount
-            if ctype in tax_types:
+            elif any(k in ctype for k in tax_keywords):
                 charges_tax += amount
     if fee_total == 0 and charges_fee > 0:
         fee_total = charges_fee
