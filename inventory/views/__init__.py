@@ -38,6 +38,7 @@ from .mercadolibre import (
     mercadolibre_callback,
     mercadolibre_connect,
     mercadolibre_dashboard,
+    mercadolibre_order_sheet,
     mercadolibre_webhook,
 )
 from .taxes import taxes_view
@@ -79,6 +80,7 @@ __all__ = [
     "mercadolibre_callback",
     "mercadolibre_connect",
     "mercadolibre_dashboard",
+    "mercadolibre_order_sheet",
     "mercadolibre_webhook",
     "taxes_view",
     "koda_chat",

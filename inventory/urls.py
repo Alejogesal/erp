@@ -8,6 +8,7 @@ urlpatterns = [
     path("mercadolibre/conectar/", views.mercadolibre_connect, name="inventory_mercadolibre_connect"),
     path("mercadolibre/callback/", views.mercadolibre_callback, name="inventory_mercadolibre_callback"),
     path("mercadolibre/webhook/", views.mercadolibre_webhook, name="inventory_mercadolibre_webhook"),
+    path("mercadolibre/pedido/", views.mercadolibre_order_sheet, name="inventory_mercadolibre_order_sheet"),
     path("productos/nuevo/", views.create_product, name="inventory_create_product"),
     path("productos/<int:pk>/editar/", views.edit_product, name="inventory_edit_product"),
     path("productos/importar/", views.import_products, name="inventory_import_products"),

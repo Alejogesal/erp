@@ -1,0 +1,35 @@
+{% extends "inventory/base.html" %}
+{% block title %}ML Pedido{% endblock %}
+{% block content %}
+<h1>Hoja de pedido — MercadoLibre</h1>
+<p class="subtitle">Proyección a 15 días basada en ventas de los últimos 30 días. Skala muestra cada variedad por separado.</p>
+
+<div class="card" style="overflow-x:auto;">
+    <table style="width:100%; border-collapse:collapse; font-size:0.95rem;">
+        <thead>
+            <tr style="border-bottom:2px solid var(--border);">
+                <th style="text-align:left; padding:8px 12px;">Nombre del producto</th>
+                <th style="text-align:center; padding:8px 12px;">Stock ML</th>
+                <th style="text-align:center; padding:8px 12px;">Recomendación de compra (15 días)</th>
+                <th style="text-align:center; padding:8px 12px; min-width:120px;"></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            <tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:7px 12px;">{{ row.name }}</td>
+                <td style="text-align:center; padding:7px 12px;">{{ row.stock }}</td>
+                <td style="text-align:center; padding:7px 12px;">{{ row.recommendation }}</td>
+                <td style="padding:7px 12px;"></td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="4" style="padding:20px 12px; text-align:center; color:var(--muted);">
+                    No hay productos de MercadoLibre con match asignado.
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
