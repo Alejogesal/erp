@@ -591,6 +591,8 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
     if order_status in {"cancelled", "expired"}:
         return False, "ignored_status"
 
+    order_date = _parse_ml_datetime(order.get("date_created"))
+
     reference = f"ML ORDER {order_id}"
     existing_sale = Sale.objects.filter(reference=reference).first()
 
@@ -685,6 +687,8 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
         ml_tax_total=tax_total.quantize(Decimal("0.01")),
         user=user,
     )
+    if order_date:
+        Sale.objects.filter(pk=sale.pk).update(created_at=order_date)
     for product, quantity, unit_price, vat_percent, variant in matched_items:
         line_total = (unit_price * quantity).quantize(Decimal("0.01"))
         SaleItem.objects.create(
