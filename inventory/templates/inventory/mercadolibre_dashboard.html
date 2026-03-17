@@ -28,9 +28,10 @@
                     <input type="hidden" name="action" value="sync_full">
                     <button type="submit">Sincronizar stock</button>
                 </form>
-                <form method="post" style="display:inline;">
+                <form method="post" style="display:inline; display:flex; gap:6px; align-items:center;">
                     {% csrf_token %}
                     <input type="hidden" name="action" value="sync_orders">
+                    <input type="date" name="sync_date" style="padding:6px 10px; border-radius:8px; background:#0f1622; border:1px solid #2a313c; color:var(--text); font-size:13px;">
                     <button type="submit">Sincronizar ventas</button>
                 </form>
                 <form method="post" style="display:inline;">

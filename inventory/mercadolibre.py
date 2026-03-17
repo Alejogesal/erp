@@ -291,26 +291,27 @@ def get_orders_summary(user_id: str, access_token: str, days: int = 30) -> dict:
     }
 
 
-def get_recent_order_ids(user_id: str, access_token: str, days: int = 30) -> list[str]:
-    date_from = (timezone.now() - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S.000-00:00")
+def get_recent_order_ids(user_id: str, access_token: str, days: int = 30, date_from_str: str | None = None, date_to_str: str | None = None) -> list[str]:
+    if date_from_str:
+        date_from = date_from_str
+    else:
+        date_from = (timezone.now() - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S.000-00:00")
     limit = 50
     offset = 0
     max_orders_env = os.environ.get("ML_ORDERS_MAX", "")
     max_orders = int(max_orders_env) if max_orders_env.isdigit() else 200
     order_ids: list[str] = []
     while True:
-        data = _request(
-            "GET",
-            "/orders/search",
-            access_token=access_token,
-            params={
-                "seller": user_id,
-                "order.date_created.from": date_from,
-                "sort": "date_desc",
-                "limit": limit,
-                "offset": offset,
-            },
-        )
+        params = {
+            "seller": user_id,
+            "order.date_created.from": date_from,
+            "sort": "date_desc",
+            "limit": limit,
+            "offset": offset,
+        }
+        if date_to_str:
+            params["order.date_created.to"] = date_to_str
+        data = _request("GET", "/orders/search", access_token=access_token, params=params)
         batch = data.get("results") or []
         for order in batch:
             order_id = str(order.get("id") or "")
@@ -322,7 +323,7 @@ def get_recent_order_ids(user_id: str, access_token: str, days: int = 30) -> lis
     return order_ids[:max_orders]
 
 
-def sync_recent_orders(connection: MercadoLibreConnection, user, days: int = 30) -> dict:
+def sync_recent_orders(connection: MercadoLibreConnection, user, days: int = 30, date_from_str: str | None = None, date_to_str: str | None = None) -> dict:
     access_token = get_valid_access_token(connection)
     if not access_token:
         return {"total": 0, "created": 0, "updated": 0, "reasons": {"missing_access_token": 1}}
@@ -333,6 +334,8 @@ def sync_recent_orders(connection: MercadoLibreConnection, user, days: int = 30)
             connection.ml_user_id,
             access_token=access_token,
             days=days,
+            date_from_str=date_from_str,
+            date_to_str=date_to_str,
         )
     except HTTPError as exc:
         if exc.code == 401:

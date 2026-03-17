@@ -160,9 +160,21 @@ def mercadolibre_dashboard(request):
                 messages.error(request, "Primero conectá la cuenta de MercadoLibre.")
             else:
                 import os
+                from datetime import date as date_type
+                date_str = (request.POST.get("sync_date") or "").strip()
+                date_from_str = None
+                date_to_str = None
+                if date_str:
+                    try:
+                        d = date_type.fromisoformat(date_str)
+                        date_from_str = f"{d.isoformat()}T00:00:00.000-03:00"
+                        date_to_str = f"{d.isoformat()}T23:59:59.999-03:00"
+                    except ValueError:
+                        messages.error(request, "Fecha inválida. Usá el formato AAAA-MM-DD.")
+                        date_str = None
                 days_env = os.environ.get("ML_ORDERS_DAYS", "")
                 days = int(days_env) if days_env.isdigit() else 30
-                result = ml.sync_recent_orders(connection, request.user, days=days)
+                result = ml.sync_recent_orders(connection, request.user, days=days, date_from_str=date_from_str, date_to_str=date_to_str)
                 if result.get("reasons", {}).get("unauthorized"):
                     messages.error(
                         request,
