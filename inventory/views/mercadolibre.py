@@ -303,37 +303,28 @@ def mercadolibre_order_sheet(request):
     items_qs = (
         MercadoLibreItem.objects.select_related("product")
         .filter(product__isnull=False)
-        .order_by("product__group", "title")
     )
 
-    # Skala items shown individually; other products aggregated
     product_map = {}  # product_id -> dict
-    skala_rows = []
-
     for item in items_qs:
         product = item.product
-        is_skala = (product.group or "").strip().lower() == "skala"
-        if is_skala:
-            rec = math.ceil(item.units_sold_30d / 2) if item.units_sold_30d > 0 else 0
-            skala_rows.append(
-                {"name": item.title, "stock": item.available_quantity, "recommendation": rec}
-            )
-        else:
-            pid = product.id
-            if pid not in product_map:
-                product_map[pid] = {"name": product.name, "stock": 0, "units_30d": 0}
-            product_map[pid]["stock"] += item.available_quantity
-            product_map[pid]["units_30d"] += item.units_sold_30d
+        pid = product.id
+        if pid not in product_map:
+            product_map[pid] = {
+                "name": product.name,
+                "group": product.group or "",
+                "stock": 0,
+                "units_30d": 0,
+            }
+        product_map[pid]["stock"] += item.available_quantity
+        product_map[pid]["units_30d"] += item.units_sold_30d
 
-    other_rows = []
+    rows = []
     for data in product_map.values():
         rec = math.ceil(data["units_30d"] / 2) if data["units_30d"] > 0 else 0
-        other_rows.append({"name": data["name"], "stock": data["stock"], "recommendation": rec})
+        rows.append({"name": data["name"], "group": data["group"], "stock": data["stock"], "recommendation": rec})
 
-    other_rows.sort(key=lambda r: r["name"].lower())
-    skala_rows.sort(key=lambda r: r["name"].lower())
-
-    rows = other_rows + skala_rows
+    rows.sort(key=lambda r: (r["group"].lower(), r["name"].lower()))
 
     return render(request, "inventory/mercadolibre_order_sheet.html", {"rows": rows})
 

@@ -2,29 +2,45 @@
 {% block title %}ML Pedido{% endblock %}
 {% block content %}
 <h1>Hoja de pedido — MercadoLibre</h1>
-<p class="subtitle">Proyección a 15 días basada en ventas de los últimos 30 días. Skala muestra cada variedad por separado.</p>
+<p class="subtitle">Un producto por fila. Completá la columna "Cantidad" y copiá el pedido para mandárselo al proveedor.</p>
+
+<div style="margin-bottom:12px; display:flex; gap:10px; align-items:center;">
+    <button id="btn-copy" type="button">Copiar pedido</button>
+    <span id="copy-status" style="font-size:13px; color:var(--muted);"></span>
+</div>
 
 <div class="card" style="overflow-x:auto;">
     <table style="width:100%; border-collapse:collapse; font-size:0.95rem;">
         <thead>
             <tr style="border-bottom:2px solid var(--border);">
-                <th style="text-align:left; padding:8px 12px;">Nombre del producto</th>
+                <th style="text-align:left; padding:8px 12px;">Producto</th>
+                <th style="text-align:left; padding:8px 12px;">Marca</th>
                 <th style="text-align:center; padding:8px 12px;">Stock ML</th>
-                <th style="text-align:center; padding:8px 12px;">Recomendación de compra (15 días)</th>
-                <th style="text-align:center; padding:8px 12px; min-width:120px;"></th>
+                <th style="text-align:center; padding:8px 12px;">Recomendación (15 días)</th>
+                <th style="text-align:center; padding:8px 12px; min-width:100px;">Cantidad</th>
             </tr>
         </thead>
         <tbody>
             {% for row in rows %}
-            <tr style="border-bottom:1px solid var(--border);">
+            <tr style="border-bottom:1px solid var(--border);" data-name="{{ row.name }}">
                 <td style="padding:7px 12px;">{{ row.name }}</td>
+                <td style="padding:7px 12px; color:var(--muted);">{{ row.group|default:"-" }}</td>
                 <td style="text-align:center; padding:7px 12px;">{{ row.stock }}</td>
                 <td style="text-align:center; padding:7px 12px;">{{ row.recommendation }}</td>
-                <td style="padding:7px 12px;"></td>
+                <td style="text-align:center; padding:7px 12px;">
+                    <input
+                        class="qty-input"
+                        type="number"
+                        min="0"
+                        value=""
+                        placeholder="0"
+                        style="width:80px; padding:5px 8px; border-radius:8px; background:#0f1622; border:1px solid #2a313c; color:var(--text); font-size:13px; text-align:center;"
+                    >
+                </td>
             </tr>
             {% empty %}
             <tr>
-                <td colspan="4" style="padding:20px 12px; text-align:center; color:var(--muted);">
+                <td colspan="5" style="padding:20px 12px; text-align:center; color:var(--muted);">
                     No hay productos de MercadoLibre con match asignado.
                 </td>
             </tr>
@@ -32,4 +48,32 @@
         </tbody>
     </table>
 </div>
+
+<script>
+document.getElementById("btn-copy").addEventListener("click", function () {
+    const rows = document.querySelectorAll("tbody tr[data-name]");
+    const lines = [];
+    rows.forEach(function (row) {
+        const input = row.querySelector(".qty-input");
+        const qty = parseInt(input?.value || "0", 10);
+        if (qty >= 1) {
+            const name = row.getAttribute("data-name") || "";
+            lines.push(name + ": " + qty);
+        }
+    });
+    if (!lines.length) {
+        document.getElementById("copy-status").textContent = "No hay productos con cantidad ≥ 1.";
+        return;
+    }
+    const text = lines.join("\n");
+    navigator.clipboard.writeText(text).then(function () {
+        document.getElementById("copy-status").textContent = "✓ Copiado (" + lines.length + " productos)";
+        setTimeout(function () {
+            document.getElementById("copy-status").textContent = "";
+        }, 3000);
+    }).catch(function () {
+        prompt("Copiá el pedido:", text);
+    });
+});
+</script>
 {% endblock %}
