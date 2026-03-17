@@ -25,13 +25,8 @@
             {% if connection and connection.access_token %}
                 <form method="post" style="display:inline;">
                     {% csrf_token %}
-                    <input type="hidden" name="action" value="sync">
-                    <button type="submit">Sincronizar ahora</button>
-                </form>
-                <form method="post" style="display:inline;">
-                    {% csrf_token %}
                     <input type="hidden" name="action" value="sync_full">
-                    <button type="submit">Sincronizar todo</button>
+                    <button type="submit">Sincronizar stock</button>
                 </form>
                 <form method="post" style="display:inline;">
                     {% csrf_token %}
@@ -43,12 +38,6 @@
                     <input type="hidden" name="action" value="sync_item">
                     <input type="text" name="ml_item_id" placeholder="ID publicación" style="width:160px;">
                     <button type="submit">Traer ID</button>
-                </form>
-                <form method="post" style="display:inline;">
-                    {% csrf_token %}
-                    <input type="hidden" name="action" value="debug_order">
-                    <input type="text" name="debug_order_id" placeholder="ID orden debug" style="width:160px;">
-                    <button type="submit" style="background:var(--muted);">Debug orden</button>
                 </form>
                 {% if missing_credentials %}
                     <button type="button" disabled style="opacity:0.6;">Reconectar MercadoLibre</button>

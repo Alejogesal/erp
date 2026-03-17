@@ -230,31 +230,6 @@ def mercadolibre_dashboard(request):
                         messages.error(request, f"No se pudo sincronizar: HTTP {exc.code}")
                 except Exception as exc:
                     messages.error(request, f"No se pudo sincronizar: {exc}")
-        elif action == "debug_order":
-            order_id = (request.POST.get("debug_order_id") or "").strip()
-            if not order_id or not connection or not connection.access_token:
-                messages.error(request, "Ingresá un ID de orden.")
-            else:
-                try:
-                    access_token = ml.get_valid_access_token(connection)
-                    order = ml._call_with_refresh(connection, ml.get_order, order_id, access_token=access_token)
-                    payments_in_order = order.get("payments") or []
-                    try:
-                        payments_api = ml._call_with_refresh(connection, ml.get_order_payments, order_id, access_token=access_token)
-                    except Exception as e:
-                        payments_api = {"error": str(e)}
-                    debug_info = {
-                        "order_status": order.get("status"),
-                        "total_amount": order.get("total_amount"),
-                        "fee_details": order.get("fee_details"),
-                        "payments_in_order_count": len(payments_in_order),
-                        "payments_in_order_sample": payments_in_order[:1],
-                        "payments_api_raw": payments_api if isinstance(payments_api, list) else payments_api,
-                        "payments_api_count": len(payments_api) if isinstance(payments_api, list) else "N/A",
-                    }
-                    messages.info(request, f"DEBUG ORDEN {order_id}: {json.dumps(debug_info, default=str)}")
-                except Exception as exc:
-                    messages.error(request, f"Error debug: {exc}")
         elif action == "link_item":
             item_id = request.POST.get("item_id")
             product_id = request.POST.get("product_id")
