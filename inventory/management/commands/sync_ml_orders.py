@@ -12,7 +12,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         days_env = os.environ.get("ML_ORDERS_DAYS", "")
-        days = int(days_env) if days_env.isdigit() else 1
+        days = int(days_env) if days_env.isdigit() else 2
         User = get_user_model()
         sync_user = (
             User.objects.filter(is_superuser=True).order_by("id").first()
