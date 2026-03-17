@@ -185,12 +185,27 @@ def mercadolibre_dashboard(request):
                     for key, count in result.get("reasons", {}).items():
                         reason_parts.append(f"{key}: {count}")
                     reason_text = f" ({', '.join(reason_parts)})" if reason_parts else ""
-                    messages.success(
-                        request,
-                        "Sync ventas OK. Revisadas: "
-                        f"{result['total']}, nuevas: {result['created']}, "
-                        f"actualizadas: {result.get('updated', 0)}.{reason_text}",
-                    )
+                    from inventory.models import Sale as SaleModel
+                    if date_str and date_from_str:
+                        from django.utils.dateparse import parse_datetime
+                        total_in_db = SaleModel.objects.filter(
+                            reference__startswith="ML ORDER",
+                            created_at__date=d,
+                        ).count()
+                        date_label = d.strftime("%d/%m/%Y")
+                        messages.success(
+                            request,
+                            f"Sync ventas {date_label} OK. Revisadas: {result['total']}, "
+                            f"nuevas: {result['created']}, actualizadas: {result.get('updated', 0)}.{reason_text} "
+                            f"— Total cargadas en ERP para ese día: {total_in_db}.",
+                        )
+                    else:
+                        messages.success(
+                            request,
+                            "Sync ventas OK. Revisadas: "
+                            f"{result['total']}, nuevas: {result['created']}, "
+                            f"actualizadas: {result.get('updated', 0)}.{reason_text}",
+                        )
         elif action == "sync_item":
             item_id = (request.POST.get("ml_item_id") or "").strip()
             if not item_id:
