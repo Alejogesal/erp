@@ -183,6 +183,10 @@ def get_item(item_id: str, access_token: str) -> dict:
     return _request("GET", f"/items/{item_id}", access_token=access_token)
 
 
+def update_item_quantity(item_id: str, quantity: int, access_token: str) -> dict:
+    return _request("PATCH", f"/items/{item_id}", access_token=access_token, data={"available_quantity": quantity})
+
+
 def get_order(order_id: str, access_token: str) -> dict:
     return _request("GET", f"/orders/{order_id}", access_token=access_token)
 

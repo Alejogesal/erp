@@ -1,0 +1,100 @@
+{% extends "inventory/base.html" %}
+{% block title %}Stock ML{% endblock %}
+{% block content %}
+<h1>Stock ML</h1>
+<p class="subtitle">Actualizá el stock disponible en MercadoLibre para cada publicación.</p>
+
+{% if not connected %}
+<div style="padding:12px 16px; border-radius:10px; background:rgba(248,81,73,0.12); border:1px solid rgba(248,81,73,0.35); margin-bottom:16px;">
+    No conectado a MercadoLibre. <a href="{% url 'inventory_mercadolibre_connect' %}" style="color:#f85149;">Conectar cuenta</a>
+</div>
+{% endif %}
+
+<form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="push_stock">
+
+    <div style="margin-bottom:16px;">
+        <button type="submit"{% if not connected %} disabled style="opacity:0.5;"{% endif %}>Actualizar stock en ML</button>
+    </div>
+
+    <div class="card table-card">
+        <table>
+            <thead>
+                <tr>
+                    <th>Producto</th>
+                    <th>Grupo</th>
+                    <th>Stock local (COMUN)</th>
+                    <th>Stock actual ML</th>
+                    <th>Nueva cantidad ML</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                <tr>
+                    <td>
+                        {% if row.item.permalink %}
+                            <a href="{{ row.item.permalink }}" target="_blank" style="color:var(--accent);">{{ row.product.name }}</a>
+                        {% else %}
+                            {{ row.product.name }}
+                        {% endif %}
+                        <br><small style="color:var(--muted);">{{ row.item.title }}</small>
+                    </td>
+                    <td>{{ row.product.group|default:"—" }}</td>
+                    <td class="local-stock" data-item-id="{{ row.item.item_id }}">{{ row.local_stock }}</td>
+                    <td>{{ row.item.available_quantity }}</td>
+                    <td>
+                        <input type="hidden" name="item_ids" value="{{ row.item.item_id }}">
+                        <input
+                            name="qty_{{ row.item.item_id }}"
+                            value="{{ row.item.available_quantity }}"
+                            type="number"
+                            min="0"
+                            style="width:80px"
+                            class="new-qty-input"
+                            data-item-id="{{ row.item.item_id }}"
+                        >
+                    </td>
+                    <td>
+                        <button
+                            type="button"
+                            class="copy-local-btn pill sm"
+                            data-item-id="{{ row.item.item_id }}"
+                            title="Copiar desde stock local"
+                        >Copiar local</button>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="6" style="color:var(--muted); text-align:center;">
+                        No hay publicaciones de ML con producto asignado. Realizá una sincronización primero.
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if rows %}
+    <div style="margin-top:16px;">
+        <button type="submit"{% if not connected %} disabled style="opacity:0.5;"{% endif %}>Actualizar stock en ML</button>
+    </div>
+    {% endif %}
+</form>
+
+<script>
+(function () {
+    document.querySelectorAll(".copy-local-btn").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+            var itemId = btn.dataset.itemId;
+            var localCell = document.querySelector(".local-stock[data-item-id='" + itemId + "']");
+            var qtyInput = document.querySelector(".new-qty-input[data-item-id='" + itemId + "']");
+            if (localCell && qtyInput) {
+                qtyInput.value = localCell.textContent.trim();
+            }
+        });
+    });
+})();
+</script>
+{% endblock %}

@@ -40,6 +40,7 @@ from .mercadolibre import (
     mercadolibre_dashboard,
     mercadolibre_order_sheet,
     mercadolibre_webhook,
+    ml_stock_push,
 )
 from .taxes import taxes_view
 from .koda import koda_chat, koda_confirm
@@ -82,6 +83,7 @@ __all__ = [
     "mercadolibre_dashboard",
     "mercadolibre_order_sheet",
     "mercadolibre_webhook",
+    "ml_stock_push",
     "taxes_view",
     "koda_chat",
     "koda_confirm",
