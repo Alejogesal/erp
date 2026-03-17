@@ -400,6 +400,12 @@ def _extract_with_pdfminer_layout(pdf_bytes: bytes) -> list[dict]:
             if discount < 0:
                 discount = abs(discount)
 
+            # If amount is missing but discount captured a large value (monto, not porcentaje),
+            # reasignarlo: ocurre cuando la celda IMPORTE cae en el rango x del DTO vacío
+            if amount is None and discount > Decimal("100.00"):
+                amount = discount
+                discount = Decimal("0.00")
+
             if qty is None or price is None or amount is None:
                 if desc and re.search(r"[A-Za-z]", desc):
                     pending_descriptions.append(desc[:140])
