@@ -210,6 +210,104 @@ def _extract_purchase_items_from_pdf_bytes(pdf_bytes: bytes) -> tuple[list[dict]
 
 
 def _extract_purchase_items_from_pdf_layout(pdf_bytes: bytes) -> list[dict]:
+    """Extract items using pymupdf's native table detection."""
+    result = _extract_with_pymupdf_tables(pdf_bytes)
+    if result:
+        return result
+    return _extract_with_pdfminer_layout(pdf_bytes)
+
+
+def _extract_with_pymupdf_tables(pdf_bytes: bytes) -> list[dict]:
+    try:
+        import fitz  # pymupdf
+    except Exception:
+        return []
+
+    parsed_items: list[dict] = []
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    except Exception:
+        return []
+
+    for page in doc:
+        try:
+            tabs = page.find_tables()
+        except Exception:
+            continue
+        for table in tabs:
+            try:
+                data = table.extract()
+            except Exception:
+                continue
+            if not data or len(data) < 2:
+                continue
+
+            # Find header row index and column positions
+            header_idx = None
+            col_desc = col_qty = col_price = col_discount = col_amount = None
+            for i, row in enumerate(data):
+                joined = _normalize_lookup_text(" ".join(str(c or "") for c in row))
+                if "descripcion" in joined and "cantidad" in joined and "precio" in joined:
+                    header_idx = i
+                    for j, cell in enumerate(row):
+                        n = _normalize_lookup_text(str(cell or ""))
+                        if "descripcion" in n or "detalle" in n:
+                            col_desc = j
+                        elif "cantidad" in n:
+                            col_qty = j
+                        elif "precio" in n and col_price is None:
+                            col_price = j
+                        elif "dto" in n or "descuento" in n:
+                            col_discount = j
+                        elif "importe" in n or n == "total":
+                            col_amount = j
+                    break
+
+            if header_idx is None or col_qty is None or col_price is None:
+                continue
+            if col_desc is None:
+                col_desc = 0
+
+            for row in data[header_idx + 1:]:
+                if not row:
+                    continue
+                joined = _normalize_lookup_text(" ".join(str(c or "") for c in row))
+                if joined.startswith("subtotal") or joined.startswith("total") or joined.startswith("descuento"):
+                    break
+
+                desc = re.sub(r"\s+", " ", str(row[col_desc] or "")).strip() if col_desc < len(row) else ""
+                qty_raw = str(row[col_qty] or "") if col_qty < len(row) else ""
+                price_raw = str(row[col_price] or "") if col_price < len(row) else ""
+                discount_raw = str(row[col_discount] or "") if col_discount is not None and col_discount < len(row) else ""
+                amount_raw = str(row[col_amount] or "") if col_amount is not None and col_amount < len(row) else ""
+
+                # If amount column not identified, use last column
+                if not amount_raw and len(row) > col_price:
+                    amount_raw = str(row[-1] or "")
+
+                qty = _parse_latam_decimal(qty_raw)
+                price = _parse_latam_decimal(price_raw)
+                amount = _parse_latam_decimal(amount_raw)
+                discount = _parse_latam_decimal(discount_raw) or Decimal("0.00")
+                if discount < 0:
+                    discount = abs(discount)
+
+                if qty is None or price is None or qty <= 0 or price < 0:
+                    continue
+                if not desc:
+                    desc = "(sin descripción)"
+                parsed_items.append({
+                    "description": desc,
+                    "quantity": qty,
+                    "unit_cost": price,
+                    "discount_percent": discount,
+                    "line_total": amount,
+                })
+
+    return parsed_items
+
+
+def _extract_with_pdfminer_layout(pdf_bytes: bytes) -> list[dict]:
     try:
         from pdfminer.high_level import extract_pages
         from pdfminer.layout import LTTextContainer
