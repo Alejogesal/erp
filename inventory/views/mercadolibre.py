@@ -341,90 +341,57 @@ def mercadolibre_order_sheet(request):
 @login_required
 @require_http_methods(["GET", "POST"])
 def ml_stock_push(request):
-    connection = MercadoLibreConnection.objects.filter(user=request.user).first()
-    connected = bool(connection and connection.access_token)
+    from decimal import Decimal as _D
 
     comun_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
-    ml_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.MERCADOLIBRE).first()
 
-    items_qs = (
+    # Build rows: one per unique product matched in ML
+    product_ids_seen = set()
+    product_rows = []
+    for item in (
         MercadoLibreItem.objects.select_related("product")
         .filter(product__isnull=False)
-        .order_by("product__group", "product__name", "title")
-    )
-
-    if request.method == "POST":
-        action = request.POST.get("action")
-        if action == "push_stock":
-            if not connected:
-                messages.error(request, "Primero conectá la cuenta de MercadoLibre.")
-            else:
-                item_ids_posted = request.POST.getlist("item_ids")
-                updated_count = 0
-                errors = []
-                access_token = ml.get_valid_access_token(connection)
-                for item_id in item_ids_posted:
-                    raw_qty = request.POST.get(f"qty_{item_id}", "").strip()
-                    if not raw_qty.isdigit():
-                        continue
-                    new_qty = int(raw_qty)
-                    ml_item = MercadoLibreItem.objects.filter(item_id=item_id).select_related("product").first()
-                    if not ml_item or not ml_item.product:
-                        continue
-                    old_qty = ml_item.available_quantity
-                    diff = new_qty - old_qty
-                    try:
-                        ml._call_with_refresh(
-                            connection,
-                            ml.update_item_quantity,
-                            item_id,
-                            new_qty,
-                            access_token=access_token,
-                        )
-                        ml_item.available_quantity = new_qty
-                        ml_item.save(update_fields=["available_quantity"])
-                        if diff != 0 and ml_wh:
-                            from decimal import Decimal
-                            services.register_adjustment(
-                                product=ml_item.product,
-                                warehouse=ml_wh,
-                                quantity=Decimal(str(diff)),
-                                user=request.user,
-                                reference=f"ML Stock push {item_id}",
-                                allow_negative=True,
-                            )
-                        updated_count += 1
-                    except HTTPError as exc:
-                        errors.append(f"{item_id}: HTTP {exc.code}")
-                    except Exception as exc:
-                        errors.append(f"{item_id}: {exc}")
-                if updated_count:
-                    messages.success(request, f"Stock actualizado en ML para {updated_count} publicacion(es).")
-                if errors:
-                    messages.error(request, "Errores: " + "; ".join(errors))
-
-    rows = []
-    for item in items_qs:
-        product = item.product
-        local_stock = 0
-        if comun_wh:
-            stock_obj = Stock.objects.filter(product=product, warehouse=comun_wh).first()
-            local_stock = int(stock_obj.quantity) if stock_obj else 0
-        rows.append({
-            "item": item,
-            "product": product,
-            "local_stock": local_stock,
+        .order_by("product__group", "product__name")
+    ):
+        if item.product_id in product_ids_seen:
+            continue
+        product_ids_seen.add(item.product_id)
+        stock_obj = Stock.objects.filter(product=item.product, warehouse=comun_wh).first() if comun_wh else None
+        product_rows.append({
+            "product": item.product,
+            "comun_stock": stock_obj.quantity if stock_obj else _D("0"),
         })
 
-    return render(
-        request,
-        "inventory/ml_stock_push.html",
-        {
-            "connection": connection,
-            "connected": connected,
-            "rows": rows,
-        },
-    )
+    if request.method == "POST":
+        updated = 0
+        for row in product_rows:
+            product = row["product"]
+            raw = request.POST.get(f"qty_{product.id}", "").strip()
+            if not raw:
+                continue
+            try:
+                new_qty = _D(raw.replace(",", "."))
+            except Exception:
+                continue
+            old_qty = row["comun_stock"]
+            diff = new_qty - old_qty
+            if diff == 0:
+                continue
+            if comun_wh:
+                services.register_adjustment(
+                    product=product,
+                    warehouse=comun_wh,
+                    quantity=diff,
+                    user=request.user,
+                    reference="Ajuste stock Comun",
+                    allow_negative=True,
+                )
+            updated += 1
+        if updated:
+            messages.success(request, f"Stock actualizado para {updated} producto(s).")
+        return redirect("inventory_ml_stock_push")
+
+    return render(request, "inventory/ml_stock_push.html", {"rows": product_rows})
 
 
 @csrf_exempt
