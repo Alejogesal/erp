@@ -110,8 +110,11 @@ class Product(models.Model):
         return self.cost_with_vat() * multiplier
 
     def _price_with_margin(self, margin: Decimal) -> Decimal:
-        multiplier = Decimal("1.00") + (margin or Decimal("0.00")) / Decimal("100.00")
-        return self.cost_with_vat() * multiplier
+        # Gross margin: price = cost / (1 - margin%), so discounting margin% breaks even
+        divisor = Decimal("1.00") - (margin or Decimal("0.00")) / Decimal("100.00")
+        if divisor <= Decimal("0.00"):
+            return self.cost_with_vat()
+        return (self.cost_with_vat() / divisor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     def cost_with_vat(self) -> Decimal:
         if self.is_kit:
