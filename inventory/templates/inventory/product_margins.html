@@ -280,7 +280,8 @@
             if (!input || !meta) return;
             const cost = parseNumber(row.dataset.cost);
             const margin = parseNumber(input.value);
-            const price = cost * (1 + margin / 100);
+            const divisor = 1 - margin / 100;
+            const price = divisor > 0 ? cost / divisor : cost;
             const profit = price - cost;
             meta.textContent = `Precio: ${format(price)} | Ganancia: ${format(profit)} | Margen: ${format(margin)}%`;
         };
