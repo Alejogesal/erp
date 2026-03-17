@@ -663,7 +663,17 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
         else:
             fee_total += amount
 
-    # fallback: try payment-level data if fee_details is empty
+    # fallback 1: use sale_fee from order_items (same field n8n workflow uses)
+    if fee_total == Decimal("0.00"):
+        for oi in order.get("order_items") or []:
+            sf = Decimal(str(oi.get("sale_fee") or 0)).copy_abs()
+            qty = Decimal(str(oi.get("quantity") or 1))
+            fee_total += sf * qty
+        if fee_total > Decimal("0.00"):
+            # IIBB ≈ 3.5% of commission (standard ML Argentina rate)
+            tax_total = (fee_total * Decimal("0.035")).quantize(Decimal("0.01"))
+
+    # fallback 2: try payment-level data if still empty
     if fee_total == Decimal("0.00"):
         payments = order.get("payments") or []
         if not payments:
