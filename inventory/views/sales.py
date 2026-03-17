@@ -1263,10 +1263,14 @@ def sales_list(request):
                 sale.margin_total = (sale.total or Decimal("0.00")) - cost_total
         sales_comun = [sale for sale in sales_list_qs if sale.warehouse.type == Warehouse.WarehouseType.COMUN]
         sales_ml = [sale for sale in sales_list_qs if sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE]
+        total_ml_count = sales.filter(warehouse__type=Warehouse.WarehouseType.MERCADOLIBRE).count()
+        total_comun_count = sales.filter(warehouse__type=Warehouse.WarehouseType.COMUN).count()
     else:
         sales_list_qs = []
         sales_comun = []
         sales_ml = []
+        total_ml_count = 0
+        total_comun_count = 0
         page_obj = None
     show_comun = show_history and (include_comun or (not include_ml and not include_comun))
     show_ml = show_history and (include_ml or (not include_ml and not include_comun))
@@ -1293,6 +1297,8 @@ def sales_list(request):
                 "show_comun": show_comun,
                 "show_ml": show_ml,
                 "delivery_status_choices": delivery_status_choices,
+                "total_ml_count": total_ml_count,
+                "total_comun_count": total_comun_count,
             },
             request=request,
         )
@@ -1325,6 +1331,8 @@ def sales_list(request):
             "variant_data": variant_data,
             "clear_sale_form": request.method != "POST",
             "default_warehouse_id": str(default_wh.id) if default_wh else "",
+            "total_ml_count": total_ml_count,
+            "total_comun_count": total_comun_count,
         },
     )
 

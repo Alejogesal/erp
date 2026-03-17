@@ -62,7 +62,7 @@
 {% endif %}
 
 {% if show_history and show_ml %}
-<h4 style="margin:16px 0 6px;">MercadoLibre</h4>
+<h4 style="margin:16px 0 6px;">MercadoLibre {% if total_ml_count %}<span style="font-size:13px; font-weight:400; color:var(--muted);">({{ total_ml_count }} venta{{ total_ml_count|pluralize:"s" }})</span>{% endif %}</h4>
 <table>
     <thead>
         <tr>
