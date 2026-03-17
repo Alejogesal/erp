@@ -722,12 +722,14 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
         Sale.objects.filter(pk=sale.pk).update(created_at=order_date)
     for product, quantity, unit_price, vat_percent, variant in matched_items:
         line_total = (unit_price * quantity).quantize(Decimal("0.01"))
+        cost_unit = product.last_purchase_cost()
         SaleItem.objects.create(
             sale=sale,
             product=product,
             variant=variant,
             quantity=quantity,
             unit_price=unit_price,
+            cost_unit=cost_unit,
             discount_percent=Decimal("0.00"),
             final_unit_price=unit_price,
             line_total=line_total,

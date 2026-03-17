@@ -1246,7 +1246,9 @@ def sales_list(request):
             for item in sale.items.all():
                 cost_unit = item.cost_unit
                 if cost_unit is None or cost_unit <= 0:
-                    cost_unit = item.product.cost_with_vat()
+                    cost_unit = item.product.last_purchase_cost()
+                    if not cost_unit or cost_unit <= 0:
+                        cost_unit = item.product.cost_with_vat()
                 cost_total += item.quantity * cost_unit
             commission_total = sale.ml_commission_total or Decimal("0.00")
             tax_total = sale.ml_tax_total or Decimal("0.00")
