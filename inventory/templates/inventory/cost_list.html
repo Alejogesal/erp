@@ -87,33 +87,11 @@
 <h1>Productos</h1>
 <p class="subtitle">Cargá productos y editá costos, nombre y proveedor. El SKU se genera automáticamente.</p>
 
-<div class="card" style="margin-bottom:16px;">
-    <div class="card-title">Actualizar márgenes</div>
-    <form method="post" id="margin-bulk-form">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="bulk_update_margins">
-        <div class="product-form-grid">
-            <div>
-                <label for="margin-group">Marca / Grupo (opcional)</label>
-                <input id="margin-group" name="group" list="group-options" placeholder="Ej: Bellissima">
-                <span class="hint">Si indicás marca, solo se actualizan productos de esa marca.</span>
-            </div>
-            <div>
-                <label for="margin-consumer">Margen % consumidor final</label>
-                <input id="margin-consumer" name="margin_consumer" placeholder="Ej: 25">
-            </div>
-            <div>
-                <label for="margin-barber">Margen % peluquerías/barberías</label>
-                <input id="margin-barber" name="margin_barber" placeholder="Ej: 20">
-            </div>
-            <div>
-                <label for="margin-distributor">Margen % distribuidores</label>
-                <input id="margin-distributor" name="margin_distributor" placeholder="Ej: 15">
-            </div>
-        </div>
-        <button type="submit">Aplicar márgenes</button>
-    </form>
-</div>
+<datalist id="group-options">
+    {% for group in group_options %}
+        <option value="{{ group }}"></option>
+    {% endfor %}
+</datalist>
 
 <div class="card" style="margin-bottom:16px;">
     <div class="card-title">Nuevo producto</div>
@@ -147,7 +125,7 @@
             </div>
             <div class="full">
                 <details class="product-advanced">
-                    <summary>Margenes (opcional)</summary>
+                    <summary>Márgenes (opcional)</summary>
                     <div class="product-form-grid">
                         <div>
                             {{ product_form.margin_consumer.label_tag }}
@@ -173,82 +151,108 @@
 </div>
 
 <div class="card" style="margin-bottom:16px;">
-    <div class="card-title">Importar costos</div>
-    <form method="post" enctype="multipart/form-data">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="import_costs">
-        <p>
-            <label for="file">Archivo XLSX</label>
-            <input id="file" name="file" type="file" accept=".xlsx">
-        </p>
-        <p>
-            <label for="import-group">Marca / Grupo (opcional)</label>
-            <input id="import-group" name="group_override" list="group-options" placeholder="Ej: Bellissima">
-            <span class="hint">Si indicás marca, solo se actualizan productos existentes de esa marca.</span>
-        </p>
-        <button type="submit">Importar</button>
-    </form>
+    <div class="card-title">Actualizar</div>
+    <details class="product-advanced" style="margin-bottom:12px;">
+        <summary>Márgenes por marca</summary>
+        <form method="post" id="margin-bulk-form" style="margin-top:10px;">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="bulk_update_margins">
+            <div class="product-form-grid">
+                <div>
+                    <label for="margin-group">Marca / Grupo (opcional)</label>
+                    <input id="margin-group" name="group" list="group-options" placeholder="Ej: Bellissima">
+                    <span class="hint">Si indicás marca, solo se actualizan productos de esa marca.</span>
+                </div>
+                <div>
+                    <label for="margin-consumer">Margen % consumidor final</label>
+                    <input id="margin-consumer" name="margin_consumer" placeholder="Ej: 25">
+                </div>
+                <div>
+                    <label for="margin-barber">Margen % peluquerías/barberías</label>
+                    <input id="margin-barber" name="margin_barber" placeholder="Ej: 20">
+                </div>
+                <div>
+                    <label for="margin-distributor">Margen % distribuidores</label>
+                    <input id="margin-distributor" name="margin_distributor" placeholder="Ej: 15">
+                </div>
+            </div>
+            <button type="submit">Aplicar márgenes</button>
+        </form>
+    </details>
+    <details class="product-advanced" style="margin-bottom:12px;">
+        <summary>Costos por marca (% ajuste)</summary>
+        <form method="post" style="margin-top:10px;">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="bulk_update">
+            <div class="product-form-grid">
+                <div>
+                    <label for="bulk-group">Marca / Grupo</label>
+                    <input id="bulk-group" name="group" list="group-options" placeholder="Ej: Bellissima">
+                </div>
+                <div>
+                    <label for="bulk-cost-percent">Ajuste % costo</label>
+                    <input id="bulk-cost-percent" name="cost_percent" placeholder="Ej: 10 o -5" required>
+                </div>
+            </div>
+            <button type="submit">Aplicar ajuste</button>
+        </form>
+    </details>
+    <details class="product-advanced">
+        <summary>Costo por producto</summary>
+        <form method="post" style="margin-top:10px;">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="update_cost_by_product">
+            <div class="product-form-grid">
+                <div class="full">
+                    <label for="single-product">Producto</label>
+                    <select id="single-product" name="product_id">
+                        <option value="">Seleccionar producto</option>
+                        {% for product in products %}
+                            <option value="{{ product.id }}">{{ product.sku }} - {{ product.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label for="single-cost">Costo unitario sin IVA</label>
+                    <input id="single-cost" name="avg_cost" placeholder="0,00">
+                </div>
+            </div>
+            <button type="submit">Actualizar costo</button>
+        </form>
+    </details>
 </div>
 
 <div class="card" style="margin-bottom:16px;">
-    <div class="card-title">Actualizar costos por marca</div>
-    <form method="post">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="bulk_update">
-        <div class="product-form-grid">
-            <div>
-                <label for="bulk-group">Marca / Grupo</label>
-                <input id="bulk-group" name="group" list="group-options" placeholder="Ej: Bellissima">
-            </div>
-            <div>
-                <label for="bulk-cost-percent">Ajuste % costo</label>
-                <input id="bulk-cost-percent" name="cost_percent" placeholder="Ej: 10 o -5" required>
-            </div>
-        </div>
-        <datalist id="group-options">
-            {% for group in group_options %}
-                <option value="{{ group }}"></option>
-            {% endfor %}
-        </datalist>
-        <button type="submit">Aplicar ajuste</button>
-    </form>
-</div>
-
-<div class="card" style="margin-bottom:16px;">
-    <div class="card-title">Actualizar costo por producto</div>
-    <form method="post">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="update_cost_by_product">
-        <div class="product-form-grid">
-            <div class="full">
-                <label for="single-product">Producto</label>
-                <select id="single-product" name="product_id">
-                    <option value="">Seleccionar producto</option>
-                    {% for product in products %}
-                        <option value="{{ product.id }}">{{ product.sku }} - {{ product.name }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div>
-                <label for="single-cost">Costo unitario sin IVA</label>
-                <input id="single-cost" name="avg_cost" placeholder="0,00">
-            </div>
-        </div>
-        <button type="submit">Actualizar costo</button>
-    </form>
-</div>
-
-<div class="card" style="margin-bottom:16px;">
-    <div class="card-title">Eliminar productos importados</div>
-    <form method="post" enctype="multipart/form-data" onsubmit="return confirm('¿Eliminar productos del archivo? Solo se borran los que no tienen movimientos.');">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="delete_import">
-        <p>
-            <label for="delete_file">Archivo XLSX</label>
-            <input id="delete_file" name="file" type="file" accept=".xlsx">
-        </p>
-        <button type="submit">Eliminar importación</button>
-    </form>
+    <div class="card-title">Importar / Administrar</div>
+    <details class="product-advanced" style="margin-bottom:12px;">
+        <summary>Importar costos desde XLSX</summary>
+        <form method="post" enctype="multipart/form-data" style="margin-top:10px;">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="import_costs">
+            <p>
+                <label for="file">Archivo XLSX</label>
+                <input id="file" name="file" type="file" accept=".xlsx">
+            </p>
+            <p>
+                <label for="import-group">Marca / Grupo (opcional)</label>
+                <input id="import-group" name="group_override" list="group-options" placeholder="Ej: Bellissima">
+                <span class="hint">Si indicás marca, solo se actualizan productos existentes de esa marca.</span>
+            </p>
+            <button type="submit">Importar</button>
+        </form>
+    </details>
+    <details class="product-advanced">
+        <summary>Eliminar productos importados</summary>
+        <form method="post" enctype="multipart/form-data" style="margin-top:10px;" onsubmit="return confirm('¿Eliminar productos del archivo? Solo se borran los que no tienen movimientos.');">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="delete_import">
+            <p>
+                <label for="delete_file">Archivo XLSX</label>
+                <input id="delete_file" name="file" type="file" accept=".xlsx">
+            </p>
+            <button type="submit">Eliminar importación</button>
+        </form>
+    </details>
 </div>
 
 <div class="card table-card" id="productos">
