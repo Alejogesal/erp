@@ -329,62 +329,6 @@ def mercadolibre_order_sheet(request):
     return render(request, "inventory/mercadolibre_order_sheet.html", {"rows": rows})
 
 
-@login_required
-@require_http_methods(["GET", "POST"])
-def ml_stock_push(request):
-    from decimal import Decimal as _D
-
-    comun_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
-
-    # Build rows: one per unique product matched in ML
-    product_ids_seen = set()
-    product_rows = []
-    for item in (
-        MercadoLibreItem.objects.select_related("product")
-        .filter(product__isnull=False)
-        .order_by("product__group", "product__name")
-    ):
-        if item.product_id in product_ids_seen:
-            continue
-        product_ids_seen.add(item.product_id)
-        stock_obj = Stock.objects.filter(product=item.product, warehouse=comun_wh).first() if comun_wh else None
-        product_rows.append({
-            "product": item.product,
-            "comun_stock": stock_obj.quantity if stock_obj else _D("0"),
-        })
-
-    if request.method == "POST":
-        updated = 0
-        for row in product_rows:
-            product = row["product"]
-            raw = request.POST.get(f"qty_{product.id}", "").strip()
-            if not raw:
-                continue
-            try:
-                new_qty = _D(raw.replace(",", "."))
-            except Exception:
-                continue
-            old_qty = row["comun_stock"]
-            diff = new_qty - old_qty
-            if diff == 0:
-                continue
-            if comun_wh:
-                services.register_adjustment(
-                    product=product,
-                    warehouse=comun_wh,
-                    quantity=diff,
-                    user=request.user,
-                    reference="Ajuste stock Comun",
-                    allow_negative=True,
-                )
-            updated += 1
-        if updated:
-            messages.success(request, f"Stock actualizado para {updated} producto(s).")
-        return redirect("inventory_ml_stock_push")
-
-    return render(request, "inventory/ml_stock_push.html", {"rows": product_rows})
-
-
 @csrf_exempt
 @require_http_methods(["GET", "POST"])
 def mercadolibre_webhook(request):
