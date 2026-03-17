@@ -45,6 +45,12 @@
         </div>
         <button type="submit">Importar PDF y registrar compra</button>
     </form>
+    <form method="post" action="{% url 'inventory_purchases_list' %}" enctype="multipart/form-data" style="margin-top:8px;">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="debug_purchase_pdf">
+        <input type="file" name="purchase_pdf" accept=".pdf,application/pdf" required style="font-size:12px;">
+        <button type="submit" style="background:#555; font-size:12px;">Debug PDF (ver texto crudo)</button>
+    </form>
 </div>
 
 <div class="card" style="margin-bottom:16px;">

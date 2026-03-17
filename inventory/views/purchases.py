@@ -37,6 +37,8 @@ from .koda import _koda_sync_common_with_variants
 from .utils_purchase_pdf import (
     _create_product_from_purchase_pdf,
     _extract_purchase_items_from_pdf_bytes,
+    _extract_purchase_items_from_pdf_layout,
+    _extract_with_pymupdf_tables,
     _normalize_purchase_pdf_item_fields,
     _resolve_product_from_purchase_pdf,
 )
@@ -208,6 +210,32 @@ def purchases_list(request):
     PurchaseItemFormSet = formset_factory(PurchaseItemForm, extra=1, can_delete=True)
     show_history = request.GET.get("show_history") == "1"
     if request.method == "POST":
+        if request.POST.get("action") == "debug_purchase_pdf":
+            pdf_upload = request.FILES.get("purchase_pdf")
+            if not pdf_upload:
+                return HttpResponse("No PDF subido", content_type="text/plain")
+            pdf_bytes = pdf_upload.read()
+            import io as _io
+            from pdfminer.high_level import extract_text as _extract_text
+            raw_text = _extract_text(_io.BytesIO(pdf_bytes)) or ""
+            text_items, _, _ = _extract_purchase_items_from_pdf_bytes(pdf_bytes)
+            layout_items = _extract_purchase_items_from_pdf_layout(pdf_bytes)
+            pymupdf_items = _extract_with_pymupdf_tables(pdf_bytes)
+            lines = [
+                "=== RAW TEXT (primeras 200 lineas) ===",
+                *raw_text.splitlines()[:200],
+                "",
+                f"=== TEXT PARSER: {len(text_items)} items ===",
+                *[str(i) for i in text_items],
+                "",
+                f"=== PDFMINER LAYOUT: {len(layout_items)} items ===",
+                *[str(i) for i in layout_items],
+                "",
+                f"=== PYMUPDF TABLES: {len(pymupdf_items)} items ===",
+                *[str(i) for i in pymupdf_items],
+            ]
+            return HttpResponse("\n".join(lines), content_type="text/plain; charset=utf-8")
+
         if request.POST.get("action") == "import_purchase_pdf":
             pdf_upload = request.FILES.get("purchase_pdf")
             warehouse_id = (request.POST.get("pdf_warehouse_id") or "").strip()
