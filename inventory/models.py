@@ -101,8 +101,7 @@ class Product(models.Model):
         ordering = ["sku"]
 
     def __str__(self) -> str:
-        sku = self.sku or "Sin SKU"
-        return f"{sku} - {self.name}"
+        return f"{self.name} [{self.sku or 'Sin SKU'}]"
 
     @property
     def suggested_price(self) -> Decimal:

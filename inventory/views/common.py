@@ -46,7 +46,7 @@ def _product_label_with_last_cost(obj: Product) -> str:
         last_cost = getattr(obj, "last_purchase_cost_value", None)
         if last_cost is None:
             last_cost = obj.last_purchase_cost()
-    return f"{obj.sku or 'Sin SKU'} - {obj.name} (último costo: {last_cost:.2f})"
+    return f"{obj.name} [{obj.sku or 'Sin SKU'}] (costo: {last_cost:.2f})"
 
 
 def _resolve_sale_item_pricing(
