@@ -372,7 +372,7 @@ def sale_edit(request, sale_id: int):
                                 variant.save(update_fields=["quantity"])
                                 if comun_wh:
                                     _koda_sync_common_with_variants(data["product"], comun_wh)
-                        default_cost = data["product"].cost_with_vat()
+                        default_cost = data["product"].last_purchase_cost() or data["product"].cost_with_vat()
                         manual_cost = data.get("cost_unit_override")
                         cost_unit = (
                             manual_cost
@@ -1126,7 +1126,7 @@ def sales_list(request):
                                     variant.save(update_fields=["quantity"])
                                     if comun_wh:
                                         _koda_sync_common_with_variants(data["product"], comun_wh)
-                            default_cost = data["product"].cost_with_vat()
+                            default_cost = data["product"].last_purchase_cost() or data["product"].cost_with_vat()
                             manual_cost = data.get("cost_unit_override")
                             cost_unit = (
                                 manual_cost
@@ -1244,11 +1244,13 @@ def sales_list(request):
         for sale in sales_list_qs:
             cost_total = Decimal("0.00")
             for item in sale.items.all():
-                cost_unit = item.cost_unit
-                if cost_unit is None or cost_unit <= 0:
-                    cost_unit = item.product.last_purchase_cost()
-                    if not cost_unit or cost_unit <= 0:
-                        cost_unit = item.product.cost_with_vat()
+                # last_purchase_cost() always stores cost WITH VAT (set by register_entry).
+                # Prefer it over the stored cost_unit which may have been saved without VAT.
+                cost_unit = item.product.last_purchase_cost()
+                if not cost_unit or cost_unit <= 0:
+                    cost_unit = item.cost_unit
+                if not cost_unit or cost_unit <= 0:
+                    cost_unit = item.product.cost_with_vat()
                 cost_total += item.quantity * cost_unit
             commission_total = sale.ml_commission_total or Decimal("0.00")
             tax_total = sale.ml_tax_total or Decimal("0.00")
