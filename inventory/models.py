@@ -143,14 +143,30 @@ class Product(models.Model):
         return self._price_with_margin(self.margin_distributor)
 
     def last_purchase_cost(self) -> Decimal:
+        """Return the last purchase cost always including the product's VAT.
+
+        Purchases registered with vat_percent=0 (e.g. PDF imports) store the
+        base cost without VAT. In those cases we apply the product's own
+        vat_percent so the returned value is always the all-in cost.
+        """
         if self.is_kit:
             return self.cost_with_vat()
-        supplier_product = self.supplier_products.order_by("-last_purchase_at").first()
-        if supplier_product and supplier_product.last_cost is not None:
-            return supplier_product.last_cost
-        last_entry = self.movements.filter(movement_type=StockMovement.MovementType.ENTRY).order_by("-created_at").first()
+        product_vat = self.vat_percent or Decimal("0.00")
+
+        last_entry = self.movements.filter(
+            movement_type=StockMovement.MovementType.ENTRY
+        ).order_by("-created_at").first()
+
         if last_entry:
-            return last_entry.unit_cost
+            base = last_entry.unit_cost
+            entry_vat = last_entry.vat_percent or Decimal("0.00")
+            # If the entry was stored without VAT but the product has VAT, add it now.
+            if entry_vat == Decimal("0.00") and product_vat > Decimal("0.00"):
+                return (base * (Decimal("1.00") + product_vat / Decimal("100.00"))).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP
+                )
+            return base
+
         return Decimal("0.00")
 
     def last_purchase_cost_display(self) -> str:
