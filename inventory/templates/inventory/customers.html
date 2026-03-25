@@ -116,18 +116,40 @@
                 <td>
                     {% if customer.custom_prices.all or customer.discounts.all or customer.group_discounts.all %}
                         {% for cp in customer.custom_prices.all %}
-                            <div>
-                                <strong>Regla</strong> {{ cp.product.sku }} -
+                            <div style="display:flex; align-items:center; gap:6px; margin-bottom:3px;">
+                                <span><strong>Regla</strong> {{ cp.product.sku }} -
                                 {% if cp.unit_price != None %}Precio ${{ cp.unit_price|latam_number:2 }}{% else %}Precio default{% endif %}
                                 |
-                                {% if cp.unit_cost != None %}Costo ${{ cp.unit_cost|latam_number:2 }}{% else %}Costo default{% endif %}
+                                {% if cp.unit_cost != None %}Costo ${{ cp.unit_cost|latam_number:2 }}{% else %}Costo default{% endif %}</span>
+                                <form method="post" style="display:inline;">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="delete_custom_price">
+                                    <input type="hidden" name="obj_id" value="{{ cp.id }}">
+                                    <button type="submit" style="padding:1px 7px; font-size:11px; background:var(--negative); color:#fff; border:none; border-radius:4px; cursor:pointer;">✕</button>
+                                </form>
                             </div>
                         {% endfor %}
                         {% for d in customer.discounts.all %}
-                            <div>{{ d.product.sku }} - {{ d.discount_percent }}%</div>
+                            <div style="display:flex; align-items:center; gap:6px; margin-bottom:3px;">
+                                <span>{{ d.product.sku }} - {{ d.discount_percent }}%</span>
+                                <form method="post" style="display:inline;">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="delete_discount">
+                                    <input type="hidden" name="obj_id" value="{{ d.id }}">
+                                    <button type="submit" style="padding:1px 7px; font-size:11px; background:var(--negative); color:#fff; border:none; border-radius:4px; cursor:pointer;">✕</button>
+                                </form>
+                            </div>
                         {% endfor %}
                         {% for g in customer.group_discounts.all %}
-                            <div>{{ g.group }} - {{ g.discount_percent }}%</div>
+                            <div style="display:flex; align-items:center; gap:6px; margin-bottom:3px;">
+                                <span>{{ g.group }} - {{ g.discount_percent }}%</span>
+                                <form method="post" style="display:inline;">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="delete_group_discount">
+                                    <input type="hidden" name="obj_id" value="{{ g.id }}">
+                                    <button type="submit" style="padding:1px 7px; font-size:11px; background:var(--negative); color:#fff; border:none; border-radius:4px; cursor:pointer;">✕</button>
+                                </form>
+                            </div>
                         {% endfor %}
                     {% else %}
                         Sin reglas comerciales

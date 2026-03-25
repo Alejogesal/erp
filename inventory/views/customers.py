@@ -95,6 +95,24 @@ def customers_view(request):
                 messages.success(request, "Precio/costo específico asignado.")
                 return redirect("inventory_customers")
             messages.error(request, "Revisá los datos del precio/costo específico.")
+        elif action == "delete_discount":
+            obj_id = request.POST.get("obj_id")
+            if obj_id:
+                CustomerProductDiscount.objects.filter(id=obj_id).delete()
+                messages.success(request, "Descuento eliminado.")
+                return redirect("inventory_customers")
+        elif action == "delete_group_discount":
+            obj_id = request.POST.get("obj_id")
+            if obj_id:
+                CustomerGroupDiscount.objects.filter(id=obj_id).delete()
+                messages.success(request, "Descuento por grupo eliminado.")
+                return redirect("inventory_customers")
+        elif action == "delete_custom_price":
+            obj_id = request.POST.get("obj_id")
+            if obj_id:
+                CustomerProductPrice.objects.filter(id=obj_id).delete()
+                messages.success(request, "Precio específico eliminado.")
+                return redirect("inventory_customers")
         elif action == "update_customer_audience":
             customer_id = request.POST.get("customer_id")
             audience = request.POST.get("audience")
