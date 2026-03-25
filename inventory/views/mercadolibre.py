@@ -22,6 +22,7 @@ from ..models import (
     MercadoLibreItem,
     MercadoLibreNotification,
     Product,
+    Sale,
     Stock,
     Warehouse,
 )
@@ -278,6 +279,41 @@ def mercadolibre_dashboard(request):
                     ml_item.matched_name = ""
                     ml_item.save(update_fields=["product", "matched_name"])
                     messages.success(request, "Match eliminado.")
+        elif action == "delete_duplicate_sales":
+            ids_to_delete = request.POST.getlist("delete_ids")
+            if ids_to_delete:
+                deleted_count, _ = Sale.objects.filter(pk__in=ids_to_delete).delete()
+                messages.success(request, f"Se eliminaron {deleted_count} ventas duplicadas.")
+            else:
+                messages.warning(request, "No se seleccionó ninguna venta para eliminar.")
+
+    # Detect duplicate ML sales (same ml_order_id appearing more than once)
+    from django.db.models import Count
+    duplicate_order_ids = (
+        Sale.objects.filter(ml_order_id__gt="")
+        .values("ml_order_id")
+        .annotate(cnt=Count("id"))
+        .filter(cnt__gt=1)
+        .values_list("ml_order_id", flat=True)
+    )
+    duplicate_sales = []
+    if duplicate_order_ids:
+        dupes_qs = (
+            Sale.objects.filter(ml_order_id__in=duplicate_order_ids)
+            .order_by("ml_order_id", "created_at")
+        )
+        current_id = None
+        group = []
+        for sale in dupes_qs:
+            if sale.ml_order_id != current_id:
+                if group:
+                    duplicate_sales.append(group)
+                group = [sale]
+                current_id = sale.ml_order_id
+            else:
+                group.append(sale)
+        if group:
+            duplicate_sales.append(group)
 
     products = Product.objects.order_by("name")
     recent_cutoff = timezone.now() - timedelta(days=30)
@@ -293,6 +329,7 @@ def mercadolibre_dashboard(request):
             "search_query": search_query,
             "recent_cutoff": recent_cutoff,
             "products": products,
+            "duplicate_sales": duplicate_sales,
         },
     )
 

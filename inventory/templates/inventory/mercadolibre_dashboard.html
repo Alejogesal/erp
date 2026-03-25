@@ -72,6 +72,52 @@
 </div>
 </div>
 
+{% if duplicate_sales %}
+<div class="card table-card" id="duplicados" style="border: 1px solid var(--negative);">
+    <div class="card-title" style="color: var(--negative);">Ventas duplicadas detectadas ({{ duplicate_sales|length }} grupos)</div>
+    <p style="font-size:13px; color:var(--muted); margin-bottom:12px;">
+        Seleccioná las ventas a eliminar (dejá solo una por grupo) y confirmá.
+    </p>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="delete_duplicate_sales">
+        <table style="width:100%; border-collapse:collapse; font-size:13px;">
+            <thead>
+                <tr style="color:var(--muted); border-bottom:1px solid #2a313c;">
+                    <th style="padding:6px; text-align:left;">Eliminar</th>
+                    <th style="padding:6px; text-align:left;">Order ID ML</th>
+                    <th style="padding:6px; text-align:left;">ID interno</th>
+                    <th style="padding:6px; text-align:left;">Fecha</th>
+                    <th style="padding:6px; text-align:right;">Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for group in duplicate_sales %}
+                {% for sale in group %}
+                <tr style="border-bottom:1px solid #1a2133; {% if not forloop.last %}{% else %}background:rgba(255,50,50,0.04);{% endif %}">
+                    <td style="padding:6px;">
+                        {% if not forloop.first %}
+                        <input type="checkbox" name="delete_ids" value="{{ sale.pk }}" checked>
+                        {% else %}
+                        <span style="color:var(--muted); font-size:11px;">conservar</span>
+                        {% endif %}
+                    </td>
+                    <td style="padding:6px; font-family:monospace;">{{ sale.ml_order_id }}</td>
+                    <td style="padding:6px; color:var(--muted);">#{{ sale.pk }}</td>
+                    <td style="padding:6px;">{{ sale.created_at|date:"d/m/Y H:i" }}</td>
+                    <td style="padding:6px; text-align:right;">${{ sale.total }}</td>
+                </tr>
+                {% endfor %}
+                {% endfor %}
+            </tbody>
+        </table>
+        <div style="margin-top:12px;">
+            <button type="submit" style="background:var(--negative); color:#fff;">Eliminar seleccionadas</button>
+        </div>
+    </form>
+</div>
+{% endif %}
+
 <div class="card table-card" id="publicaciones">
     <div class="card-title">Publicaciones</div>
     <form method="get" style="margin: 8px 0 12px; display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">
