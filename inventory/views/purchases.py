@@ -355,7 +355,7 @@ def purchases_list(request):
                         avg_cost_tracker.append({
                             "product": data["product"],
                             "qty": qty,
-                            "cost_with_vat": effective_unit_cost_with_vat,
+                            "cost_no_vat": effective_unit_cost,
                         })
                         PurchaseItem.objects.create(
                             purchase=purchase,
@@ -673,7 +673,7 @@ def purchases_list(request):
                         avg_cost_tracker.append({
                             "product": data["product"],
                             "qty": qty,
-                            "cost_with_vat": cost_with_vat_for_stock,
+                            "cost_no_vat": effective_unit_cost_for_stock,
                         })
                         PurchaseItem.objects.create(
                             purchase=purchase,
@@ -1018,7 +1018,7 @@ def purchase_edit(request, purchase_id: int):
                         avg_cost_tracker.append({
                             "product": product,
                             "qty": qty,
-                            "cost_with_vat": cost_with_vat_for_stock,
+                            "cost_no_vat": effective_unit_cost_for_stock,
                         })
                         PurchaseItem.objects.create(
                             purchase=purchase,
