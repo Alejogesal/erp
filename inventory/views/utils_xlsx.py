@@ -1,5 +1,5 @@
 """Excel import/export helpers."""
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import io
 import re
 import unicodedata
@@ -367,6 +367,9 @@ def _process_costs_xlsx(
         if not product:
             product = Product.objects.filter(name=description, group=group).first()
         if product:
+            vat = product.vat_percent or Decimal("0.00")
+            if vat > 0:
+                cost = (cost * (1 + vat / Decimal("100.00"))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             product.avg_cost = cost
             product.save(update_fields=["avg_cost"])
             updated += 1
