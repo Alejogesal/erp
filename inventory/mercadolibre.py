@@ -156,16 +156,20 @@ def get_valid_access_token(connection: MercadoLibreConnection) -> str:
 
 
 def get_item_ids(user_id: str, access_token: str, max_items: int | None = None) -> tuple[list[str], bool]:
+    """Fetch all item IDs for a seller using scroll-based pagination."""
     item_ids: list[str] = []
-    offset = 0
     limit = 50
     truncated = False
+    scroll_id = None
     while True:
+        params: dict = {"search_type": "scan", "limit": limit}
+        if scroll_id:
+            params["scroll_id"] = scroll_id
         data = _request(
             "GET",
             f"/users/{user_id}/items/search",
             access_token=access_token,
-            params={"search_type": "scan", "limit": limit, "offset": offset},
+            params=params,
         )
         results = data.get("results") or []
         item_ids.extend(results)
@@ -173,9 +177,9 @@ def get_item_ids(user_id: str, access_token: str, max_items: int | None = None) 
             item_ids = item_ids[:max_items]
             truncated = True
             break
-        if len(results) < limit:
+        scroll_id = data.get("scroll_id")
+        if len(results) < limit or not scroll_id:
             break
-        offset += limit
     return item_ids, truncated
 
 
