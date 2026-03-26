@@ -187,6 +187,23 @@ def get_item(item_id: str, access_token: str) -> dict:
     return _request("GET", f"/items/{item_id}", access_token=access_token)
 
 
+def get_items_batch(item_ids: list[str], access_token: str) -> list[dict]:
+    """Fetch up to 20 items in a single API call using the batch endpoint."""
+    if not item_ids:
+        return []
+    ids_str = ",".join(item_ids[:20])
+    data = _request("GET", "/items", access_token=access_token, params={"ids": ids_str})
+    # Response is a list of {"code": 200, "body": {...}} dicts
+    results = []
+    if isinstance(data, list):
+        for entry in data:
+            if entry.get("code") == 200 and entry.get("body"):
+                results.append(entry["body"])
+    elif isinstance(data, dict) and data.get("body"):
+        results.append(data["body"])
+    return results
+
+
 def update_item_quantity(item_id: str, quantity: int, access_token: str) -> dict:
     return _request("PATCH", f"/items/{item_id}", access_token=access_token, data={"available_quantity": quantity})
 
@@ -513,40 +530,48 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
     ml_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.MERCADOLIBRE).first()
     total = matched = unmatched = updated_stock = 0
 
-    for item_id in item_ids:
+    # Fetch items in batches of 20 to minimize API calls
+    BATCH_SIZE = 20
+    for batch_start in range(0, len(item_ids), BATCH_SIZE):
+        batch_ids = item_ids[batch_start:batch_start + BATCH_SIZE]
         try:
-            item = _call_with_refresh(connection, get_item, item_id, access_token=access_token)
+            items_batch = _call_with_refresh(connection, get_items_batch, batch_ids, access_token=access_token)
         except HTTPError as exc:
             if exc.code == 401:
                 return SyncResult(total, matched, unmatched, updated_stock, {"error": "unauthorized"})
             raise
-        title = item.get("title", "") or ""
-        available = int(item.get("available_quantity", 0) or 0)
-        status = item.get("status", "") or ""
-        shipping = item.get("shipping") or {}
-        logistic_type = item.get("logistic_type", "") or shipping.get("logistic_type", "") or ""
-        permalink = item.get("permalink", "") or ""
-        existing = MercadoLibreItem.objects.filter(item_id=item_id).first()
-        product = existing.product if existing else None
-        matched_name = existing.matched_name if existing else ""
-        MercadoLibreItem.objects.update_or_create(
-            item_id=item_id,
-            defaults={
-                "title": title,
-                "available_quantity": available,
-                "status": status,
-                "logistic_type": logistic_type,
-                "permalink": permalink,
-                "product": product,
-                "matched_name": matched_name,
-            },
-        )
-        total += 1
-        if product:
-            matched += 1
-            if ml_wh:
-                stock = Stock.objects.filter(product=product, warehouse=ml_wh).first()
-                current_qty = stock.quantity if stock else Decimal("0.00")
+
+        for item in items_batch:
+            item_id = str(item.get("id", "") or "")
+            if not item_id:
+                continue
+            title = item.get("title", "") or ""
+            available = int(item.get("available_quantity", 0) or 0)
+            status = item.get("status", "") or ""
+            shipping = item.get("shipping") or {}
+            logistic_type = item.get("logistic_type", "") or shipping.get("logistic_type", "") or ""
+            permalink = item.get("permalink", "") or ""
+            existing = MercadoLibreItem.objects.filter(item_id=item_id).first()
+            product = existing.product if existing else None
+            matched_name = existing.matched_name if existing else ""
+            MercadoLibreItem.objects.update_or_create(
+                item_id=item_id,
+                defaults={
+                    "title": title,
+                    "available_quantity": available,
+                    "status": status,
+                    "logistic_type": logistic_type,
+                    "permalink": permalink,
+                    "product": product,
+                    "matched_name": matched_name,
+                },
+            )
+            total += 1
+            if product:
+                matched += 1
+                if ml_wh:
+                    stock = Stock.objects.filter(product=product, warehouse=ml_wh).first()
+                    current_qty = stock.quantity if stock else Decimal("0.00")
                 desired_qty = Decimal(str(available))
                 diff = desired_qty - current_qty
                 if diff != 0:

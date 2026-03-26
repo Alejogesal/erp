@@ -355,7 +355,9 @@ def mercadolibre_order_sheet(request):
                 "stock": 0,
                 "units_30d": 0,
             }
-        product_map[pid]["stock"] += item.available_quantity
+        # Only count stock from active publications
+        if item.status == "active":
+            product_map[pid]["stock"] += item.available_quantity
         product_map[pid]["units_30d"] += item.units_sold_30d
 
     rows = []
