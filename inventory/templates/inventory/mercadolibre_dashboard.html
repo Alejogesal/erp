@@ -74,7 +74,7 @@
 
 {% if duplicate_sales %}
 <div class="card table-card" id="duplicados" style="border: 1px solid var(--negative);">
-    <div class="card-title" style="color: var(--negative);">Ventas duplicadas detectadas ({{ duplicate_sales|length }} grupos)</div>
+    <div class="card-title" style="color: var(--negative);">⚠ Ventas duplicadas detectadas ({{ duplicate_sales|length }} grupos)</div>
     <p style="font-size:13px; color:var(--muted); margin-bottom:12px;">
         Seleccioná las ventas a eliminar (dejá solo una por grupo) y confirmá.
     </p>
@@ -115,6 +115,11 @@
             <button type="submit" style="background:var(--negative); color:#fff;">Eliminar seleccionadas</button>
         </div>
     </form>
+</div>
+{% else %}
+<div class="card" style="border: 1px solid #2a3a2a;">
+    <div class="card-title" style="color: #4caf50;">✓ Sin ventas duplicadas</div>
+    <p style="font-size:13px; color:var(--muted);">No se encontraron órdenes de ML con más de un registro en el sistema.</p>
 </div>
 {% endif %}
 
