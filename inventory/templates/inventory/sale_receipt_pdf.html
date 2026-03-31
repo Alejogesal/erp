@@ -7,7 +7,7 @@
     <style>
         @page {
             size: A4;
-            margin: 12mm;
+            margin: 10mm 10mm 10mm 10mm;
         }
         html, body {
             margin: 0;
@@ -15,31 +15,32 @@
             font-family: Arial, sans-serif;
             color: #000;
             background: #fff;
-            font-size: 12px;
+            font-size: 11px;
         }
         .invoice-wrapper {
             border: 1px solid #000;
-            padding: 12mm;
+            padding: 8mm 10mm;
             box-sizing: border-box;
             width: 100%;
         }
-        .invoice-header { display: grid; grid-template-columns: 70mm 1fr; align-items: center; gap: 8mm; }
-        .invoice-logo { text-align: center; border: 2px solid #000; padding: 14px; font-size: 26px; font-weight: 700; }
-        .invoice-meta h2 { margin: 0 0 6px; font-size: 18px; }
-        .info-row { display: grid; grid-template-columns: 1.2fr 1fr 1fr 0.8fr; gap: 6mm; margin: 6mm 0; }
-        .info-block strong { display: block; font-size: 11px; text-transform: uppercase; }
-        table.invoice-table { width: 100%; border-collapse: collapse; margin-top: 6mm; table-layout: fixed; }
-        table.invoice-table th, table.invoice-table td { border-bottom: 1px solid #000; padding: 6px 4px; }
-        table.invoice-table th { font-size: 11px; text-transform: uppercase; text-align: left; }
+        .invoice-header { display: grid; grid-template-columns: 55mm 1fr; align-items: center; gap: 6mm; margin-bottom: 4mm; }
+        .invoice-logo { text-align: center; border: 2px solid #000; padding: 10px; font-size: 24px; font-weight: 700; }
+        .invoice-meta h2 { margin: 0 0 4px; font-size: 16px; }
+        .info-row { display: grid; grid-template-columns: 1.4fr 1fr 1fr 0.9fr; gap: 4mm; margin: 4mm 0; }
+        .info-block strong { display: block; font-size: 10px; text-transform: uppercase; }
+        table.invoice-table { width: 100%; border-collapse: collapse; margin-top: 4mm; table-layout: fixed; }
+        table.invoice-table thead { display: table-header-group; }
+        table.invoice-table th, table.invoice-table td { border-bottom: 1px solid #000; padding: 5px 3px; }
+        table.invoice-table th { font-size: 10px; text-transform: uppercase; text-align: left; }
         table.invoice-table th.num { text-align: right; }
         table.invoice-table td.desc { white-space: normal; }
         table.invoice-table td.num { text-align: right; white-space: nowrap; }
         table.invoice-table tr { page-break-inside: avoid; }
         .invoice-body { width: 100%; }
-        .totals { margin-top: 6mm; border-top: 1px solid #000; padding-top: 6mm; page-break-inside: avoid; }
-        .totals-row { display: grid; grid-template-columns: 1fr 1fr 35mm; }
-        .totals-row div { text-align: right; padding: 4px 0; }
-        .totals-row .label { text-align: left; }
+        .totals { margin-top: 5mm; border-top: 2px solid #000; padding-top: 4mm; page-break-inside: avoid; }
+        .totals-row { display: flex; justify-content: space-between; padding: 3px 0; }
+        .totals-row .label { text-align: left; flex: 1; }
+        .totals-row .amount { text-align: right; min-width: 35mm; }
         .right { text-align: right; }
     </style>
 </head>
@@ -68,11 +69,11 @@
     <div class="invoice-body">
         <table class="invoice-table">
             <colgroup>
-                <col style="width:86mm;">
-                <col style="width:20mm;">
-                <col style="width:25mm;">
-                <col style="width:15mm;">
-                <col style="width:40mm;">
+                <col style="width:auto;">
+                <col style="width:18mm;">
+                <col style="width:26mm;">
+                <col style="width:14mm;">
+                <col style="width:30mm;">
             </colgroup>
             <thead>
                 <tr>
@@ -108,36 +109,30 @@
     <div class="totals">
         <div class="totals-row">
             <div class="label">Subtotal</div>
-            <div></div>
-            <div>${{ subtotal|latam_number:2 }}</div>
+            <div class="amount">${{ subtotal|latam_number:2 }}</div>
         </div>
         <div class="totals-row">
             <div class="label">Descuento</div>
-            <div></div>
-            <div>${{ discount_total|latam_number:2 }}</div>
+            <div class="amount">${{ discount_total|latam_number:2 }}</div>
         </div>
         {% if is_ml %}
         <div class="totals-row">
             <div class="label">Comisión ML</div>
-            <div></div>
-            <div>${{ commission_total|latam_number:2 }}</div>
+            <div class="amount">${{ commission_total|latam_number:2 }}</div>
         </div>
         <div class="totals-row">
             <div class="label">Impuestos ML</div>
-            <div></div>
-            <div>${{ tax_total|latam_number:2 }}</div>
+            <div class="amount">${{ tax_total|latam_number:2 }}</div>
         </div>
         {% endif %}
-        <div class="totals-row" style="font-weight:700;">
+        <div class="totals-row" style="font-weight:700; border-top:1px solid #000; margin-top:3px; padding-top:3px;">
             <div class="label">Total</div>
-            <div></div>
-            <div>${{ total|latam_number:2 }}</div>
+            <div class="amount">${{ total|latam_number:2 }}</div>
         </div>
         {% if is_ml %}
         <div class="totals-row" style="font-weight:700;">
             <div class="label">Neto ML</div>
-            <div></div>
-            <div>${{ net_total|latam_number:2 }}</div>
+            <div class="amount">${{ net_total|latam_number:2 }}</div>
         </div>
         {% endif %}
     </div>
