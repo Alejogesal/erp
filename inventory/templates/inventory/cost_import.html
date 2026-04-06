@@ -2,20 +2,45 @@
 {% block title %}Importar costos{% endblock %}
 {% block content %}
 <h1>Importar costos</h1>
-<p class="subtitle">Subí un Excel (.xlsx) con columnas: Grupo/Marca (opcional), Descripción/Producto y Costo.</p>
+<p class="subtitle">Subí un Excel (.xlsx) con columnas: Grupo/Marca (opcional), Descripción/Producto y Costo (sin IVA).</p>
 <div class="card">
-    <form method="post" enctype="multipart/form-data">
+    <form method="post" enctype="multipart/form-data" id="cost-import-form">
         {% csrf_token %}
         <label for="xlsx-file">Archivo XLSX</label>
         <input id="xlsx-file" name="file" type="file" accept=".xlsx" required />
-        <label for="xlsx-group">Marca / Grupo (opcional)</label>
-        <input id="xlsx-group" name="group_override" list="group-options" placeholder="Ej: Bellissima">
+        <label for="xlsx-group" style="margin-top:12px;">Marca / Grupo (opcional — filtra la sincronización a una sola marca)</label>
+        <input id="xlsx-group" name="group_override" list="group-options" placeholder="Ej: LA PUISSANCE">
         <datalist id="group-options">
             {% for group in group_options %}
                 <option value="{{ group }}"></option>
             {% endfor %}
         </datalist>
-        <button type="submit">Importar</button>
+        <div style="margin-top:16px; padding:12px; border:1px solid #2a313c; border-radius:10px; background:#0b111a;">
+            <label style="display:flex; gap:10px; align-items:flex-start; cursor:pointer;">
+                <input type="checkbox" name="sync_catalog" value="1" id="sync-catalog" style="margin-top:3px; flex-shrink:0;">
+                <span>
+                    <strong>Sincronizar catálogo</strong><br>
+                    <span style="font-size:12px; color:var(--muted);">
+                        Los productos que estén en el sistema pero <strong>no</strong> en el XLSX serán eliminados.
+                        {% if not group_options %}<br>Si no especificás marca/grupo, se eliminarán de <em>todos</em> los productos.{% endif %}
+                        Si especificás una marca, solo elimina productos de esa marca.
+                    </span>
+                </span>
+            </label>
+        </div>
+        <button type="submit" style="margin-top:16px;" id="import-btn">Importar</button>
     </form>
 </div>
+<script>
+    document.getElementById("cost-import-form").addEventListener("submit", function(e) {
+        const sync = document.getElementById("sync-catalog").checked;
+        if (sync) {
+            const group = document.getElementById("xlsx-group").value.trim();
+            const scope = group ? `la marca "${group}"` : "TODOS los productos";
+            if (!confirm(`¿Confirmar? Los productos de ${scope} que no estén en el XLSX serán eliminados del sistema.`)) {
+                e.preventDefault();
+            }
+        }
+    });
+</script>
 {% endblock %}

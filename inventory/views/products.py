@@ -869,6 +869,7 @@ def import_costs_xlsx(request):
     """
     Importa costos desde un Excel (.xlsx) con columnas:
     Grupo, Descripción, Precio Venta.
+    Si sync_catalog=1, elimina los productos del grupo que no estén en el XLSX.
     """
     if request.method == "POST":
         upload = request.FILES.get("file")
@@ -877,15 +878,48 @@ def import_costs_xlsx(request):
             return redirect("inventory_import_costs")
 
         group_override = (request.POST.get("group_override") or "").strip()
+        sync_catalog = request.POST.get("sync_catalog") == "1"
+
         result = _process_costs_xlsx(upload, group_override=group_override or None)
         if isinstance(result, str):
             messages.error(request, result)
             return redirect("inventory_import_costs")
         created, updated, skipped = result
-        messages.success(
-            request,
-            f"Importación completa. Nuevos: {created}, Actualizados: {updated}, Omitidos: {skipped}.",
-        )
+
+        deleted = 0
+        if sync_catalog:
+            from .utils_xlsx import _read_costs_xlsx_rows
+            upload.seek(0)
+            rows, err = _read_costs_xlsx_rows(upload)
+            if not err:
+                names_in_xlsx = set()
+                skus_in_xlsx = set()
+                for group, description, cost, sku in rows:
+                    if sku:
+                        skus_in_xlsx.add(sku.lower())
+                    effective_group = group_override if group_override else group
+                    names_in_xlsx.add((description, effective_group))
+
+                qs = Product.objects.all()
+                if group_override:
+                    qs = qs.filter(group=group_override)
+
+                for product in qs:
+                    in_xlsx = (
+                        (product.sku or "").lower() in skus_in_xlsx
+                        or (product.name, product.group) in names_in_xlsx
+                    )
+                    if not in_xlsx:
+                        try:
+                            product.delete()
+                            deleted += 1
+                        except Exception:
+                            pass
+
+        msg = f"Importación completa. Nuevos: {created}, Actualizados: {updated}, Omitidos: {skipped}."
+        if sync_catalog:
+            msg += f" Eliminados: {deleted}."
+        messages.success(request, msg)
         return redirect("inventory_product_prices")
 
     group_options = (
