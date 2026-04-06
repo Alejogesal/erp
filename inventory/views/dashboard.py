@@ -104,6 +104,7 @@ def dashboard(request):
             cost_total = item.quantity * _resolve_cost(item)
             profit = (revenue_share - cost_total).quantize(Decimal("0.01"))
             key = (item.product_id, item.variant_id)
+            unit_cost = _resolve_cost(item)
             if key not in ranking_map:
                 ranking_map[key] = {
                     "product_id": item.product_id,
@@ -112,9 +113,12 @@ def dashboard(request):
                     "variant": item.variant.name if item.variant else None,
                     "quantity": Decimal("0.00"),
                     "profit": Decimal("0.00"),
+                    "zero_cost": unit_cost <= Decimal("0.00"),
                 }
             ranking_map[key]["quantity"] += item.quantity
             ranking_map[key]["profit"] += profit
+            if unit_cost > Decimal("0.00"):
+                ranking_map[key]["zero_cost"] = False
 
     ranking = sorted(ranking_map.values(), key=lambda item: item["profit"], reverse=True)
 

@@ -116,7 +116,10 @@
                     <td>{{ item.sku }}</td>
                     <td>{{ item.name }}</td>
                     <td>{{ item.variant|default:"-" }}</td>
-                    <td>${{ item.profit|latam_number:2 }}</td>
+                    <td>
+                        ${{ item.profit|latam_number:2 }}
+                        {% if item.zero_cost %}<span title="Costo $0 — ganancia = ingreso bruto" style="color:var(--negative); font-size:11px; margin-left:4px;">sin costo</span>{% endif %}
+                    </td>
                     <td>{{ item.quantity|latam_number:2 }}</td>
                 </tr>
                 {% endfor %}
