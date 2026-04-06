@@ -337,14 +337,12 @@ def mercadolibre_dashboard(request):
             from ..models import SaleItem as _SaleItem
             items_to_fix = _SaleItem.objects.filter(
                 sale__warehouse__type=Warehouse.WarehouseType.MERCADOLIBRE,
-            ).filter(
-                cost_unit__lte=_Dec("0.00"),
             ).select_related("product")
             fixed = 0
             for item in items_to_fix:
-                new_cost = item.product.last_purchase_cost()
+                new_cost = item.product.cost_with_vat()
                 if not new_cost or new_cost <= _Dec("0.00"):
-                    new_cost = item.product.cost_with_vat()
+                    new_cost = item.product.last_purchase_cost()
                 if new_cost and new_cost > _Dec("0.00"):
                     item.cost_unit = new_cost
                     item.save(update_fields=["cost_unit"])
