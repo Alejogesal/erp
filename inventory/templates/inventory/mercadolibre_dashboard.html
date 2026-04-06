@@ -40,13 +40,7 @@
                     <input type="text" name="ml_item_id" placeholder="ID publicación" style="width:160px;">
                     <button type="submit">Traer ID</button>
                 </form>
-                <form method="post" style="display:inline; display:flex; gap:6px; align-items:center;">
-                    {% csrf_token %}
-                    <input type="hidden" name="action" value="debug_order">
-                    <input type="text" name="debug_order_id" placeholder="ID orden debug" style="width:160px;">
-                    <button type="submit" style="background:#444;">Debug orden</button>
-                </form>
-                <form method="post" style="display:inline;">
+<form method="post" style="display:inline;">
                     {% csrf_token %}
                     <input type="hidden" name="action" value="resync_commissions">
                     <button type="submit" style="background:#e67e22;" onclick="return confirm('Esto va a re-sincronizar todas las ventas ML con comisión $0. Puede tardar varios minutos. ¿Continuar?')">Recalcular comisiones</button>
