@@ -350,6 +350,7 @@ def sync_recent_orders(connection: MercadoLibreConnection, user, days: int = 30,
     created = 0
     updated = 0
     reasons: dict[str, int] = {}
+    no_match_ids: list[str] = []
     for order_id in order_ids:
         ok, reason = sync_order(connection, order_id, user)
         if ok and reason == "ok":
@@ -358,7 +359,9 @@ def sync_recent_orders(connection: MercadoLibreConnection, user, days: int = 30,
             updated += 1
         else:
             reasons[reason] = reasons.get(reason, 0) + 1
-    return {"total": len(order_ids), "created": created, "updated": updated, "reasons": reasons}
+            if reason == "no_matches":
+                no_match_ids.append(str(order_id))
+    return {"total": len(order_ids), "created": created, "updated": updated, "reasons": reasons, "no_match_ids": no_match_ids}
 
 
 def _normalize(text: str) -> str:

@@ -186,9 +186,12 @@ def mercadolibre_dashboard(request):
                     for key, count in result.get("reasons", {}).items():
                         reason_parts.append(f"{key}: {count}")
                     reason_text = f" ({', '.join(reason_parts)})" if reason_parts else ""
+                    no_match_ids = result.get("no_match_ids", [])
+                    no_match_text = ""
+                    if no_match_ids:
+                        no_match_text = f" — Sin match (vincular producto): {', '.join(no_match_ids)}"
                     from inventory.models import Sale as SaleModel
                     if date_str and date_from_str:
-                        from django.utils.dateparse import parse_datetime
                         total_in_db = SaleModel.objects.filter(
                             reference__startswith="ML ORDER",
                             created_at__date=d,
@@ -198,14 +201,14 @@ def mercadolibre_dashboard(request):
                             request,
                             f"Sync ventas {date_label} OK. Revisadas: {result['total']}, "
                             f"nuevas: {result['created']}, actualizadas: {result.get('updated', 0)}.{reason_text} "
-                            f"— Total cargadas en ERP para ese día: {total_in_db}.",
+                            f"— Total en ERP ese día: {total_in_db}.{no_match_text}",
                         )
                     else:
                         messages.success(
                             request,
                             "Sync ventas OK. Revisadas: "
                             f"{result['total']}, nuevas: {result['created']}, "
-                            f"actualizadas: {result.get('updated', 0)}.{reason_text}",
+                            f"actualizadas: {result.get('updated', 0)}.{reason_text}{no_match_text}",
                         )
         elif action == "sync_item":
             item_id = (request.POST.get("ml_item_id") or "").strip()
