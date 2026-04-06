@@ -289,6 +289,49 @@ def mercadolibre_dashboard(request):
                 messages.success(request, f"Se eliminaron {deleted_count} ventas duplicadas.")
             else:
                 messages.warning(request, "No se seleccionó ninguna venta para eliminar.")
+        elif action == "debug_order":
+            order_id = (request.POST.get("debug_order_id") or "").strip()
+            if not order_id or not connection:
+                messages.error(request, "Ingresá un ID de orden.")
+            else:
+                import json as _json
+                try:
+                    access_token = ml.get_valid_access_token(connection)
+                    order = ml._call_with_refresh(connection, ml.get_order, order_id, access_token=access_token)
+                    fee_details = order.get("fee_details") or []
+                    payments = order.get("payments") or []
+                    order_items = order.get("order_items") or []
+                    item_fees = [(oi.get("item", {}).get("id"), oi.get("sale_fee"), oi.get("quantity")) for oi in order_items]
+                    messages.info(request,
+                        f"Orden {order_id} | status: {order.get('status')} | "
+                        f"total_amount: {order.get('total_amount')} | "
+                        f"fee_details: {_json.dumps(fee_details)} | "
+                        f"payments_count: {len(payments)} | "
+                        f"item_fees (id, sale_fee, qty): {item_fees}"
+                    )
+                except Exception as exc:
+                    messages.error(request, f"Error debug: {exc}")
+        elif action == "resync_commissions":
+            if not connection:
+                messages.error(request, "No hay conexión ML.")
+            else:
+                from decimal import Decimal as _Dec
+                sales_to_fix = Sale.objects.filter(
+                    ml_order_id__gt="",
+                    ml_commission_total=_Dec("0.00"),
+                )
+                updated = 0
+                skipped = 0
+                for sale in sales_to_fix:
+                    try:
+                        ok, reason = ml.sync_order(connection, sale.ml_order_id, request.user)
+                        if ok:
+                            updated += 1
+                        else:
+                            skipped += 1
+                    except Exception:
+                        skipped += 1
+                messages.success(request, f"Comisiones recalculadas: {updated} ventas actualizadas, {skipped} sin datos.")
 
     # Detect duplicate ML sales (same ml_order_id appearing more than once)
     from django.db.models import Count
