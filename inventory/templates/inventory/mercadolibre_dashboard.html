@@ -51,6 +51,11 @@
                     <input type="hidden" name="action" value="resync_commissions">
                     <button type="submit" style="background:#e67e22;" onclick="return confirm('Esto va a re-sincronizar todas las ventas ML con comisión $0. Puede tardar varios minutos. ¿Continuar?')">Recalcular comisiones</button>
                 </form>
+                <form method="post" style="display:inline;">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="recost_ml_sales">
+                    <button type="submit" style="background:#1a6a9a;" onclick="return confirm('Esto va a actualizar el costo de todos los items ML con costo $0 usando el costo actual del producto. ¿Continuar?')">Recostear ventas ML</button>
+                </form>
                 {% if missing_credentials %}
                     <button type="button" disabled style="opacity:0.6;">Reconectar MercadoLibre</button>
                 {% else %}

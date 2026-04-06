@@ -1227,11 +1227,9 @@ def sales_list(request):
         for sale in sales_list_qs:
             cost_total = Decimal("0.00")
             for item in sale.items.all():
-                # last_purchase_cost() always stores cost WITH VAT (set by register_entry).
-                # Prefer it over the stored cost_unit which may have been saved without VAT.
-                cost_unit = item.product.last_purchase_cost()
+                cost_unit = item.cost_unit
                 if not cost_unit or cost_unit <= 0:
-                    cost_unit = item.cost_unit
+                    cost_unit = item.product.last_purchase_cost()
                 if not cost_unit or cost_unit <= 0:
                     cost_unit = item.product.cost_with_vat()
                 cost_total += item.quantity * cost_unit

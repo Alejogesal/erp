@@ -705,16 +705,25 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
         existing_sale.ml_order_id = str(order_id)
         existing_sale.save(update_fields=["ml_commission_total", "ml_tax_total", "ml_order_id"])
         for product, quantity, unit_price, vat_percent, variant in matched_items:
-            if not variant:
-                continue
             target = (
-                SaleItem.objects.filter(sale=existing_sale, product=product, variant__isnull=True, quantity=quantity)
+                SaleItem.objects.filter(sale=existing_sale, product=product, quantity=quantity)
                 .order_by("id")
                 .first()
             )
             if target:
-                target.variant = variant
-                target.save(update_fields=["variant"])
+                to_update = []
+                if variant and not target.variant_id:
+                    target.variant = variant
+                    to_update.append("variant")
+                if not target.cost_unit or target.cost_unit <= Decimal("0.00"):
+                    new_cost = product.last_purchase_cost()
+                    if not new_cost or new_cost <= Decimal("0.00"):
+                        new_cost = product.cost_with_vat()
+                    if new_cost and new_cost > Decimal("0.00"):
+                        target.cost_unit = new_cost
+                        to_update.append("cost_unit")
+                if to_update:
+                    target.save(update_fields=to_update)
         return True, "updated"
 
     sale = Sale.objects.create(
@@ -732,6 +741,8 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
     for product, quantity, unit_price, vat_percent, variant in matched_items:
         line_total = (unit_price * quantity).quantize(Decimal("0.01"))
         cost_unit = product.last_purchase_cost()
+        if not cost_unit or cost_unit <= Decimal("0.00"):
+            cost_unit = product.cost_with_vat()
         SaleItem.objects.create(
             sale=sale,
             product=product,
