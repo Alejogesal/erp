@@ -99,7 +99,7 @@
                             0%
                         {% endif %}
                     </td>
-                    <td class="num">${{ item.line_total|latam_number:2 }}</td>
+                    <td class="num">${{ item.final_importe|latam_number:2 }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -107,14 +107,6 @@
     </div>
 
     <div class="totals">
-        <div class="totals-row">
-            <div class="label">Subtotal</div>
-            <div class="amount">${{ subtotal|latam_number:2 }}</div>
-        </div>
-        <div class="totals-row">
-            <div class="label">Descuento</div>
-            <div class="amount">${{ discount_total|latam_number:2 }}</div>
-        </div>
         {% if is_ml %}
         <div class="totals-row">
             <div class="label">Comisión ML</div>

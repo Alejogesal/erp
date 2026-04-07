@@ -61,8 +61,10 @@ def sale_receipt(request, sale_id: int):
         if subtotal > 0
         else Decimal("0.00")
     )
+    extra_factor = Decimal("1.00") - extra_discount_percent / Decimal("100.00")
+    for item in items:
+        item.final_importe = (item.line_total * extra_factor).quantize(Decimal("0.01"))
     is_ml = sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE
-    subtotal_display = subtotal
     total_display = sale.total if is_ml and sale.total is not None else (subtotal - discount_total)
     commission_total = sale.ml_commission_total or Decimal("0.00")
     tax_total = sale.ml_tax_total or Decimal("0.00")
@@ -71,8 +73,6 @@ def sale_receipt(request, sale_id: int):
     context = {
         "sale": sale,
         "items": items,
-        "subtotal": subtotal_display,
-        "discount_total": discount_total,
         "extra_discount_percent": extra_discount_percent,
         "total": total_display,
         "is_ml": is_ml,
@@ -102,8 +102,10 @@ def sale_receipt_pdf(request, sale_id: int):
         if subtotal > 0
         else Decimal("0.00")
     )
+    extra_factor = Decimal("1.00") - extra_discount_percent / Decimal("100.00")
+    for item in items:
+        item.final_importe = (item.line_total * extra_factor).quantize(Decimal("0.01"))
     is_ml = sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE
-    subtotal_display = subtotal
     total_display = sale.total if is_ml and sale.total is not None else (subtotal - discount_total)
     commission_total = sale.ml_commission_total or Decimal("0.00")
     tax_total = sale.ml_tax_total or Decimal("0.00")
@@ -115,8 +117,6 @@ def sale_receipt_pdf(request, sale_id: int):
         {
             "sale": sale,
             "items": items,
-            "subtotal": subtotal_display,
-            "discount_total": discount_total,
             "extra_discount_percent": extra_discount_percent,
             "total": total_display,
             "is_ml": is_ml,
