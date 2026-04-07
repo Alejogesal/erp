@@ -204,6 +204,11 @@ def supplier_history_view(request, supplier_id):
                 messages.success(request, "Pago registrado.")
                 return redirect("inventory_supplier_history", supplier_id=supplier.id)
             messages.error(request, "Revisá los datos del pago.")
+        elif action == "delete_payment":
+            payment_id = request.POST.get("payment_id")
+            SupplierPayment.objects.filter(pk=payment_id, supplier=supplier).delete()
+            messages.success(request, "Pago eliminado.")
+            return redirect("inventory_supplier_history", supplier_id=supplier.id)
 
     purchases = list(
         Purchase.objects.filter(supplier=supplier)
@@ -281,6 +286,7 @@ def supplier_history_view(request, supplier_id):
                 "detail": " · ".join([part for part in detail_parts if part]),
                 "debit": debit,
                 "credit": credit,
+                "payment_id": payment.id,
             }
         )
 

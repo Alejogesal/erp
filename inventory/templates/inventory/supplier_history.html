@@ -69,6 +69,7 @@
                 <th>Debe</th>
                 <th>Haber</th>
                 <th>Saldo</th>
+                <th></th>
             </tr>
         </thead>
         <tbody>
@@ -80,9 +81,19 @@
                 <td>${{ entry.debit|latam_number:2 }}</td>
                 <td>${{ entry.credit|latam_number:2 }}</td>
                 <td>${{ entry.balance|latam_number:2 }}</td>
+                <td>
+                    {% if entry.payment_id %}
+                    <form method="post" style="display:inline;">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="delete_payment">
+                        <input type="hidden" name="payment_id" value="{{ entry.payment_id }}">
+                        <button type="submit" style="background:var(--negative,#c0392b);padding:2px 8px;font-size:12px;" onclick="return confirm('¿Eliminar este pago?')">Eliminar</button>
+                    </form>
+                    {% endif %}
+                </td>
             </tr>
             {% empty %}
-            <tr><td colspan="6">No hay movimientos.</td></tr>
+            <tr><td colspan="7">No hay movimientos.</td></tr>
             {% endfor %}
         </tbody>
     </table>
