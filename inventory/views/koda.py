@@ -60,18 +60,18 @@ def _koda_system_prompt() -> str:
         "Sos Koda, el asistente del ERP. Respondé SOLO en JSON válido con las claves: "
         "reply (string), actions (array), needs_confirmation (boolean). "
         "Cada acción debe ser un objeto con {type, data}. "
-        "Tu objetivo es ayudar con precisión, evitando suposiciones. "
-        "Nunca inventes cifras o resultados. Si el usuario pide reportes o totales "
-        "y no hay datos explícitos en el mensaje, pedí rango de fechas. "
-        "Solo preguntá por filtros (depósito, canal, cliente) si el usuario los menciona "
-        "o si explícitamente pide un filtro. Dejá actions vacío y needs_confirmation=false. "
-        "Para consultas informativas (márgenes, ventas, stock), NO uses actions. "
+        "REGLA CRÍTICA: needs_confirmation=true SOLO cuando hay actions que modifican datos (crear, registrar, transferir, eliminar). "
+        "Para preguntas informativas (margen, ventas, stock, costos, reportes) NUNCA uses needs_confirmation=true ni pidas confirmación. "
+        "Respondé directamente con la información solicitada. "
+        "Si el usuario dice 'en general', 'todo el año', 'siempre' o similar, asumí el año actual sin pedir fechas. "
+        "Solo pedí fechas si el período es genuinamente ambiguo (ej: 'el mes pasado de qué año'). "
+        "Nunca respondas 'puedo hacerlo, confirmame' para consultas informativas. Simplemente respondé. "
+        "Nunca inventes cifras o resultados. "
+        "Para consultas informativas, dejá actions vacío y needs_confirmation=false. "
         "Siempre respondé algo útil en reply, aunque no haya acciones. "
-        "Si falta información para ejecutar una acción, hacé preguntas concretas. "
         "Si hay una imagen adjunta, extraé los datos relevantes de la imagen. "
         "Nunca digas que ejecutaste una acción si no envías actions. "
         "Si el usuario pide ejecutar/registrar/crear/transferir, devolvé actions y needs_confirmation=true. "
-        "Si el usuario pide confirmación de lo que entendiste, resumí y pedí OK. "
         "Respondé en español rioplatense, directo y claro. "
         "Acciones permitidas:\n"
         "- create_product: {name, sku?, group?, avg_cost?, vat_percent?, price_consumer?, price_barber?, price_distributor?}\n"
@@ -136,6 +136,22 @@ def _koda_parse_date_range(message: str) -> tuple[datetime, datetime, datetime.d
         last_prev_month = first_this_month - timedelta(days=1)
         start_date = last_prev_month.replace(day=1)
         end_date = last_prev_month
+    elif re.search(r"\baño\s+(actual|en\s+curso|corriente|vigente)\b|\beste\s+año\b|\baño\s+actual\b", lowered):
+        start_date = today.replace(month=1, day=1)
+        end_date = today
+    elif re.search(r"\baño\s+pasado\b|\baño\s+anterior\b|\baño\s+\d{4}\b", lowered):
+        year_match = re.search(r"\b(\d{4})\b", lowered)
+        if year_match:
+            y = int(year_match.group(1))
+            start_date = today.replace(year=y, month=1, day=1)
+            end_date = today.replace(year=y, month=12, day=31)
+        else:
+            y = today.year - 1
+            start_date = today.replace(year=y, month=1, day=1)
+            end_date = today.replace(year=y, month=12, day=31)
+    elif re.search(r"\ben\s+general\b|\bsiemp?re\b|\btodo\s+el\s+tiempo\b|\bhistorial\b|\btodos?\b", lowered):
+        start_date = today.replace(year=today.year, month=1, day=1)
+        end_date = today
     else:
         month_map = {
             "enero": 1,
@@ -318,13 +334,17 @@ def _koda_try_local_response(message: str) -> str | None:
             reply_lines.append(f"Total compras: {_koda_format_amount(purchases_total)}.")
         if wants_profit:
             profit_sales = _koda_sales_profit(sales_qs)
-            reply_lines.append(f"Ganancia por ventas (neto ML - costo): {_koda_format_amount(profit_sales)}.")
+            reply_lines.append(f"Ganancia bruta: {_koda_format_amount(profit_sales)}.")
+            if sales_total and sales_total > 0:
+                margin_pct = (profit_sales / sales_total * Decimal("100.00")).quantize(Decimal("0.01"))
+                reply_lines.append(f"Margen promedio sobre ventas: {_koda_format_amount(margin_pct, currency=False)}%.")
             if tax_total:
                 net_profit = profit_sales - tax_total
                 reply_lines.append(f"Impuestos registrados: {_koda_format_amount(tax_total)}.")
                 reply_lines.append(f"Ganancia neta después de impuestos: {_koda_format_amount(net_profit)}.")
-            else:
-                reply_lines.append("Impuestos registrados: $0,00.")
+                if sales_total and sales_total > 0:
+                    net_margin_pct = (net_profit / sales_total * Decimal("100.00")).quantize(Decimal("0.01"))
+                    reply_lines.append(f"Margen neto: {_koda_format_amount(net_margin_pct, currency=False)}%.")
         if wants_tax and not wants_profit:
             reply_lines.append(f"Impuestos registrados: {_koda_format_amount(tax_total)}.")
         if percent is not None and (wants_sales or wants_purchases):
