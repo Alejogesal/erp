@@ -128,6 +128,27 @@ JOIN sale_totals st ON st.sale_id = ic.sale_id;
 
 SALDO PROVEEDOR: SUM(purchase.total) - SUM(payments donde kind='PAYMENT') + SUM(payments donde kind='ADJUSTMENT')
 VENTAS TOTALES DEL PERÍODO: SUM(inventory_saleitem.line_total) filtrando por sale__created_at
+
+IVA EN COMPRAS:
+  El IVA de cada ítem de compra = pi.quantity * pi.unit_cost * (pi.vat_percent / 100)
+  El IVA total de las compras de un período:
+  SELECT ROUND(SUM(pi.quantity * pi.unit_cost * (pi.vat_percent / 100.0))::numeric, 2) AS iva_total
+  FROM inventory_purchaseitem pi
+  JOIN inventory_purchase p ON p.id = pi.purchase_id
+  WHERE p.created_at AT TIME ZONE 'America/Argentina/Buenos_Aires' >= '[INICIO]'
+    AND p.created_at AT TIME ZONE 'America/Argentina/Buenos_Aires' < '[FIN]';
+
+  NOTA: si el resultado es 0 o NULL, significa que las compras de ese período fueron registradas
+  sin información de IVA por ítem (vat_percent=0). En ese caso informalo al usuario y sugerile
+  que use el total de las compras como referencia.
+
+IVA EN VENTAS:
+  El IVA de cada ítem de venta = si.quantity * si.final_unit_price * (si.vat_percent / 100)
+  SELECT ROUND(SUM(si.quantity * si.final_unit_price * (si.vat_percent / 100.0))::numeric, 2) AS iva_ventas
+  FROM inventory_saleitem si
+  JOIN inventory_sale s ON s.id = si.sale_id
+  WHERE s.created_at AT TIME ZONE 'America/Argentina/Buenos_Aires' >= '[INICIO]'
+    AND s.created_at AT TIME ZONE 'America/Argentina/Buenos_Aires' < '[FIN]';
 """
 
 _TOOLS = [
