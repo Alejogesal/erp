@@ -1,0 +1,312 @@
+{% extends "inventory/base.html" %}
+{% block title %}Agente IA{% endblock %}
+{% block content %}
+<style>
+    .chat-wrap {
+        display: flex;
+        flex-direction: column;
+        height: 70vh;
+        min-height: 400px;
+        background: linear-gradient(145deg, var(--panel), #111721);
+        border: 1px solid #1f2630;
+        border-radius: 14px;
+        overflow: hidden;
+        box-shadow: 0 16px 40px rgba(0,0,0,.35);
+    }
+    .chat-messages {
+        flex: 1;
+        overflow-y: auto;
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        scroll-behavior: smooth;
+    }
+    .chat-messages::-webkit-scrollbar { width: 6px; }
+    .chat-messages::-webkit-scrollbar-track { background: transparent; }
+    .chat-messages::-webkit-scrollbar-thumb { background: #2a313c; border-radius: 4px; }
+    .msg {
+        max-width: 85%;
+        padding: 10px 14px;
+        border-radius: 12px;
+        font-size: 14px;
+        line-height: 1.55;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+    .msg.user {
+        align-self: flex-end;
+        background: linear-gradient(135deg, #3aa0ff, #2d6cff);
+        color: #fff;
+        border-bottom-right-radius: 4px;
+    }
+    .msg.assistant {
+        align-self: flex-start;
+        background: #1c2333;
+        border: 1px solid #2a313c;
+        color: var(--text);
+        border-bottom-left-radius: 4px;
+    }
+    .msg.assistant table {
+        border-collapse: collapse;
+        width: 100%;
+        margin-top: 8px;
+        font-size: 13px;
+    }
+    .msg.assistant th, .msg.assistant td {
+        border: 1px solid #2a313c;
+        padding: 6px 10px;
+        text-align: left;
+    }
+    .msg.assistant th {
+        background: #161b22;
+        color: var(--muted);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: .8px;
+    }
+    .msg.assistant code {
+        background: #0d1117;
+        padding: 2px 6px;
+        border-radius: 5px;
+        font-size: 12px;
+    }
+    .msg.assistant strong { color: #fff; }
+    .typing-dots span {
+        display: inline-block;
+        width: 7px; height: 7px;
+        margin: 0 2px;
+        background: var(--muted);
+        border-radius: 50%;
+        animation: bounce 1.2s infinite;
+    }
+    .typing-dots span:nth-child(2) { animation-delay: .2s; }
+    .typing-dots span:nth-child(3) { animation-delay: .4s; }
+    @keyframes bounce {
+        0%, 80%, 100% { transform: translateY(0); opacity: .5; }
+        40% { transform: translateY(-6px); opacity: 1; }
+    }
+    .chat-footer {
+        padding: 14px 16px;
+        border-top: 1px solid #242c37;
+        display: flex;
+        gap: 10px;
+        align-items: flex-end;
+        background: #0f1622;
+    }
+    #chat-input {
+        flex: 1;
+        resize: none;
+        min-height: 40px;
+        max-height: 120px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid #2a313c;
+        background: #161b22;
+        color: var(--text);
+        font-size: 14px;
+        font-family: inherit;
+        line-height: 1.4;
+        overflow-y: auto;
+        transition: border-color 120ms;
+    }
+    #chat-input:focus { outline: none; border-color: var(--accent); }
+    #chat-send {
+        flex-shrink: 0;
+        height: 40px;
+        padding: 0 18px;
+        font-size: 14px;
+    }
+    #chat-send:disabled { opacity: .5; cursor: not-allowed; }
+    .chat-empty {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 14px;
+        padding: 20px;
+        text-align: center;
+    }
+    .chat-empty .big { font-size: 32px; }
+    .suggestions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+        justify-content: center;
+    }
+    .suggestion {
+        padding: 7px 12px;
+        border-radius: 20px;
+        border: 1px solid #2a313c;
+        background: #161b22;
+        color: var(--muted);
+        font-size: 12px;
+        cursor: pointer;
+        transition: border-color 120ms, color 120ms;
+    }
+    .suggestion:hover { border-color: var(--accent); color: var(--accent); }
+</style>
+
+<h1>Agente IA</h1>
+<p class="subtitle">Consultá cualquier dato del ERP en lenguaje natural.</p>
+
+<div class="chat-wrap">
+    <div class="chat-messages" id="chat-messages">
+        <div class="chat-empty" id="chat-empty">
+            <div class="big">✦</div>
+            <div>Preguntame lo que quieras sobre ventas, compras, stock, proveedores y más.</div>
+            <div class="suggestions">
+                <span class="suggestion">¿Cuánto vendí este mes?</span>
+                <span class="suggestion">Top 10 productos más vendidos este año</span>
+                <span class="suggestion">¿Cuál es mi ganancia de abril?</span>
+                <span class="suggestion">Saldo de cada proveedor</span>
+                <span class="suggestion">¿Qué productos tienen stock bajo?</span>
+                <span class="suggestion">Ventas por canal este año</span>
+            </div>
+        </div>
+    </div>
+    <div class="chat-footer">
+        <textarea id="chat-input" placeholder="Escribí tu consulta..." rows="1"></textarea>
+        <button id="chat-send">Enviar</button>
+    </div>
+</div>
+
+<script>
+(function () {
+    const messagesEl = document.getElementById("chat-messages");
+    const inputEl = document.getElementById("chat-input");
+    const sendBtn = document.getElementById("chat-send");
+    const emptyEl = document.getElementById("chat-empty");
+    let history = [];
+    let busy = false;
+
+    const getCookie = (name) => {
+        const v = `; ${document.cookie}`;
+        const parts = v.split(`; ${name}=`);
+        if (parts.length === 2) return parts.pop().split(";").shift();
+        return "";
+    };
+
+    const escapeHtml = (str) => str
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+
+    // Minimal markdown renderer: bold, code, tables, newlines
+    const renderMarkdown = (text) => {
+        // Tables
+        text = text.replace(/(?:^\|.+\|\n)+/gm, (block) => {
+            const lines = block.trim().split("\n").filter(l => l.trim());
+            if (lines.length < 2) return escapeHtml(block);
+            const toCell = (line, tag) =>
+                "<tr>" + line.split("|").slice(1, -1).map(c =>
+                    `<${tag}>${escapeHtml(c.trim())}</${tag}>`).join("") + "</tr>";
+            let html = "<table><thead>" + toCell(lines[0], "th") + "</thead><tbody>";
+            for (let i = 2; i < lines.length; i++) html += toCell(lines[i], "td");
+            html += "</tbody></table>";
+            return html;
+        });
+        // Bold
+        text = text.replace(/\*\*(.+?)\*\*/g, (_, m) => `<strong>${escapeHtml(m)}</strong>`);
+        // Inline code
+        text = text.replace(/`([^`]+)`/g, (_, m) => `<code>${escapeHtml(m)}</code>`);
+        // Remaining plain text — escape and convert newlines
+        // (tables already replaced, rest is plain)
+        text = text.split(/(<table[\s\S]*?<\/table>|<strong>[\s\S]*?<\/strong>|<code>[\s\S]*?<\/code>)/g)
+            .map((chunk, i) => {
+                if (i % 2 === 1) return chunk; // already HTML
+                return escapeHtml(chunk).replace(/\n/g, "<br>");
+            }).join("");
+        return text;
+    };
+
+    const addMessage = (role, text) => {
+        if (emptyEl) emptyEl.style.display = "none";
+        const div = document.createElement("div");
+        div.className = `msg ${role}`;
+        if (role === "assistant") {
+            div.innerHTML = renderMarkdown(text);
+        } else {
+            div.textContent = text;
+        }
+        messagesEl.appendChild(div);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+        return div;
+    };
+
+    const showTyping = () => {
+        if (emptyEl) emptyEl.style.display = "none";
+        const div = document.createElement("div");
+        div.className = "msg assistant typing-dots";
+        div.id = "typing-bubble";
+        div.innerHTML = "<span></span><span></span><span></span>";
+        messagesEl.appendChild(div);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+    };
+
+    const hideTyping = () => {
+        const el = document.getElementById("typing-bubble");
+        if (el) el.remove();
+    };
+
+    const send = async () => {
+        if (busy) return;
+        const text = inputEl.value.trim();
+        if (!text) return;
+        busy = true;
+        sendBtn.disabled = true;
+        inputEl.value = "";
+        inputEl.style.height = "auto";
+
+        addMessage("user", text);
+        history.push({ role: "user", content: text });
+        showTyping();
+
+        try {
+            const res = await fetch("{% url 'inventory_agent' %}", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRFToken": getCookie("csrftoken"),
+                },
+                body: JSON.stringify({ messages: history }),
+            });
+            const data = await res.json();
+            hideTyping();
+            const reply = data.reply || "Sin respuesta.";
+            addMessage("assistant", reply);
+            history.push({ role: "assistant", content: reply });
+        } catch (err) {
+            hideTyping();
+            addMessage("assistant", "Error al conectar con el servidor. Intentá de nuevo.");
+        }
+
+        busy = false;
+        sendBtn.disabled = false;
+        inputEl.focus();
+    };
+
+    sendBtn.addEventListener("click", send);
+    inputEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+    });
+    // Auto-resize textarea
+    inputEl.addEventListener("input", () => {
+        inputEl.style.height = "auto";
+        inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + "px";
+    });
+    // Suggestion chips
+    document.querySelectorAll(".suggestion").forEach(chip => {
+        chip.addEventListener("click", () => {
+            inputEl.value = chip.textContent;
+            inputEl.focus();
+            send();
+        });
+    });
+})();
+</script>
+{% endblock %}

@@ -42,6 +42,7 @@ from .mercadolibre import (
     mercadolibre_webhook,
 )
 from .taxes import taxes_view
+from .agent import agent_view
 __all__ = [
     "dashboard",
     "create_product",
@@ -81,4 +82,5 @@ __all__ = [
     "mercadolibre_order_sheet",
     "mercadolibre_webhook",
     "taxes_view",
+    "agent_view",
 ]

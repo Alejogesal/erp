@@ -45,4 +45,5 @@ urlpatterns = [
     path("ventas/<int:sale_id>/eliminar/", views.sale_delete, name="inventory_sale_delete"),
     path("stock/", views.stock_list, name="inventory_stock_list"),
     path("impuestos/", views.taxes_view, name="inventory_taxes"),
+    path("agente/", views.agent_view, name="inventory_agent"),
 ]
