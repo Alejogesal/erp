@@ -139,19 +139,19 @@ def _koda_parse_date_range(message: str) -> tuple[datetime, datetime, datetime.d
     elif re.search(r"\baño\s+(actual|en\s+curso|corriente|vigente)\b|\beste\s+año\b|\baño\s+actual\b", lowered):
         start_date = today.replace(month=1, day=1)
         end_date = today
-    elif re.search(r"\baño\s+pasado\b|\baño\s+anterior\b|\baño\s+\d{4}\b", lowered):
-        year_match = re.search(r"\b(\d{4})\b", lowered)
-        if year_match:
-            y = int(year_match.group(1))
-            start_date = today.replace(year=y, month=1, day=1)
-            end_date = today.replace(year=y, month=12, day=31)
-        else:
-            y = today.year - 1
-            start_date = today.replace(year=y, month=1, day=1)
-            end_date = today.replace(year=y, month=12, day=31)
+    elif re.search(r"\baño\s+pasado\b|\baño\s+anterior\b", lowered):
+        y = today.year - 1
+        start_date = today.replace(year=y, month=1, day=1)
+        end_date = today.replace(year=y, month=12, day=31)
     elif re.search(r"\ben\s+general\b|\bsiemp?re\b|\btodo\s+el\s+tiempo\b|\bhistorial\b|\btodos?\b", lowered):
         start_date = today.replace(year=today.year, month=1, day=1)
         end_date = today
+    elif re.search(r"\b(20\d{2})\b", lowered):
+        # Año suelto tipo "2026", "en 2026", "de 2026", "este año 2026"
+        year_match = re.search(r"\b(20\d{2})\b", lowered)
+        y = int(year_match.group(1))
+        start_date = today.replace(year=y, month=1, day=1)
+        end_date = today if y == today.year else today.replace(year=y, month=12, day=31)
     else:
         month_map = {
             "enero": 1,
@@ -305,8 +305,14 @@ def _koda_try_local_response(message: str) -> str | None:
     if wants_profit or wants_sales or wants_purchases or percent or wants_tax:
         date_range = _koda_parse_date_range(lowered)
         if not date_range:
-            return "¿De qué fechas? Indicame desde y hasta (ej: 01/01/2026 al 11/01/2026)."
-        start_dt, end_dt, start_date, end_date = date_range
+            # Sin fecha explícita → asumir año actual
+            today = timezone.localdate()
+            start_date = today.replace(month=1, day=1)
+            end_date = today
+            start_dt = timezone.make_aware(datetime.combine(start_date, time.min))
+            end_dt = timezone.make_aware(datetime.combine(end_date, time.max))
+        else:
+            start_dt, end_dt, start_date, end_date = date_range
         warehouse = _koda_extract_warehouse(lowered)
         range_label = f"{start_date.strftime('%d/%m/%Y')} al {end_date.strftime('%d/%m/%Y')}"
         reply_lines = [f"Rango: {range_label}."]
