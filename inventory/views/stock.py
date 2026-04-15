@@ -21,7 +21,23 @@ from ..models import (
     Warehouse,
 )
 from .forms import StockTransferForm
-from .koda import _koda_sync_common_with_variants
+
+
+def _sync_common_with_variants(product: Product, comun_wh: Warehouse):
+    from django.db.models import Sum as _Sum
+    total = (
+        ProductVariant.objects.filter(product=product)
+        .aggregate(total=_Sum("quantity"))
+        .get("total")
+    )
+    total = total if total is not None else Decimal("0.00")
+    stock = Stock.objects.select_for_update().get_or_create(
+        product=product,
+        warehouse=comun_wh,
+        defaults={"quantity": total},
+    )[0]
+    stock.quantity = total
+    stock.save(update_fields=["quantity"])
 
 
 @login_required

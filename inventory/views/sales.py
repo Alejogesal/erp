@@ -34,7 +34,7 @@ from ..models import (
 )
 from .common import _resolve_sale_item_pricing
 from .forms import SaleHeaderForm, SaleItemForm
-from .koda import _koda_sync_common_with_variants
+from .stock import _sync_common_with_variants
 from .utils_xlsx import _read_ml_sales_xlsx_rows
 
 
@@ -281,7 +281,7 @@ def sale_edit(request, sale_id: int):
                                     variant.quantity = (variant.quantity + prev_item.quantity).quantize(Decimal("0.01"))
                                     variant.save(update_fields=["quantity"])
                                     if comun_wh:
-                                        _koda_sync_common_with_variants(prev_item.product, comun_wh)
+                                        _sync_common_with_variants(prev_item.product, comun_wh)
                     for movement in sale.movements.select_for_update():
                         if not is_ml_sale and movement.movement_type == StockMovement.MovementType.EXIT and movement.from_warehouse:
                             stock, _ = Stock.objects.select_for_update().get_or_create(
@@ -354,7 +354,7 @@ def sale_edit(request, sale_id: int):
                                 variant.quantity = (variant.quantity - qty).quantize(Decimal("0.01"))
                                 variant.save(update_fields=["quantity"])
                                 if comun_wh:
-                                    _koda_sync_common_with_variants(data["product"], comun_wh)
+                                    _sync_common_with_variants(data["product"], comun_wh)
                         default_cost = data["product"].last_purchase_cost() or data["product"].cost_with_vat()
                         manual_cost = data.get("cost_unit_override")
                         cost_unit = (
@@ -952,7 +952,7 @@ def sales_list(request):
                                 variant.quantity = (variant.quantity + item.quantity).quantize(Decimal("0.01"))
                                 variant.save(update_fields=["quantity"])
                                 if comun_wh:
-                                    _koda_sync_common_with_variants(item.product, comun_wh)
+                                    _sync_common_with_variants(item.product, comun_wh)
                 for movement in sale.movements.select_for_update():
                     if not is_ml_sale and movement.movement_type == StockMovement.MovementType.EXIT and movement.from_warehouse:
                         stock, _ = Stock.objects.select_for_update().get_or_create(
@@ -1108,7 +1108,7 @@ def sales_list(request):
                                     variant.quantity = (variant.quantity - qty).quantize(Decimal("0.01"))
                                     variant.save(update_fields=["quantity"])
                                     if comun_wh:
-                                        _koda_sync_common_with_variants(data["product"], comun_wh)
+                                        _sync_common_with_variants(data["product"], comun_wh)
                             default_cost = data["product"].last_purchase_cost() or data["product"].cost_with_vat()
                             manual_cost = data.get("cost_unit_override")
                             cost_unit = (
@@ -1366,7 +1366,7 @@ def sale_delete(request, sale_id: int):
                             variant.quantity = (variant.quantity + item.quantity).quantize(Decimal("0.01"))
                             variant.save(update_fields=["quantity"])
                             if comun_wh:
-                                _koda_sync_common_with_variants(item.product, comun_wh)
+                                _sync_common_with_variants(item.product, comun_wh)
             for movement in sale.movements.select_for_update():
                 if not is_ml_sale and movement.movement_type == StockMovement.MovementType.EXIT and movement.from_warehouse:
                     stock, _ = Stock.objects.select_for_update().get_or_create(

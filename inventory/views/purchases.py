@@ -33,7 +33,7 @@ from .common import (
     _shipping_cost_per_unit,
 )
 from .forms import PurchaseHeaderForm, PurchaseItemForm
-from .koda import _koda_sync_common_with_variants
+from .stock import _sync_common_with_variants
 from .utils_purchase_pdf import (
     _create_product_from_purchase_pdf,
     _extract_purchase_items_from_pdf_bytes,
@@ -375,7 +375,7 @@ def purchases_list(request):
                             if variant:
                                 variant.quantity = (variant.quantity + qty).quantize(Decimal("0.01"))
                                 variant.save(update_fields=["quantity"])
-                                _koda_sync_common_with_variants(data["product"], warehouse)
+                                _sync_common_with_variants(data["product"], warehouse)
                         services.register_entry(
                             product=data["product"],
                             warehouse=warehouse,
@@ -693,7 +693,7 @@ def purchases_list(request):
                             if variant:
                                 variant.quantity = (variant.quantity + qty).quantize(Decimal("0.01"))
                                 variant.save(update_fields=["quantity"])
-                                _koda_sync_common_with_variants(data["product"], warehouse)
+                                _sync_common_with_variants(data["product"], warehouse)
                         services.register_entry(
                             product=data["product"],
                             warehouse=warehouse,
@@ -961,7 +961,7 @@ def purchase_edit(request, purchase_id: int):
                                     raise services.NegativeStockError("Stock cannot go negative")
                                 variant.quantity = (variant.quantity - item.quantity).quantize(Decimal("0.01"))
                                 variant.save(update_fields=["quantity"])
-                                _koda_sync_common_with_variants(item.product, purchase.warehouse)
+                                _sync_common_with_variants(item.product, purchase.warehouse)
                     purchase.items.all().delete()
 
                     purchase.warehouse = new_warehouse
@@ -1040,7 +1040,7 @@ def purchase_edit(request, purchase_id: int):
                                 if apply_qty > 0:
                                     variant.quantity = (variant.quantity + apply_qty).quantize(Decimal("0.01"))
                                     variant.save(update_fields=["quantity"])
-                                    _koda_sync_common_with_variants(product, purchase.warehouse)
+                                    _sync_common_with_variants(product, purchase.warehouse)
                         if stock_changed or (additive_update and delta_qty > 0):
                             services.register_entry(
                                 product=product,

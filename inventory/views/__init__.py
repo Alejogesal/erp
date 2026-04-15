@@ -42,8 +42,6 @@ from .mercadolibre import (
     mercadolibre_webhook,
 )
 from .taxes import taxes_view
-from .koda import koda_chat, koda_confirm
-
 __all__ = [
     "dashboard",
     "create_product",
@@ -83,6 +81,4 @@ __all__ = [
     "mercadolibre_order_sheet",
     "mercadolibre_webhook",
     "taxes_view",
-    "koda_chat",
-    "koda_confirm",
 ]
