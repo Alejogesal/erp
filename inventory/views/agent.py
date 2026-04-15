@@ -155,11 +155,11 @@ _TOOLS = [
     }
 ]
 
-_SYSTEM_PROMPT = f"""Sos un asistente de análisis del ERP de una distribuidora de productos de peluquería en Argentina.
+_SYSTEM_PROMPT_TEMPLATE = """Sos un asistente de análisis del ERP de una distribuidora de productos de peluquería en Argentina.
 Tenés acceso completo a la base de datos a través de la herramienta execute_sql.
 Respondé siempre en español, de forma clara y concisa.
 Cuando presentes números monetarios usá formato argentino: $1.234,56.
-Cuando no se especifique un período, asumí el año actual.
+Hoy es {today} (zona horaria Argentina). Cuando el usuario diga "enero" sin año, significa enero de {year}. Cuando diga "este mes" significa {month_name} de {year}. Cuando diga "este año" significa {year}. NUNCA asumas un año distinto a {year} salvo que el usuario lo especifique explícitamente.
 Para fechas en zona horaria argentina usá: created_at AT TIME ZONE 'America/Argentina/Buenos_Aires'.
 Si la consulta requiere varias queries, ejecutalas todas antes de responder.
 Presentá los resultados en tablas markdown cuando tenga sentido.
@@ -167,12 +167,26 @@ Presentá los resultados en tablas markdown cuando tenga sentido.
 REGLA CRÍTICA — NUNCA INVENTES DATOS:
 - Siempre ejecutá execute_sql antes de dar cualquier número o cifra.
 - Si la query devuelve 0 filas o NULL, decí exactamente eso: "No encontré datos para ese período."
-- Si no estás seguro de cómo calcular algo (por ejemplo qué columnas usar para la ganancia), preguntale al usuario cómo quiere que lo calcule, en lugar de asumir.
+- Si no estás seguro de cómo calcular algo, preguntale al usuario en lugar de asumir.
 - JAMÁS respondas con un número que no hayas obtenido directamente de una query ejecutada en esta conversación.
 - Si ejecutaste una query y el resultado está vacío, NO repitas la consulta con otros criterios sin avisarle al usuario.
 
-{_SCHEMA}
-"""
+""" + _SCHEMA
+
+
+def _build_system_prompt() -> str:
+    from django.utils import timezone as _tz
+    import locale as _locale
+    now = _tz.localtime(_tz.now())
+    month_names = [
+        "", "enero", "febrero", "marzo", "abril", "mayo", "junio",
+        "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"
+    ]
+    return _SYSTEM_PROMPT_TEMPLATE.format(
+        today=now.strftime("%d/%m/%Y"),
+        year=now.year,
+        month_name=month_names[now.month],
+    )
 
 _FORBIDDEN_RE = re.compile(
     r"\b(INSERT|UPDATE|DELETE|DROP|TRUNCATE|ALTER|CREATE|GRANT|REVOKE|EXECUTE|CALL|COPY)\b",
@@ -228,7 +242,7 @@ def agent_view(request):
         return JsonResponse({"reply": "La variable OPENAI_API_KEY no está configurada."})
 
     client = _openai.OpenAI(api_key=api_key)
-    openai_messages = [{"role": "system", "content": _SYSTEM_PROMPT}] + messages_history
+    openai_messages = [{"role": "system", "content": _build_system_prompt()}] + messages_history
 
     for _ in range(10):
         response = client.chat.completions.create(
