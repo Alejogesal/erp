@@ -88,6 +88,46 @@ inventory_stockmovement
 
 auth_user
   id, username, first_name, last_name, email
+
+FÓRMULAS EXACTAS (usá siempre estas):
+
+COSTO POR ÍTEM:
+  CASE WHEN si.cost_unit > 0 THEN si.cost_unit ELSE p.avg_cost * (1 + p.vat_percent/100) END
+
+GANANCIA POR VENTA (la misma lógica que el dashboard):
+  - Ventas COMUN: ganancia = si.line_total - si.quantity * costo_item
+  - Ventas MERCADOLIBRE: ganancia = (s.total - s.ml_commission_total - s.ml_tax_total) * si.line_total / items_total_de_esa_venta - si.quantity * costo_item
+  - Ganancia neta del período = ganancia_bruta - SUM(inventory_taxexpense.amount del mismo período)
+
+SQL MODELO para ganancia de un período (reemplazá [INICIO] y [FIN] con fechas 'YYYY-MM-DD'):
+WITH item_costs AS (
+  SELECT si.id, si.sale_id, si.line_total, si.quantity,
+         CASE WHEN si.cost_unit > 0 THEN si.cost_unit ELSE p.avg_cost * (1 + p.vat_percent/100) END AS cost,
+         w.type AS wh_type,
+         s.total AS sale_total, s.ml_commission_total, s.ml_tax_total,
+         s.created_at
+  FROM inventory_saleitem si
+  JOIN inventory_sale s ON s.id = si.sale_id
+  JOIN inventory_warehouse w ON w.id = s.warehouse_id
+  JOIN inventory_product p ON p.id = si.product_id
+  WHERE s.created_at AT TIME ZONE 'America/Argentina/Buenos_Aires' >= '[INICIO]'
+    AND s.created_at AT TIME ZONE 'America/Argentina/Buenos_Aires' < '[FIN]'
+),
+sale_totals AS (
+  SELECT sale_id, SUM(line_total) AS items_total FROM inventory_saleitem GROUP BY sale_id
+)
+SELECT ROUND(SUM(
+  CASE WHEN ic.wh_type = 'MERCADOLIBRE'
+    THEN (ic.sale_total - ic.ml_commission_total - ic.ml_tax_total)
+         * ic.line_total / NULLIF(st.items_total, 0) - ic.quantity * ic.cost
+    ELSE ic.line_total - ic.quantity * ic.cost
+  END
+)::numeric, 2) AS ganancia_bruta
+FROM item_costs ic
+JOIN sale_totals st ON st.sale_id = ic.sale_id;
+
+SALDO PROVEEDOR: SUM(purchase.total) - SUM(payments donde kind='PAYMENT') + SUM(payments donde kind='ADJUSTMENT')
+VENTAS TOTALES DEL PERÍODO: SUM(inventory_saleitem.line_total) filtrando por sale__created_at
 """
 
 _TOOLS = [
