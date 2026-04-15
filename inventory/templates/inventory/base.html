@@ -182,7 +182,6 @@
             <a class="pill" href="{% url 'inventory_mercadolibre_order_sheet' %}">ML Pedido</a>
             <a class="pill" href="{% url 'inventory_customers' %}">Clientes</a>
             <a class="pill" href="{% url 'inventory_suppliers' %}">Proveedores</a>
-            <a class="pill cta" href="{% url 'inventory_agent' %}">Koda</a>
             {% if user.is_authenticated %}
             <a class="pill" href="{% url 'password_change' %}">Cambiar contraseña</a>
             {% endif %}
@@ -198,5 +197,255 @@
             {% block content %}{% endblock %}
         </div>
     </div>
+{% if user.is_authenticated %}
+<style>
+    .koda-btn {
+        position: fixed;
+        bottom: 24px;
+        right: 24px;
+        z-index: 1000;
+        background: linear-gradient(135deg, #3aa0ff, #2d6cff);
+        color: #fff;
+        border: none;
+        border-radius: 24px;
+        padding: 12px 22px;
+        font-size: 15px;
+        font-weight: 700;
+        cursor: pointer;
+        box-shadow: 0 8px 24px rgba(45,108,255,.4);
+        transition: transform 120ms, box-shadow 120ms;
+    }
+    .koda-btn:hover { transform: translateY(-2px); box-shadow: 0 12px 28px rgba(45,108,255,.5); opacity: 1; }
+    .koda-btn:active { transform: translateY(0); }
+    .koda-panel {
+        position: fixed;
+        bottom: 80px;
+        right: 24px;
+        z-index: 999;
+        width: 420px;
+        max-width: calc(100vw - 48px);
+        height: 540px;
+        max-height: calc(100vh - 120px);
+        background: #161b22;
+        border: 1px solid #2a313c;
+        border-radius: 16px;
+        box-shadow: 0 24px 60px rgba(0,0,0,.6);
+        display: none;
+        flex-direction: column;
+        overflow: hidden;
+    }
+    .koda-panel.open { display: flex; }
+    .koda-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 16px;
+        border-bottom: 1px solid #242c37;
+        font-weight: 700;
+        font-size: 15px;
+    }
+    .koda-header button {
+        background: none;
+        border: none;
+        color: var(--muted);
+        font-size: 18px;
+        cursor: pointer;
+        padding: 0 4px;
+        font-weight: 400;
+        line-height: 1;
+    }
+    .koda-header button:hover { color: var(--text); opacity: 1; }
+    .koda-messages {
+        flex: 1;
+        overflow-y: auto;
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        scroll-behavior: smooth;
+    }
+    .koda-messages::-webkit-scrollbar { width: 5px; }
+    .koda-messages::-webkit-scrollbar-thumb { background: #2a313c; border-radius: 4px; }
+    .koda-msg {
+        max-width: 88%;
+        padding: 9px 13px;
+        border-radius: 12px;
+        font-size: 13px;
+        line-height: 1.55;
+        word-break: break-word;
+    }
+    .koda-msg.user {
+        align-self: flex-end;
+        background: linear-gradient(135deg, #3aa0ff, #2d6cff);
+        color: #fff;
+        border-bottom-right-radius: 4px;
+    }
+    .koda-msg.assistant {
+        align-self: flex-start;
+        background: #1c2333;
+        border: 1px solid #2a313c;
+        color: var(--text);
+        border-bottom-left-radius: 4px;
+        white-space: pre-wrap;
+    }
+    .koda-msg.assistant table { border-collapse: collapse; width: 100%; margin-top: 6px; font-size: 12px; }
+    .koda-msg.assistant th, .koda-msg.assistant td { border: 1px solid #2a313c; padding: 4px 8px; text-align: left; }
+    .koda-msg.assistant th { background: #0d1117; color: var(--muted); font-size: 10px; text-transform: uppercase; }
+    .koda-msg.assistant strong { color: #fff; }
+    .koda-msg.assistant code { background: #0d1117; padding: 1px 5px; border-radius: 4px; font-size: 11px; }
+    .koda-typing span {
+        display: inline-block;
+        width: 6px; height: 6px;
+        margin: 0 2px;
+        background: var(--muted);
+        border-radius: 50%;
+        animation: kbounce 1.2s infinite;
+    }
+    .koda-typing span:nth-child(2) { animation-delay: .2s; }
+    .koda-typing span:nth-child(3) { animation-delay: .4s; }
+    @keyframes kbounce {
+        0%,80%,100% { transform: translateY(0); opacity:.5; }
+        40% { transform: translateY(-5px); opacity:1; }
+    }
+    .koda-footer {
+        padding: 12px;
+        border-top: 1px solid #242c37;
+        display: flex;
+        gap: 8px;
+        align-items: flex-end;
+        background: #0f1622;
+    }
+    #koda-input {
+        flex: 1;
+        resize: none;
+        min-height: 36px;
+        max-height: 100px;
+        padding: 8px 10px;
+        border-radius: 9px;
+        border: 1px solid #2a313c;
+        background: #161b22;
+        color: var(--text);
+        font-size: 13px;
+        font-family: inherit;
+        line-height: 1.4;
+        overflow-y: auto;
+        transition: border-color 120ms;
+    }
+    #koda-input:focus { outline: none; border-color: var(--accent); }
+    #koda-send { flex-shrink: 0; height: 36px; padding: 0 14px; font-size: 13px; border-radius: 9px; }
+    #koda-send:disabled { opacity: .45; cursor: not-allowed; }
+</style>
+
+<button class="koda-btn" id="koda-toggle">✦ Koda</button>
+
+<div class="koda-panel" id="koda-panel">
+    <div class="koda-header">
+        <span>✦ Koda</span>
+        <button id="koda-close" type="button">✕</button>
+    </div>
+    <div class="koda-messages" id="koda-messages"></div>
+    <div class="koda-footer">
+        <textarea id="koda-input" placeholder="Preguntá algo..." rows="1"></textarea>
+        <button id="koda-send" type="button">Enviar</button>
+    </div>
+</div>
+
+<script>
+(function () {
+    const toggle = document.getElementById("koda-toggle");
+    const panel = document.getElementById("koda-panel");
+    const closeBtn = document.getElementById("koda-close");
+    const messagesEl = document.getElementById("koda-messages");
+    const inputEl = document.getElementById("koda-input");
+    const sendBtn = document.getElementById("koda-send");
+    let history = [];
+    let busy = false;
+
+    const getCookie = (n) => {
+        const v = `; ${document.cookie}`;
+        const p = v.split(`; ${n}=`);
+        return p.length === 2 ? p.pop().split(";").shift() : "";
+    };
+
+    const escHtml = (s) => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+
+    const renderMd = (text) => {
+        text = text.replace(/(?:^\|.+\|\n)+/gm, (block) => {
+            const lines = block.trim().split("\n").filter(l => l.trim());
+            if (lines.length < 2) return escHtml(block);
+            const row = (line, tag) => "<tr>" + line.split("|").slice(1,-1).map(c=>`<${tag}>${escHtml(c.trim())}</${tag}>`).join("") + "</tr>";
+            let h = "<table><thead>" + row(lines[0],"th") + "</thead><tbody>";
+            for (let i=2;i<lines.length;i++) h += row(lines[i],"td");
+            return h + "</tbody></table>";
+        });
+        text = text.replace(/\*\*(.+?)\*\*/g, (_,m) => `<strong>${escHtml(m)}</strong>`);
+        text = text.replace(/`([^`]+)`/g, (_,m) => `<code>${escHtml(m)}</code>`);
+        text = text.split(/(<table[\s\S]*?<\/table>|<strong>[\s\S]*?<\/strong>|<code>[\s\S]*?<\/code>)/g)
+            .map((chunk, i) => i%2===1 ? chunk : escHtml(chunk).replace(/\n/g,"<br>")).join("");
+        return text;
+    };
+
+    const addMsg = (role, text) => {
+        const div = document.createElement("div");
+        div.className = `koda-msg ${role}`;
+        if (role === "assistant") div.innerHTML = renderMd(text);
+        else div.textContent = text;
+        messagesEl.appendChild(div);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+    };
+
+    const showTyping = () => {
+        const div = document.createElement("div");
+        div.className = "koda-msg assistant koda-typing";
+        div.id = "koda-typing";
+        div.innerHTML = "<span></span><span></span><span></span>";
+        messagesEl.appendChild(div);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+    };
+    const hideTyping = () => { const el = document.getElementById("koda-typing"); if (el) el.remove(); };
+
+    toggle.addEventListener("click", () => panel.classList.toggle("open"));
+    closeBtn.addEventListener("click", () => panel.classList.remove("open"));
+
+    const send = async () => {
+        if (busy) return;
+        const text = inputEl.value.trim();
+        if (!text) return;
+        busy = true;
+        sendBtn.disabled = true;
+        inputEl.value = "";
+        inputEl.style.height = "auto";
+        addMsg("user", text);
+        history.push({ role: "user", content: text });
+        showTyping();
+        try {
+            const res = await fetch("{% url 'inventory_agent' %}", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-CSRFToken": getCookie("csrftoken") },
+                body: JSON.stringify({ messages: history }),
+            });
+            const data = await res.json();
+            hideTyping();
+            const reply = data.reply || "Sin respuesta.";
+            addMsg("assistant", reply);
+            history.push({ role: "assistant", content: reply });
+        } catch {
+            hideTyping();
+            addMsg("assistant", "Error al conectar. Intentá de nuevo.");
+        }
+        busy = false;
+        sendBtn.disabled = false;
+        inputEl.focus();
+    };
+
+    sendBtn.addEventListener("click", send);
+    inputEl.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
+    inputEl.addEventListener("input", () => {
+        inputEl.style.height = "auto";
+        inputEl.style.height = Math.min(inputEl.scrollHeight, 100) + "px";
+    });
+})();
+</script>
+{% endif %}
 </body>
 </html>
