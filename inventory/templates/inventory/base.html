@@ -352,6 +352,9 @@
 
 <script>
 (function () {
+    const STORAGE_KEY = "koda_history";
+    const TTL_MS = 24 * 60 * 60 * 1000; // 24 horas
+
     const toggle = document.getElementById("koda-toggle");
     const panel = document.getElementById("koda-panel");
     const closeBtn = document.getElementById("koda-close");
@@ -360,6 +363,22 @@
     const sendBtn = document.getElementById("koda-send");
     let history = [];
     let busy = false;
+
+    // Persistencia en localStorage con expiración de 24hs
+    const saveHistory = () => {
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify({ ts: Date.now(), history }));
+        } catch {}
+    };
+    const loadHistory = () => {
+        try {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            if (!raw) return [];
+            const { ts, history: h } = JSON.parse(raw);
+            if (Date.now() - ts > TTL_MS) { localStorage.removeItem(STORAGE_KEY); return []; }
+            return h || [];
+        } catch { return []; }
+    };
 
     const getCookie = (n) => {
         const v = `; ${document.cookie}`;
@@ -404,7 +423,14 @@
     };
     const hideTyping = () => { const el = document.getElementById("koda-typing"); if (el) el.remove(); };
 
-    toggle.addEventListener("click", () => panel.classList.toggle("open"));
+    // Cargar historial guardado al iniciar
+    history = loadHistory();
+    history.forEach(m => addMsg(m.role, m.content));
+
+    toggle.addEventListener("click", () => {
+        panel.classList.toggle("open");
+        if (panel.classList.contains("open")) messagesEl.scrollTop = messagesEl.scrollHeight;
+    });
     closeBtn.addEventListener("click", () => panel.classList.remove("open"));
 
     const send = async () => {
@@ -417,6 +443,7 @@
         inputEl.style.height = "auto";
         addMsg("user", text);
         history.push({ role: "user", content: text });
+        saveHistory();
         showTyping();
         try {
             const res = await fetch("{% url 'inventory_agent' %}", {
@@ -429,6 +456,7 @@
             const reply = data.reply || "Sin respuesta.";
             addMsg("assistant", reply);
             history.push({ role: "assistant", content: reply });
+            saveHistory();
         } catch {
             hideTyping();
             addMsg("assistant", "Error al conectar. Intentá de nuevo.");
