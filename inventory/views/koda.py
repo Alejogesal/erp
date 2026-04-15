@@ -859,6 +859,14 @@ def koda_chat(request):
 
     if not image_file:
         local_reply = _koda_try_local_response(message)
+        if not local_reply:
+            # Si el mensaje actual no tiene contexto suficiente (ej: "en general", "todo el año"),
+            # intentar combinarlo con la última pregunta del usuario en el historial.
+            history_check = request.session.get("koda_history", [])
+            user_msgs = [h["content"] for h in history_check if h.get("role") == "user"]
+            if user_msgs:
+                combined = f"{user_msgs[-1]} {message}"
+                local_reply = _koda_try_local_response(combined)
         if local_reply:
             history = request.session.get("koda_history", [])
             history = history[-8:]
@@ -912,12 +920,16 @@ def koda_chat(request):
     needs_confirmation = bool(result.get("needs_confirmation")) and bool(actions)
     reply = result.get("reply") or ""
     lowered = reply.lower()
-    if "no tengo acceso" in lowered or "no tengo acceso directo" in lowered or "no puedo acceder" in lowered:
-        reply = "Puedo gestionarlo. Confirmame los datos exactos para proceder."
+    # Si OpenAI dice que no tiene acceso a los datos, intentar responder localmente con el contexto combinado
+    if not actions and ("no tengo acceso" in lowered or "no puedo acceder" in lowered or "no tengo datos" in lowered):
+        history_check = request.session.get("koda_history", [])
+        user_msgs = [h["content"] for h in history_check if h.get("role") == "user"]
+        combined = " ".join(user_msgs[-2:] + [message]) if user_msgs else message
+        fallback = _koda_try_local_response(combined)
+        if fallback:
+            reply = fallback
     if actions and not needs_confirmation:
         needs_confirmation = True
-    if not actions and any(word in lowered for word in ("registr", "cre", "transfer", "actualic", "listo", "confirm")):
-        reply = "Puedo hacerlo, pero necesito confirmación y los datos exactos para ejecutar."
 
     if needs_confirmation:
         request.session["koda_pending"] = {
