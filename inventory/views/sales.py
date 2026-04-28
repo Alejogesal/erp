@@ -1211,11 +1211,27 @@ def sales_list(request):
                 messages.error(request, "Fecha hasta inválida.")
                 return redirect("inventory_sales_list")
         if search_query:
-            sales = sales.filter(
+            q_filter = (
                 Q(customer__name__icontains=search_query)
                 | Q(items__product__name__icontains=search_query)
                 | Q(items__product__sku__icontains=search_query)
-            ).distinct()
+                | Q(ml_order_id__icontains=search_query)
+            )
+            # Match invoice_number "00001-XXXXXXXX" by pk
+            pk_candidate = None
+            if "-" in search_query:
+                try:
+                    pk_candidate = int(search_query.rsplit("-", 1)[-1])
+                except ValueError:
+                    pass
+            if pk_candidate is None:
+                try:
+                    pk_candidate = int(search_query)
+                except ValueError:
+                    pass
+            if pk_candidate and pk_candidate > 0:
+                q_filter |= Q(pk=pk_candidate)
+            sales = sales.filter(q_filter).distinct()
         if include_comun and not include_ml:
             sales = sales.filter(warehouse__type=Warehouse.WarehouseType.COMUN)
         elif include_ml and not include_comun:
