@@ -135,8 +135,9 @@ def dashboard(request):
         else:
             profit = (sale.total or Decimal("0.00")) - cost_total
         if key not in customer_ranking_map:
-            customer_ranking_map[key] = {"customer_id": key, "name": name, "profit": Decimal("0.00"), "sale_count": 0}
+            customer_ranking_map[key] = {"customer_id": key, "name": name, "profit": Decimal("0.00"), "total": Decimal("0.00"), "sale_count": 0}
         customer_ranking_map[key]["profit"] += profit
+        customer_ranking_map[key]["total"] += sale.total or Decimal("0.00")
         customer_ranking_map[key]["sale_count"] += 1
 
     customer_ranking = sorted(

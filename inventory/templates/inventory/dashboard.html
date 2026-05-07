@@ -137,7 +137,8 @@
                 <tr>
                     <th>#</th>
                     <th>Cliente</th>
-                    <th>Ganancia</th>
+                    <th>Total comprado</th>
+                    <th>Margen</th>
                     <th>Ventas</th>
                 </tr>
             </thead>
@@ -146,6 +147,7 @@
                 <tr>
                     <td style="color:var(--muted); width:32px;">{{ forloop.counter }}</td>
                     <td><a href="{% url 'inventory_customer_history' item.customer_id %}">{{ item.name }}</a></td>
+                    <td>${{ item.total|latam_number:2 }}</td>
                     <td style="{% if item.profit < 0 %}color:var(--negative);{% endif %}">${{ item.profit|latam_number:2 }}</td>
                     <td>{{ item.sale_count }}</td>
                 </tr>
