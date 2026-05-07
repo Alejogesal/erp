@@ -97,66 +97,68 @@
     </div>
     </div>
 
-    <div class="card table-card">
-        <div class="card-title">Ranking por ganancia</div>
-    {% if ranking %}
-        <table>
-            <thead>
-                <tr>
-                    <th>SKU</th>
-                    <th>Producto</th>
-                    <th>Variedad</th>
-                    <th>Ganancia</th>
-                    <th>Cantidad vendida</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for item in ranking %}
-                <tr>
-                    <td>{{ item.sku }}</td>
-                    <td>{{ item.name }}</td>
-                    <td>{{ item.variant|default:"-" }}</td>
-                    <td>
-                        ${{ item.profit|latam_number:2 }}
-                        {% if item.zero_cost %}<span title="Costo $0 — ganancia = ingreso bruto" style="color:var(--negative); font-size:11px; margin-left:4px;">sin costo</span>{% endif %}
-                    </td>
-                    <td>{{ item.quantity|latam_number:2 }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-        {% else %}
-            <p class="subtitle">Aún no hay movimientos de venta.</p>
-        {% endif %}
-    </div>
-    <div class="card table-card" style="margin-top:16px;">
-        <div class="card-title">Clientes más rentables (Depósito Común)</div>
-        {% if customer_ranking %}
-        <table>
-            <thead>
-                <tr>
-                    <th>#</th>
-                    <th>Cliente</th>
-                    <th>Total comprado</th>
-                    <th>Margen</th>
-                    <th>Ventas</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for item in customer_ranking %}
-                <tr>
-                    <td style="color:var(--muted); width:32px;">{{ forloop.counter }}</td>
-                    <td><a href="{% url 'inventory_customer_history' item.customer_id %}">{{ item.name }}</a></td>
-                    <td>${{ item.total|latam_number:2 }}</td>
-                    <td style="{% if item.profit < 0 %}color:var(--negative);{% endif %}">${{ item.profit|latam_number:2 }}</td>
-                    <td>{{ item.sale_count }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-        {% else %}
-            <p class="subtitle">No hay ventas a clientes identificados en el período.</p>
-        {% endif %}
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px; align-items:start;">
+        <div class="card table-card">
+            <div class="card-title">Ranking por ganancia</div>
+            {% if ranking %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>SKU</th>
+                        <th>Producto</th>
+                        <th>Variedad</th>
+                        <th>Ganancia</th>
+                        <th>Cantidad vendida</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in ranking %}
+                    <tr>
+                        <td>{{ item.sku }}</td>
+                        <td>{{ item.name }}</td>
+                        <td>{{ item.variant|default:"-" }}</td>
+                        <td>
+                            ${{ item.profit|latam_number:2 }}
+                            {% if item.zero_cost %}<span title="Costo $0 — ganancia = ingreso bruto" style="color:var(--negative); font-size:11px; margin-left:4px;">sin costo</span>{% endif %}
+                        </td>
+                        <td>{{ item.quantity|latam_number:2 }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+                <p class="subtitle">Aún no hay movimientos de venta.</p>
+            {% endif %}
+        </div>
+        <div class="card table-card">
+            <div class="card-title">Clientes más rentables (Depósito Común)</div>
+            {% if customer_ranking %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Cliente</th>
+                        <th>Total comprado</th>
+                        <th>Margen</th>
+                        <th>Ventas</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in customer_ranking %}
+                    <tr>
+                        <td style="color:var(--muted); width:32px;">{{ forloop.counter }}</td>
+                        <td><a href="{% url 'inventory_customer_history' item.customer_id %}" style="color:#fff;">{{ item.name }}</a></td>
+                        <td>${{ item.total|latam_number:2 }}</td>
+                        <td style="{% if item.profit < 0 %}color:var(--negative);{% endif %}">${{ item.profit|latam_number:2 }}</td>
+                        <td>{{ item.sale_count }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+                <p class="subtitle">No hay ventas a clientes identificados en el período.</p>
+            {% endif %}
+        </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
