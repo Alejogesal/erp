@@ -129,6 +129,34 @@
             <p class="subtitle">Aún no hay movimientos de venta.</p>
         {% endif %}
     </div>
+    <div class="card table-card" style="margin-top:16px;">
+        <div class="card-title">Clientes más rentables (Depósito Común)</div>
+        {% if customer_ranking %}
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Cliente</th>
+                    <th>Ganancia</th>
+                    <th>Ventas</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in customer_ranking %}
+                <tr>
+                    <td style="color:var(--muted); width:32px;">{{ forloop.counter }}</td>
+                    <td><a href="{% url 'inventory_customer_history' item.customer_id %}">{{ item.name }}</a></td>
+                    <td style="{% if item.profit < 0 %}color:var(--negative);{% endif %}">${{ item.profit|latam_number:2 }}</td>
+                    <td>{{ item.sale_count }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+            <p class="subtitle">No hay ventas a clientes identificados en el período.</p>
+        {% endif %}
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <script>
         (function() {

@@ -122,6 +122,29 @@ def dashboard(request):
 
     ranking = sorted(ranking_map.values(), key=lambda item: item["profit"], reverse=True)
 
+    customer_ranking_map: dict = {}
+    for sale in sales_qs:
+        key = sale.customer_id
+        name = sale.customer.name if sale.customer else "Consumidor final"
+        cost_total = Decimal("0.00")
+        for item in sale.items.all():
+            cost_total += item.quantity * _resolve_cost(item)
+        if sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE:
+            net = (sale.total or Decimal("0.00")) - (sale.ml_commission_total or Decimal("0.00")) - (sale.ml_tax_total or Decimal("0.00"))
+            profit = net - cost_total
+        else:
+            profit = (sale.total or Decimal("0.00")) - cost_total
+        if key not in customer_ranking_map:
+            customer_ranking_map[key] = {"customer_id": key, "name": name, "profit": Decimal("0.00"), "sale_count": 0}
+        customer_ranking_map[key]["profit"] += profit
+        customer_ranking_map[key]["sale_count"] += 1
+
+    customer_ranking = sorted(
+        (r for r in customer_ranking_map.values() if r["customer_id"] is not None),
+        key=lambda x: x["profit"],
+        reverse=True,
+    )
+
     context = {
         "purchase_total": purchase_total,
         "sale_total": sale_total,
@@ -130,6 +153,7 @@ def dashboard(request):
         "margin_ml": margin_ml,
         "margin_comun": margin_comun,
         "ranking": ranking,
+        "customer_ranking": customer_ranking,
         "start_date": start_date,
         "end_date": end_date,
         "tax_total": tax_total,
