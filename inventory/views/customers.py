@@ -220,6 +220,30 @@ def customer_history_view(request, customer_id):
                 messages.success(request, "Nota de crédito registrada.")
                 return redirect("inventory_customer_history", customer_id=customer.id)
             messages.error(request, "Revisá los datos de la nota de crédito.")
+        elif action == "delete_payment":
+            payment_id = request.POST.get("payment_id")
+            if payment_id:
+                payment = CustomerPayment.objects.filter(id=payment_id, customer=customer).first()
+                if payment and payment.kind != CustomerPayment.Kind.CREDIT_NOTE:
+                    payment.delete()
+                    messages.success(request, "Pago eliminado.")
+                else:
+                    messages.error(request, "No se puede eliminar ese movimiento.")
+            return redirect("inventory_customer_history", customer_id=customer.id)
+        elif action == "update_payment":
+            payment_id = request.POST.get("payment_id")
+            if payment_id:
+                payment = CustomerPayment.objects.filter(id=payment_id, customer=customer).first()
+                if payment and payment.kind != CustomerPayment.Kind.CREDIT_NOTE:
+                    form = CustomerPaymentForm(request.POST, instance=payment, customer=customer)
+                    if form.is_valid():
+                        form.save()
+                        messages.success(request, "Pago actualizado.")
+                    else:
+                        messages.error(request, "Revisá los datos del pago.")
+                else:
+                    messages.error(request, "No se puede editar ese movimiento.")
+            return redirect("inventory_customer_history", customer_id=customer.id)
 
     sales = list(
         Sale.objects.filter(customer=customer)
@@ -274,6 +298,7 @@ def customer_history_view(request, customer_id):
                 "detail": f"Venta ({sale.warehouse.name})",
                 "debit": sale.total,
                 "credit": Decimal("0.00"),
+                "payment_id": None,
             }
         )
     for payment in payments:
@@ -306,6 +331,13 @@ def customer_history_view(request, customer_id):
                 "detail": " · ".join([part for part in detail_parts if part]),
                 "debit": debit,
                 "credit": credit,
+                "payment_id": payment.id,
+                "payment_amount": payment.amount,
+                "payment_method": payment.method,
+                "payment_kind": payment.kind,
+                "payment_paid_at": payment.paid_at.isoformat(),
+                "payment_sale_id": payment.sale_id or "",
+                "payment_notes": payment.notes or "",
             }
         )
 

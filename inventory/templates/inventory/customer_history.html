@@ -75,6 +75,7 @@
                 <th>Debe</th>
                 <th>Haber</th>
                 <th>Saldo</th>
+                <th></th>
             </tr>
         </thead>
         <tbody>
@@ -86,11 +87,92 @@
                 <td>${{ entry.debit|latam_number:2 }}</td>
                 <td>${{ entry.credit|latam_number:2 }}</td>
                 <td>${{ entry.balance|latam_number:2 }}</td>
+                <td style="white-space:nowrap;">
+                    {% if entry.payment_id and entry.payment_kind != "CREDIT_NOTE" %}
+                    <button type="button" class="pill"
+                        style="font-size:11px; padding:3px 8px;"
+                        onclick="openEditPayment({{ entry.payment_id }}, '{{ entry.payment_paid_at }}', '{{ entry.payment_amount }}', '{{ entry.payment_method }}', '{{ entry.payment_kind }}', '{{ entry.payment_sale_id }}', '{{ entry.payment_notes|escapejs }}')">Editar</button>
+                    <form method="post" style="display:inline;" onsubmit="return confirm('¿Borrar este pago?')">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="delete_payment">
+                        <input type="hidden" name="payment_id" value="{{ entry.payment_id }}">
+                        <button type="submit" class="pill" style="font-size:11px; padding:3px 8px; background:var(--negative); color:#fff;">Borrar</button>
+                    </form>
+                    {% endif %}
+                </td>
             </tr>
             {% empty %}
-            <tr><td colspan="6">No hay movimientos.</td></tr>
+            <tr><td colspan="7">No hay movimientos.</td></tr>
             {% endfor %}
         </tbody>
     </table>
 </div>
+
+<!-- Modal editar pago -->
+<div id="edit-payment-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:1000; align-items:center; justify-content:center;">
+    <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:12px; padding:24px; width:100%; max-width:420px; position:relative;">
+        <div style="font-weight:600; font-size:15px; margin-bottom:16px;">Editar pago</div>
+        <form method="post" id="edit-payment-form">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="update_payment">
+            <input type="hidden" name="payment_id" id="edit-payment-id">
+            <div style="display:flex; flex-direction:column; gap:12px;">
+                <div>
+                    <label style="font-size:13px;">Fecha</label>
+                    <input type="date" name="paid_at" id="edit-paid-at" style="width:100%;">
+                </div>
+                <div>
+                    <label style="font-size:13px;">Monto</label>
+                    <input type="number" name="amount" id="edit-amount" step="0.01" min="0.01" style="width:100%;">
+                </div>
+                <div>
+                    <label style="font-size:13px;">Método</label>
+                    <select name="method" id="edit-method" style="width:100%;">
+                        <option value="CASH">Efectivo</option>
+                        <option value="TRANSFER">Transferencia</option>
+                        <option value="CARD">Tarjeta</option>
+                        <option value="MERCADOPAGO">MercadoPago</option>
+                        <option value="OTHER">Otro</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-size:13px;">Tipo</label>
+                    <select name="kind" id="edit-kind" style="width:100%;">
+                        <option value="PAYMENT">Pago</option>
+                        <option value="REFUND">Devolución/Ajuste</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-size:13px;">Notas</label>
+                    <input type="text" name="notes" id="edit-notes" style="width:100%;">
+                </div>
+                <input type="hidden" name="sale" id="edit-sale-id">
+            </div>
+            <div style="display:flex; gap:8px; margin-top:20px; justify-content:flex-end;">
+                <button type="button" onclick="closeEditPayment()" style="background:var(--border);">Cancelar</button>
+                <button type="submit">Guardar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function openEditPayment(id, paidAt, amount, method, kind, saleId, notes) {
+    document.getElementById('edit-payment-id').value = id;
+    document.getElementById('edit-paid-at').value = paidAt;
+    document.getElementById('edit-amount').value = amount;
+    document.getElementById('edit-method').value = method;
+    document.getElementById('edit-kind').value = kind;
+    document.getElementById('edit-sale-id').value = saleId;
+    document.getElementById('edit-notes').value = notes;
+    var modal = document.getElementById('edit-payment-modal');
+    modal.style.display = 'flex';
+}
+function closeEditPayment() {
+    document.getElementById('edit-payment-modal').style.display = 'none';
+}
+document.getElementById('edit-payment-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeEditPayment();
+});
+</script>
 {% endblock %}
