@@ -115,6 +115,12 @@
                 <td class="totals-amount">${{ tax_total|latam_number:2 }}</td>
             </tr>
             {% endif %}
+            {% if sale.shipping_cost %}
+            <tr class="totals-row">
+                <td colspan="4" class="totals-label">Costo de envío</td>
+                <td class="totals-amount">${{ sale.shipping_cost|latam_number:2 }}</td>
+            </tr>
+            {% endif %}
             <tr class="totals-row">
                 <td colspan="4" class="totals-label">Total</td>
                 <td class="totals-amount">${{ total|latam_number:2 }}</td>

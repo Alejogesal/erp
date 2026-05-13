@@ -253,6 +253,7 @@ def sale_edit(request, sale_id: int):
             extra_discount_percent = header_form.cleaned_data.get("descuento_total") or Decimal("0.00")
             comision_ml = header_form.cleaned_data.get("comision_ml") or Decimal("0.00")
             impuestos_ml = header_form.cleaned_data.get("impuestos_ml") or Decimal("0.00")
+            costo_envio = header_form.cleaned_data.get("costo_envio") or Decimal("0.00")
             delivery_status = header_form.cleaned_data.get("delivery_status") or Sale.DeliveryStatus.NOT_DELIVERED
             if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE:
                 customer = None
@@ -304,6 +305,7 @@ def sale_edit(request, sale_id: int):
                     sale.ml_tax_total = (
                         impuestos_ml if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE else Decimal("0.00")
                     )
+                    sale.shipping_cost = costo_envio
                     update_fields = [
                         "customer",
                         "warehouse",
@@ -311,6 +313,7 @@ def sale_edit(request, sale_id: int):
                         "delivery_status",
                         "ml_commission_total",
                         "ml_tax_total",
+                        "shipping_cost",
                     ]
                     if sale_date:
                         created_at = datetime.combine(sale_date, time(12, 0))
@@ -473,6 +476,7 @@ def sale_edit(request, sale_id: int):
                 "descuento_total": discount_percent,
                 "comision_ml": sale.ml_commission_total or Decimal("0.00"),
                 "impuestos_ml": sale.ml_tax_total or Decimal("0.00"),
+                "costo_envio": sale.shipping_cost or Decimal("0.00"),
             }
         )
         items = list(sale.items.select_related("variant", "product"))
@@ -1022,6 +1026,7 @@ def sales_list(request):
             extra_discount_percent = header_form.cleaned_data.get("descuento_total") or Decimal("0.00")
             comision_ml = header_form.cleaned_data.get("comision_ml") or Decimal("0.00")
             impuestos_ml = header_form.cleaned_data.get("impuestos_ml") or Decimal("0.00")
+            costo_envio = header_form.cleaned_data.get("costo_envio") or Decimal("0.00")
             delivery_status = header_form.cleaned_data.get("delivery_status") or Sale.DeliveryStatus.NOT_DELIVERED
             if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE:
                 customer = None
@@ -1063,6 +1068,7 @@ def sales_list(request):
                             user=request.user,
                             ml_commission_total=comision_ml if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE else Decimal("0.00"),
                             ml_tax_total=impuestos_ml if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE else Decimal("0.00"),
+                            shipping_cost=costo_envio,
                         )
                         if sale_date:
                             created_at = datetime.combine(sale_date, time(12, 0))
@@ -1251,6 +1257,7 @@ def sales_list(request):
                 cost_total += item.quantity * cost_unit
             commission_total = sale.ml_commission_total or Decimal("0.00")
             tax_total = sale.ml_tax_total or Decimal("0.00")
+            shipping = sale.shipping_cost or Decimal("0.00")
             is_ml_sale = (
                 sale.ml_order_id
                 or sale.reference.startswith("ML ORDER")
@@ -1259,9 +1266,9 @@ def sales_list(request):
             )
             if is_ml_sale:
                 net_total = (sale.total or Decimal("0.00")) - commission_total - tax_total
-                sale.margin_total = net_total - cost_total
+                sale.margin_total = net_total - cost_total - shipping
             else:
-                sale.margin_total = (sale.total or Decimal("0.00")) - cost_total
+                sale.margin_total = (sale.total or Decimal("0.00")) - cost_total - shipping
         sales_comun = [sale for sale in sales_list_qs if sale.warehouse.type == Warehouse.WarehouseType.COMUN]
         sales_ml = [sale for sale in sales_list_qs if sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE]
         total_ml_count = sales.filter(warehouse__type=Warehouse.WarehouseType.MERCADOLIBRE).count()

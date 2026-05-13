@@ -156,6 +156,13 @@ class SaleHeaderForm(forms.Form):
         decimal_places=2,
         required=False,
     )
+    costo_envio = forms.DecimalField(
+        label="Costo de envío",
+        min_value=Decimal("0.00"),
+        decimal_places=2,
+        required=False,
+        initial=Decimal("0.00"),
+    )
 
 
 class SaleItemForm(forms.Form):
