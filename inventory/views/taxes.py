@@ -7,7 +7,7 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import redirect, render
 from django.utils import timezone
 
-from ..models import PurchaseItem, SaleItem, TaxExpense
+from ..models import PurchaseItem, SaleItem, TaxExpense, Warehouse
 from .forms import TaxExpenseForm
 
 
@@ -54,17 +54,27 @@ def taxes_view(request):
         .select_related("purchase", "product")
         .order_by("purchase__created_at", "purchase__id")
     )
-    sale_items_qs = (
-        SaleItem.objects.filter(vat_percent__gt=0)
+    # ML: always 21% | Common: use stored vat_percent (only > 0)
+    ml_items_qs = (
+        SaleItem.objects
+        .filter(sale__warehouse__type=Warehouse.WarehouseType.MERCADOLIBRE)
+        .select_related("sale", "sale__warehouse", "product")
+        .order_by("sale__created_at", "sale__id")
+    )
+    common_items_qs = (
+        SaleItem.objects
+        .filter(sale__warehouse__type=Warehouse.WarehouseType.COMUN, vat_percent__gt=0)
         .select_related("sale", "sale__warehouse", "product")
         .order_by("sale__created_at", "sale__id")
     )
     if start_dt:
         purchase_items_qs = purchase_items_qs.filter(purchase__created_at__gte=start_dt)
-        sale_items_qs = sale_items_qs.filter(sale__created_at__gte=start_dt)
+        ml_items_qs = ml_items_qs.filter(sale__created_at__gte=start_dt)
+        common_items_qs = common_items_qs.filter(sale__created_at__gte=start_dt)
     if end_dt:
         purchase_items_qs = purchase_items_qs.filter(purchase__created_at__lte=end_dt)
-        sale_items_qs = sale_items_qs.filter(sale__created_at__lte=end_dt)
+        ml_items_qs = ml_items_qs.filter(sale__created_at__lte=end_dt)
+        common_items_qs = common_items_qs.filter(sale__created_at__lte=end_dt)
 
     credito_rows = []
     credito_total = Decimal("0.00")
@@ -83,11 +93,23 @@ def taxes_view(request):
 
     debito_rows = []
     debito_total = Decimal("0.00")
-    for item in sale_items_qs:
-        vat_amount = (item.line_total * item.vat_percent / 100).quantize(Decimal("0.01"))
+    for item in ml_items_qs:
+        vat_amount = (item.line_total * Decimal("21") / 100).quantize(Decimal("0.01"))
         debito_rows.append({
             "date": item.sale.created_at,
             "comprobante": item.sale.ml_order_id or item.sale.invoice_number,
+            "deposito": item.sale.warehouse.name,
+            "product": item.product.name,
+            "net": item.line_total,
+            "vat_percent": Decimal("21"),
+            "vat_amount": vat_amount,
+        })
+        debito_total += vat_amount
+    for item in common_items_qs:
+        vat_amount = (item.line_total * item.vat_percent / 100).quantize(Decimal("0.01"))
+        debito_rows.append({
+            "date": item.sale.created_at,
+            "comprobante": item.sale.invoice_number,
             "deposito": item.sale.warehouse.name,
             "product": item.product.name,
             "net": item.line_total,
@@ -95,6 +117,7 @@ def taxes_view(request):
             "vat_amount": vat_amount,
         })
         debito_total += vat_amount
+    debito_rows.sort(key=lambda x: x["date"])
 
     posicion_iva = debito_total - credito_total
 

@@ -102,9 +102,9 @@
     </table>
     </div>
 </div>
-<div class="card" style="margin-top:16px;">
+<div class="card" style="margin-top:16px;" id="iva-section">
     <div class="card-title">Posición IVA</div>
-    <form method="get" autocomplete="off" style="margin-bottom:16px;">
+    <form method="get" action="#iva-section" autocomplete="off" style="margin-bottom:16px;">
         <div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
             <div>
                 <label style="font-size:13px; display:block; margin-bottom:4px;">Desde</label>
@@ -242,5 +242,16 @@
         detail.style.display = visible ? "none" : "block";
         btn.textContent = visible ? "Ver detalle" : "Ocultar detalle";
     }
+
+    // Auto-abrir detalle IVA si hay filtro activo
+    (function() {
+        var params = new URLSearchParams(window.location.search);
+        if (params.get("iva_start") || params.get("iva_end")) {
+            var detail = document.getElementById("iva-detail");
+            var btn = document.getElementById("iva-toggle-btn");
+            if (detail) detail.style.display = "block";
+            if (btn) btn.textContent = "Ocultar detalle";
+        }
+    })();
 </script>
 {% endblock %}
