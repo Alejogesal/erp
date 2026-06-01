@@ -436,6 +436,11 @@ class SupplierPaymentForm(forms.ModelForm):
 class TaxExpenseForm(forms.ModelForm):
     class Meta:
         model = TaxExpense
-        fields = ["description", "amount", "paid_at"]
-        labels = {"description": "Descripción", "amount": "Monto", "paid_at": "Fecha"}
+        fields = ["description", "amount", "vat_amount", "paid_at"]
+        labels = {
+            "description": "Descripción",
+            "amount": "Monto (sin IVA)",
+            "vat_amount": "IVA $ (crédito fiscal)",
+            "paid_at": "Fecha",
+        }
         widgets = {"paid_at": forms.DateInput(attrs={"type": "date"})}

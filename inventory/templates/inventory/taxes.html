@@ -57,7 +57,7 @@
 </style>
 
 <div class="card" style="margin-bottom:16px;">
-    <div class="card-title">Agregar impuesto</div>
+    <div class="card-title">Agregar gasto / insumo / impuesto</div>
     <form method="post">
         {% csrf_token %}
         {{ tax_form.as_p }}
@@ -77,6 +77,7 @@
                 <th>Fecha</th>
                 <th>Descripción</th>
                 <th>Monto</th>
+                <th>IVA $</th>
                 <th>Acciones</th>
             </tr>
         </thead>
@@ -86,6 +87,7 @@
                 <td>{{ tax.paid_at|date:"d/m/Y" }}</td>
                 <td>{{ tax.description }}</td>
                 <td>${{ tax.amount|latam_number:2 }}</td>
+                <td>{% if tax.vat_amount %}<strong>${{ tax.vat_amount|latam_number:2 }}</strong>{% else %}-{% endif %}</td>
                 <td>
                     <form method="post" style="display:inline;">
                         {% csrf_token %}
@@ -96,7 +98,7 @@
                 </td>
             </tr>
             {% empty %}
-            <tr><td colspan="4">Aún no hay gastos cargados.</td></tr>
+            <tr><td colspan="5">Aún no hay gastos cargados.</td></tr>
             {% endfor %}
         </tbody>
     </table>
@@ -180,14 +182,14 @@
             </div>
 
             <div class="card table-card">
-                <div class="card-title">Crédito fiscal — compras</div>
+                <div class="card-title">Crédito fiscal — compras y gastos</div>
                 {% if credito_rows %}
                 <table>
                     <thead>
                         <tr>
                             <th>Fecha</th>
-                            <th>Comprobante</th>
-                            <th>Producto</th>
+                            <th>Origen</th>
+                            <th>Descripción</th>
                             <th>Neto</th>
                             <th>IVA %</th>
                             <th>IVA $</th>
@@ -197,10 +199,10 @@
                         {% for row in credito_rows %}
                         <tr>
                             <td>{{ row.date|date:"d/m/Y" }}</td>
-                            <td>{{ row.comprobante }}</td>
+                            <td style="color:var(--muted); font-size:12px;">{% if row.source == "gasto" %}Gasto{% else %}Compra{% endif %}</td>
                             <td>{{ row.product }}</td>
                             <td>${{ row.net|latam_number:2 }}</td>
-                            <td>{{ row.vat_percent|latam_number:0 }}%</td>
+                            <td>{% if row.vat_percent %}{{ row.vat_percent|latam_number:0 }}%{% else %}-{% endif %}</td>
                             <td><strong>${{ row.vat_amount|latam_number:2 }}</strong></td>
                         </tr>
                         {% endfor %}
@@ -213,7 +215,7 @@
                     </tfoot>
                 </table>
                 {% else %}
-                <p class="subtitle">No hay compras con IVA en el período.</p>
+                <p class="subtitle">No hay compras ni gastos con IVA en el período.</p>
                 {% endif %}
             </div>
         </div>

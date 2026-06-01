@@ -88,8 +88,29 @@ def taxes_view(request):
             "net": net,
             "vat_percent": item.vat_percent,
             "vat_amount": vat_amount,
+            "source": "compra",
         })
         credito_total += vat_amount
+
+    # IVA de gastos/impuestos
+    expenses_with_vat = TaxExpense.objects.filter(vat_amount__gt=0).order_by("paid_at", "id")
+    if start_dt:
+        from django.utils.timezone import make_aware
+        expenses_with_vat = expenses_with_vat.filter(paid_at__gte=start_dt.date())
+    if end_dt:
+        expenses_with_vat = expenses_with_vat.filter(paid_at__lte=end_dt.date())
+    for expense in expenses_with_vat:
+        credito_rows.append({
+            "date": expense.paid_at,
+            "comprobante": "-",
+            "product": expense.description,
+            "net": expense.amount,
+            "vat_percent": None,
+            "vat_amount": expense.vat_amount,
+            "source": "gasto",
+        })
+        credito_total += expense.vat_amount
+    credito_rows.sort(key=lambda x: x["date"] if hasattr(x["date"], "date") else x["date"])
 
     debito_rows = []
     debito_total = Decimal("0.00")
