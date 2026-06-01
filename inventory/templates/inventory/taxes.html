@@ -1,9 +1,9 @@
 {% extends "inventory/base.html" %}
 {% load latam_numbers %}
-{% block title %}Impuestos{% endblock %}
+{% block title %}Impuestos / Gastos{% endblock %}
 {% block content %}
-<h1>Impuestos</h1>
-<p class="subtitle">Registrá los impuestos pagados para descontarlos del margen.</p>
+<h1>Impuestos / Gastos</h1>
+<p class="subtitle">Registrá impuestos, honorarios y otros gastos para descontarlos del margen.</p>
 
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 <style>
@@ -97,11 +97,137 @@
         </tbody>
     </table>
 </div>
+<div class="card" style="margin-top:16px;">
+    <div class="card-title">Posición IVA</div>
+    <form method="get" autocomplete="off" style="margin-bottom:16px;">
+        <div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
+            <div>
+                <label style="font-size:13px; display:block; margin-bottom:4px;">Desde</label>
+                <input type="date" name="iva_start" value="{{ iva_start }}" style="width:160px;">
+            </div>
+            <div>
+                <label style="font-size:13px; display:block; margin-bottom:4px;">Hasta</label>
+                <input type="date" name="iva_end" value="{{ iva_end }}" style="width:160px;">
+            </div>
+            <button type="submit">Aplicar</button>
+        </div>
+    </form>
+
+    <div class="cards" style="margin-bottom:16px;">
+        <div class="card">
+            <div class="card-title">Débito fiscal (ventas)</div>
+            <p class="value">${{ debito_total|latam_number:2 }}</p>
+        </div>
+        <div class="card">
+            <div class="card-title">Crédito fiscal (compras)</div>
+            <p class="value">${{ credito_total|latam_number:2 }}</p>
+        </div>
+        <div class="card">
+            <div class="card-title">Posición neta {% if posicion_iva > 0 %}(a pagar){% else %}(a favor){% endif %}</div>
+            <p class="value" style="color:{% if posicion_iva > 0 %}var(--negative){% else %}var(--positive){% endif %};">
+                ${{ posicion_iva|latam_number:2 }}
+            </p>
+        </div>
+    </div>
+
+    <button type="button" id="iva-toggle-btn" onclick="toggleIvaDetail()">Ver detalle</button>
+
+    <div id="iva-detail" style="display:none; margin-top:16px;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:start;">
+            <div class="card table-card">
+                <div class="card-title">Débito fiscal — ventas</div>
+                {% if debito_rows %}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Fecha</th>
+                            <th>Comprobante</th>
+                            <th>Depósito</th>
+                            <th>Producto</th>
+                            <th>Neto</th>
+                            <th>IVA %</th>
+                            <th>IVA $</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in debito_rows %}
+                        <tr>
+                            <td>{{ row.date|date:"d/m/Y" }}</td>
+                            <td>{{ row.comprobante }}</td>
+                            <td>{{ row.deposito }}</td>
+                            <td>{{ row.product }}</td>
+                            <td>${{ row.net|latam_number:2 }}</td>
+                            <td>{{ row.vat_percent|latam_number:0 }}%</td>
+                            <td><strong>${{ row.vat_amount|latam_number:2 }}</strong></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot>
+                        <tr>
+                            <td colspan="6" style="text-align:right; font-weight:600;">Total</td>
+                            <td><strong>${{ debito_total|latam_number:2 }}</strong></td>
+                        </tr>
+                    </tfoot>
+                </table>
+                {% else %}
+                <p class="subtitle">No hay ventas con IVA en el período.</p>
+                {% endif %}
+            </div>
+
+            <div class="card table-card">
+                <div class="card-title">Crédito fiscal — compras</div>
+                {% if credito_rows %}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Fecha</th>
+                            <th>Comprobante</th>
+                            <th>Producto</th>
+                            <th>Neto</th>
+                            <th>IVA %</th>
+                            <th>IVA $</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in credito_rows %}
+                        <tr>
+                            <td>{{ row.date|date:"d/m/Y" }}</td>
+                            <td>{{ row.comprobante }}</td>
+                            <td>{{ row.product }}</td>
+                            <td>${{ row.net|latam_number:2 }}</td>
+                            <td>{{ row.vat_percent|latam_number:0 }}%</td>
+                            <td><strong>${{ row.vat_amount|latam_number:2 }}</strong></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot>
+                        <tr>
+                            <td colspan="5" style="text-align:right; font-weight:600;">Total</td>
+                            <td><strong>${{ credito_total|latam_number:2 }}</strong></td>
+                        </tr>
+                    </tfoot>
+                </table>
+                {% else %}
+                <p class="subtitle">No hay compras con IVA en el período.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script>
     (function() {
         if (!window.flatpickr) return;
         flatpickr("#id_paid_at", { dateFormat: "Y-m-d", allowInput: true });
     })();
+
+    function toggleIvaDetail() {
+        var detail = document.getElementById("iva-detail");
+        var btn = document.getElementById("iva-toggle-btn");
+        var visible = detail.style.display !== "none";
+        detail.style.display = visible ? "none" : "block";
+        btn.textContent = visible ? "Ver detalle" : "Ocultar detalle";
+    }
 </script>
 {% endblock %}
