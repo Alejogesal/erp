@@ -66,7 +66,11 @@
 </div>
 
 <div class="card table-card">
-    <div class="card-title">Historial de impuestos</div>
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+        <div class="card-title" style="margin-bottom:0;">Historial de gastos e impuestos</div>
+        <button type="button" id="gastos-toggle-btn" onclick="toggleGastos()">Cargar historial</button>
+    </div>
+    <div id="gastos-detail" style="display:none;">
     <table>
         <thead>
             <tr>
@@ -87,15 +91,16 @@
                         {% csrf_token %}
                         <input type="hidden" name="action" value="delete_tax">
                         <input type="hidden" name="tax_id" value="{{ tax.id }}">
-                        <button type="submit" class="danger" onclick="return confirm('¿Eliminar impuesto?');">Eliminar</button>
+                        <button type="submit" class="danger" onclick="return confirm('¿Eliminar?');">Eliminar</button>
                     </form>
                 </td>
             </tr>
             {% empty %}
-            <tr><td colspan="4">Aún no hay impuestos cargados.</td></tr>
+            <tr><td colspan="4">Aún no hay gastos cargados.</td></tr>
             {% endfor %}
         </tbody>
     </table>
+    </div>
 </div>
 <div class="card" style="margin-top:16px;">
     <div class="card-title">Posición IVA</div>
@@ -221,6 +226,14 @@
         if (!window.flatpickr) return;
         flatpickr("#id_paid_at", { dateFormat: "Y-m-d", allowInput: true });
     })();
+
+    function toggleGastos() {
+        var detail = document.getElementById("gastos-detail");
+        var btn = document.getElementById("gastos-toggle-btn");
+        var visible = detail.style.display !== "none";
+        detail.style.display = visible ? "none" : "block";
+        btn.textContent = visible ? "Cargar historial" : "Ocultar historial";
+    }
 
     function toggleIvaDetail() {
         var detail = document.getElementById("iva-detail");
