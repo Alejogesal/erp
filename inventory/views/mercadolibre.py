@@ -83,10 +83,11 @@ def mercadolibre_callback(request):
     connection.access_token = access_token
     connection.refresh_token = refresh_token
     connection.expires_at = timezone.now() + timedelta(seconds=expires_in) if expires_in else None
+    connection.last_sync_at = timezone.now()
     profile = ml.get_user_profile(access_token)
     connection.ml_user_id = str(profile.get("id", "") or "")
     connection.nickname = profile.get("nickname", "") or ""
-    connection.save(update_fields=["access_token", "refresh_token", "expires_at", "ml_user_id", "nickname"])
+    connection.save(update_fields=["access_token", "refresh_token", "expires_at", "last_sync_at", "ml_user_id", "nickname"])
 
     messages.success(request, "MercadoLibre conectado correctamente.")
     return redirect("inventory_mercadolibre_dashboard")

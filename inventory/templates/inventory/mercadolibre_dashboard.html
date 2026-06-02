@@ -14,18 +14,18 @@
         {% if connection and connection.access_token %}
             <p style="font-size:15px;"><strong>{{ connection.nickname|default:"Cuenta ML" }}</strong></p>
             {% if sync_age_minutes is not None %}
-                {% if sync_age_minutes < 15 %}
+                {% if sync_age_minutes < 30 %}
                     <p style="color: var(--positive); font-weight:600; margin-top:8px;">
                         &#10003; Auto-sync activo
                         <span style="font-weight:400; color:var(--muted); font-size:12px;">— hace {{ sync_age_minutes }} min</span>
                     </p>
-                {% elif sync_age_minutes < 60 %}
+                {% elif sync_age_minutes < 120 %}
                     <p style="color: #f0ad4e; font-weight:600; margin-top:8px;">
                         &#9888; Último sync hace {{ sync_age_minutes }} min
                     </p>
                 {% else %}
                     <p style="color: var(--negative); font-weight:600; margin-top:8px;">
-                        &#10007; Sin sync hace {{ sync_age_minutes }} min
+                        &#10007; Sin sync hace {{ sync_age_minutes }} min — el sync automático no está corriendo
                     </p>
                     {% if not missing_credentials %}
                     <a href="{% url 'inventory_mercadolibre_connect' %}" style="display:inline-block; margin-top:8px; font-size:13px; color:var(--accent);">Reautorizar con MercadoLibre</a>
@@ -37,7 +37,7 @@
                 <a href="{% url 'inventory_mercadolibre_connect' %}" style="display:inline-block; margin-top:8px; font-size:13px; color:var(--accent);">Autorizar conexión</a>
                 {% endif %}
             {% endif %}
-            {% if sync_age_minutes is not None and sync_age_minutes < 60 %}
+            {% if sync_age_minutes is not None and sync_age_minutes < 120 %}
             <p style="color:var(--muted); font-size:11px; margin-top:10px;">
                 El token se renueva solo. <a href="{% url 'inventory_mercadolibre_connect' %}" style="color:var(--muted);">Reautorizar</a> solo si hay errores.
             </p>
