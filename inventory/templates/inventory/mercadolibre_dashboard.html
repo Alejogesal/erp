@@ -348,9 +348,9 @@
             <tr>
                 <th>Item</th>
                 <th>Producto (match)</th>
-                <th>Stock ML</th>
-                <th>Stock ERP</th>
-                <th>Precio ERP</th>
+                <th title="Stock publicado en ML (se actualiza cada 5 min)">Stock ML</th>
+                <th title="Stock en depósito COMUN del ERP">Stock ERP</th>
+                <th title="Precio calculado: costo × margen del ERP">Precio ERP</th>
                 <th>Estado</th>
                 <th></th>
             </tr>
@@ -423,7 +423,9 @@
                 </td>
                 <td>{{ item.status }}</td>
                 <td>
-                    {% if item.product and item.erp_price %}
+                    {% if item.logistic_type == "fulfillment" %}
+                        <span style="color:var(--muted); font-size:11px;" title="Stock Full gestionado por ML — no editable vía API">Full</span>
+                    {% elif item.product and item.erp_price %}
                     <form method="post" style="display:inline;">
                         {% csrf_token %}
                         <input type="hidden" name="action" value="push_price_ml">

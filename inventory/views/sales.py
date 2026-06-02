@@ -59,7 +59,8 @@ def _push_products_stock_to_ml(products, user):
         if product.id in seen:
             continue
         seen.add(product.id)
-        ml_items = MercadoLibreItem.objects.filter(product=product)
+        # Skip Full/fulfillment items — ML manages their stock
+        ml_items = MercadoLibreItem.objects.filter(product=product).exclude(logistic_type="fulfillment")
         if not ml_items.exists():
             continue
         stock = Stock.objects.filter(product=product, warehouse=comun_wh).first()
