@@ -283,6 +283,12 @@
 {% endif %}
 
 {% if open_claims %}
+{% else %}
+<div class="card" style="border:1px solid #2a3a2a; margin-bottom:16px;">
+    <div class="card-title" style="color:#2ecc71;">✓ Sin reclamos abiertos</div>
+</div>
+{% endif %}
+{% if open_claims %}
 <div class="card table-card" style="border:1px solid #c0392b; margin-bottom:16px;">
     <div class="card-title" style="color:#c0392b;">⚠ Reclamos abiertos — {{ open_claims|length }}</div>
     <table style="font-size:13px; width:100%; border-collapse:collapse;">
