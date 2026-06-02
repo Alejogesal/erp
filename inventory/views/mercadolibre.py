@@ -89,7 +89,19 @@ def mercadolibre_callback(request):
     connection.nickname = profile.get("nickname", "") or ""
     connection.save(update_fields=["access_token", "refresh_token", "expires_at", "last_sync_at", "ml_user_id", "nickname"])
 
-    messages.success(request, "MercadoLibre conectado correctamente.")
+    # Auto-sync last 60 days to recover any missed orders (especially those that came
+    # via orders_v2 webhook topic which the old code ignored)
+    try:
+        result = ml.sync_recent_orders(connection, request.user, days=60)
+        created = result.get("created", 0)
+        updated = result.get("updated", 0)
+        messages.success(
+            request,
+            f"MercadoLibre conectado. Sincronización automática: {created} órdenes nuevas, {updated} actualizadas."
+        )
+    except Exception:
+        messages.success(request, "MercadoLibre conectado correctamente.")
+
     return redirect("inventory_mercadolibre_dashboard")
 
 

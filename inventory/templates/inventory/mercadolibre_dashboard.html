@@ -86,14 +86,22 @@
         <p><strong>Ventas:</strong> {{ db_metrics.month.count }}</p>
         <p><strong>Facturación:</strong> ${{ db_metrics.month.revenue|latam_number:2 }}</p>
         <p><strong>Comisión ML:</strong> ${{ db_metrics.month.commission|latam_number:2 }}</p>
+        {% if sync_age_minutes is not None and sync_age_minutes > 120 %}
+        <p style="color:#f0ad4e; font-size:11px; margin-top:8px;">⚠ Puede haber órdenes faltantes — el sync estuvo inactivo</p>
+        {% else %}
         <p style="color:var(--muted); font-size:11px; margin-top:8px;">Datos del ERP (ventas sincronizadas)</p>
+        {% endif %}
     </div>
     <div class="card">
         <div class="card-title">Últimos 30 días</div>
         <p><strong>Ventas:</strong> {{ db_metrics.days30.count }}</p>
         <p><strong>Facturación:</strong> ${{ db_metrics.days30.revenue|latam_number:2 }}</p>
         <p><strong>Comisión ML:</strong> ${{ db_metrics.days30.commission|latam_number:2 }}</p>
+        {% if sync_age_minutes is not None and sync_age_minutes > 120 %}
+        <p style="color:#f0ad4e; font-size:11px; margin-top:8px;">⚠ Puede haber órdenes faltantes — el sync estuvo inactivo</p>
+        {% else %}
         <p style="color:var(--muted); font-size:11px; margin-top:8px;">Datos del ERP (ventas sincronizadas)</p>
+        {% endif %}
     </div>
     {% endif %}
 </div>
