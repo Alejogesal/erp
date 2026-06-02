@@ -337,7 +337,7 @@ def get_recent_order_ids(user_id: str, access_token: str, days: int = 30, date_f
     limit = 50
     offset = 0
     max_orders_env = os.environ.get("ML_ORDERS_MAX", "")
-    max_orders = int(max_orders_env) if max_orders_env.isdigit() else 200
+    max_orders = int(max_orders_env) if max_orders_env.isdigit() else 1000
     order_ids: list[str] = []
     while True:
         params = {
