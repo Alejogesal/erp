@@ -502,9 +502,24 @@ def mercadolibre_dashboard(request):
             cost = item.product.avg_cost or _Dec("0")
             margin = item.product.margin_consumer or _Dec("0")
             item.erp_price = (cost * (1 + margin / 100)).quantize(_Dec("0.01"))
+            item.min_stock = item.product.min_stock
         else:
             item.erp_stock = None
             item.erp_price = None
+            item.min_stock = None
+        # Semaphore: 'red' | 'yellow' | 'green' | 'gray'
+        avail = item.available_quantity
+        min_s = getattr(item, "min_stock", None)
+        if item.status == "closed":
+            item.semaphore = "gray"
+        elif avail == 0:
+            item.semaphore = "red"
+        elif min_s is not None and avail < min_s:
+            item.semaphore = "yellow"
+        elif min_s is not None:
+            item.semaphore = "green"
+        else:
+            item.semaphore = "gray"
 
     products = Product.objects.order_by("name")
     recent_cutoff = timezone.now() - timedelta(days=30)

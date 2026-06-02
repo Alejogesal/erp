@@ -411,14 +411,18 @@
             {% for item in items %}
             <tr data-status="{{ item.status }}" data-recent="{% if item.last_sold_at and item.last_sold_at >= recent_cutoff %}1{% else %}0{% endif %}">
                 <td>
-                    {% if item.permalink %}
-                    <a class="ml-item-link" href="{{ item.permalink }}" target="_blank" rel="noreferrer">
+                    <div style="display:flex; align-items:center; gap:7px;">
+                        <span style="flex-shrink:0; width:10px; height:10px; border-radius:50%; display:inline-block;
+                            background:{% if item.semaphore == 'red' %}#e74c3c{% elif item.semaphore == 'yellow' %}#f39c12{% elif item.semaphore == 'green' %}#2ecc71{% else %}#555{% endif %};"
+                            title="{% if item.semaphore == 'red' %}Sin stock{% elif item.semaphore == 'yellow' %}Stock bajo{% elif item.semaphore == 'green' %}Stock OK{% else %}Sin umbral configurado{% endif %}">
+                        </span>
+                        {% if item.permalink %}
+                        <a class="ml-item-link" href="{{ item.permalink }}" target="_blank" rel="noreferrer">{{ item.title }}</a>
+                        {% else %}
                         {{ item.title }}
-                    </a>
-                    {% else %}
-                    {{ item.title }}
-                    {% endif %}
-                    <div style="font-size:11px; color:var(--muted); margin-top:2px; font-family:monospace;">{{ item.item_id }}</div>
+                        {% endif %}
+                    </div>
+                    <div style="font-size:11px; color:var(--muted); margin-top:2px; font-family:monospace; padding-left:17px;">{{ item.item_id }}</div>
                 </td>
                 <td>
                     {% if item.product %}
