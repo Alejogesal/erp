@@ -158,6 +158,12 @@
             <input type="hidden" name="action" value="recost_ml_sales">
             <button type="submit" style="background:#1a6a9a; font-size:12px;" onclick="return confirm('Actualiza el costo de todos los items ML con costo $0. ¿Continuar?')">Recostear ventas ML</button>
         </form>
+        <form method="post" style="display:inline; display:flex; gap:6px; align-items:center;">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="debug_item">
+            <input type="text" name="debug_item_id" placeholder="MLA1234567" style="width:140px; font-size:12px;">
+            <button type="submit" style="background:#555; font-size:12px;">Debug item</button>
+        </form>
     </div>
 </details>
 {% endif %}

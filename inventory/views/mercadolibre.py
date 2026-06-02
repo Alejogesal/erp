@@ -346,6 +346,28 @@ def mercadolibre_dashboard(request):
                 messages.success(request, f"Se eliminaron {deleted_count} ventas duplicadas.")
             else:
                 messages.warning(request, "No se seleccionó ninguna venta para eliminar.")
+        elif action == "debug_item":
+            item_id = (request.POST.get("debug_item_id") or "").strip()
+            if not item_id or not connection:
+                messages.error(request, "Ingresá el ID del item.")
+            else:
+                try:
+                    import json as _json
+                    access_token_dbg = ml.get_valid_access_token(connection)
+                    item_data = ml._call_with_refresh(connection, ml.get_item, item_id, access_token=access_token_dbg)
+                    inv_id = item_data.get("inventory_id", "") or ""
+                    logistic = item_data.get("logistic_type", "") or (item_data.get("shipping") or {}).get("logistic_type", "")
+                    avail = item_data.get("available_quantity", "?")
+                    full_stock = None
+                    if inv_id:
+                        full_stock = ml.get_fulfillment_stock(inv_id, access_token_dbg)
+                    messages.info(request,
+                        f"Item {item_id} | logistic_type: {logistic!r} | "
+                        f"inventory_id: {inv_id!r} | available_quantity: {avail} | "
+                        f"fulfillment_stock: {full_stock}"
+                    )
+                except Exception as exc:
+                    messages.error(request, f"Error debug item: {exc}")
         elif action == "debug_order":
             order_id = (request.POST.get("debug_order_id") or "").strip()
             if not order_id or not connection:
