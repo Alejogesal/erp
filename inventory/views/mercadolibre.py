@@ -527,6 +527,10 @@ def mercadolibre_dashboard(request):
             })
     ml_low_stock.sort(key=lambda x: (0 if x["color"] == "red" else 1, x["available"]))
 
+    # Split: low priority = red items where green threshold < 5 (very low sales volume)
+    ml_low_stock_priority = [x for x in ml_low_stock if not (x["color"] == "red" and (x["min"] + x["buffer"]) < 5)]
+    ml_low_stock_lowprio = [x for x in ml_low_stock if x["color"] == "red" and (x["min"] + x["buffer"]) < 5]
+
     # Annotate ML items with ERP stock and calculated price
     from decimal import Decimal as _Dec
     comun_wh_for_items = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
@@ -613,7 +617,8 @@ def mercadolibre_dashboard(request):
             "db_metrics": db_metrics,
             "reputation": reputation,
             "fraud_sales": fraud_sales,
-            "ml_low_stock": ml_low_stock,
+            "ml_low_stock": ml_low_stock_priority,
+            "ml_low_stock_lowprio": ml_low_stock_lowprio,
         },
     )
 

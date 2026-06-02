@@ -170,9 +170,9 @@
 
 {% if ml_low_stock %}
 <div class="card table-card" style="border:1px solid #e67e22; margin-bottom:16px;">
-    <div class="card-title" style="color:#e67e22;">⚠ Stock bajo en publicaciones ML — {{ ml_low_stock|length }} publicación{{ ml_low_stock|length|pluralize:"es" }}</div>
+    <div class="card-title" style="color:#e67e22;">⚠ Stock bajo en publicaciones ML — {{ ml_low_stock|length }} publicación{{ ml_low_stock|length|pluralize:"es" }}{% if ml_low_stock_lowprio %} <span style="font-size:12px; color:var(--muted); font-weight:400;">+ {{ ml_low_stock_lowprio|length }} baja prioridad</span>{% endif %}</div>
     <p style="font-size:13px; color:var(--muted); margin-bottom:12px;">
-        Estas publicaciones tienen stock menor al mínimo configurado. Reponelas para evitar que se pausicen automáticamente.
+        Reponé estas publicaciones para evitar que se pausicen. Ordenadas de menor a mayor stock.
     </p>
     <table style="font-size:13px; width:100%; border-collapse:collapse;">
         <thead>
@@ -214,7 +214,72 @@
             {% endfor %}
         </tbody>
     </table>
+
+    {% if ml_low_stock_lowprio %}
+    <details style="margin-top:12px; border-top:1px solid #2a313c; padding-top:10px;">
+        <summary style="cursor:pointer; font-size:13px; color:var(--muted); user-select:none;">
+            ▶ Baja prioridad — {{ ml_low_stock_lowprio|length }} publicación{{ ml_low_stock_lowprio|length|pluralize:"es" }} en rojo con poco volumen (necesitan &lt; 5 u. para estar en verde)
+        </summary>
+        <table style="font-size:12px; width:100%; border-collapse:collapse; margin-top:8px; opacity:0.8;">
+            <thead>
+                <tr style="color:var(--muted);">
+                    <th style="padding:4px;"></th>
+                    <th style="padding:4px; text-align:left;">Publicación</th>
+                    <th style="padding:4px; text-align:right;">Stock</th>
+                    <th style="padding:4px; text-align:right;">Mín.</th>
+                    <th style="padding:4px; text-align:right;">Vendidas 30d</th>
+                    <th style="padding:4px; text-align:right;">Para verde</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in ml_low_stock_lowprio %}
+                <tr style="border-top:1px solid #1e2733;">
+                    <td style="padding:4px;">
+                        <span style="width:8px; height:8px; border-radius:50%; display:inline-block; background:#e74c3c;"></span>
+                    </td>
+                    <td style="padding:4px;">
+                        {% if item.permalink %}
+                        <a href="{{ item.permalink }}" target="_blank" rel="noreferrer" style="color:var(--muted);">{{ item.title|truncatechars:40 }}</a>
+                        {% else %}<span style="color:var(--muted);">{{ item.title|truncatechars:40 }}</span>{% endif %}
+                    </td>
+                    <td style="padding:4px; text-align:right; color:#e74c3c; font-weight:600;">{{ item.available }}</td>
+                    <td style="padding:4px; text-align:right; color:var(--muted);">{{ item.min }}</td>
+                    <td style="padding:4px; text-align:right; color:var(--muted);">{{ item.sold_30d }}</td>
+                    <td style="padding:4px; text-align:right; color:#2ecc71;">{{ item.min|add:item.buffer }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </details>
+    {% endif %}
 </div>
+{% elif ml_low_stock_lowprio %}
+<details style="margin-bottom:16px;">
+    <summary style="cursor:pointer; font-size:13px; color:var(--muted); padding:8px 0; user-select:none;">
+        ⚪ Baja prioridad — {{ ml_low_stock_lowprio|length }} publicación{{ ml_low_stock_lowprio|length|pluralize:"es" }} en rojo con poco volumen
+    </summary>
+    <div class="card table-card" style="margin-top:8px; border:1px solid #2a313c;">
+        <table style="font-size:12px; width:100%; border-collapse:collapse; opacity:0.8;">
+            <thead><tr style="color:var(--muted);">
+                <th style="padding:4px;"></th><th style="padding:4px; text-align:left;">Publicación</th>
+                <th style="padding:4px; text-align:right;">Stock</th><th style="padding:4px; text-align:right;">Mín.</th>
+                <th style="padding:4px; text-align:right;">Vendidas 30d</th><th style="padding:4px; text-align:right;">Para verde</th>
+            </tr></thead>
+            <tbody>
+                {% for item in ml_low_stock_lowprio %}
+                <tr style="border-top:1px solid #1e2733;">
+                    <td style="padding:4px;"><span style="width:8px; height:8px; border-radius:50%; display:inline-block; background:#e74c3c;"></span></td>
+                    <td style="padding:4px;">{% if item.permalink %}<a href="{{ item.permalink }}" target="_blank" rel="noreferrer" style="color:var(--muted);">{{ item.title|truncatechars:40 }}</a>{% else %}<span style="color:var(--muted);">{{ item.title|truncatechars:40 }}</span>{% endif %}</td>
+                    <td style="padding:4px; text-align:right; color:#e74c3c; font-weight:600;">{{ item.available }}</td>
+                    <td style="padding:4px; text-align:right; color:var(--muted);">{{ item.min }}</td>
+                    <td style="padding:4px; text-align:right; color:var(--muted);">{{ item.sold_30d }}</td>
+                    <td style="padding:4px; text-align:right; color:#2ecc71;">{{ item.min|add:item.buffer }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</details>
 {% endif %}
 
 {% if fraud_sales %}
