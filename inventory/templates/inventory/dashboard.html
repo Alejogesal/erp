@@ -67,6 +67,34 @@
         </form>
     </div>
 
+    {% if low_stock_alerts %}
+    <div class="card table-card" style="border:1px solid var(--negative); margin-bottom:16px;">
+        <div class="card-title" style="color:var(--negative);">⚠ Stock bajo — {{ low_stock_alerts|length }} producto{{ low_stock_alerts|length|pluralize:"s" }}</div>
+        <table style="font-size:13px;">
+            <thead>
+                <tr style="color:var(--muted);">
+                    <th>SKU</th>
+                    <th>Producto</th>
+                    <th style="text-align:right;">Stock actual</th>
+                    <th style="text-align:right;">Mínimo</th>
+                    <th style="text-align:right;">Faltante</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for alert in low_stock_alerts %}
+                <tr style="border-top:1px solid #2a313c;">
+                    <td style="color:var(--muted);">{{ alert.sku }}</td>
+                    <td><a href="{% url 'inventory_stock_list' %}" style="color:var(--text);">{{ alert.name }}</a>{% if alert.group %} <span style="color:var(--muted); font-size:11px;">{{ alert.group }}</span>{% endif %}</td>
+                    <td style="text-align:right; color:var(--negative); font-weight:600;">{{ alert.current|floatformat:0 }}</td>
+                    <td style="text-align:right;">{{ alert.min }}</td>
+                    <td style="text-align:right; color:#f0ad4e;">−{{ alert.diff }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
     <div class="cards">
         <div class="card">
             <div class="card-title">Monto de compra</div>

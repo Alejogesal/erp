@@ -243,6 +243,10 @@
             <input id="stock-only" type="checkbox">
             Solo con stock
         </label>
+        <label class="toggle" style="color:var(--negative);">
+            <input id="low-stock-only" type="checkbox">
+            Solo stock bajo
+        </label>
     </div>
     <table>
         <thead>
@@ -250,13 +254,18 @@
                 <th>SKU</th>
                 <th>Producto</th>
                 <th>Comun</th>
+                <th>Stock mín.</th>
                 <th>Total</th>
             </tr>
         </thead>
         <tbody>
             {% for product in products %}
-            <tr data-total="{{ product.total_qty }}">
-                <td>{{ product.sku }}</td>
+            <tr data-total="{{ product.total_qty }}" data-low="{{ product.is_low_stock|yesno:'1,0' }}"
+                {% if product.is_low_stock %}style="background:rgba(192,57,43,0.08);"{% endif %}>
+                <td>
+                    {{ product.sku }}
+                    {% if product.is_low_stock %}<span style="color:var(--negative); font-size:11px; margin-left:4px;">▼ bajo</span>{% endif %}
+                </td>
                 <td>
                     {{ product.name }}
                     <div style="margin-top:6px; font-size:12px;">
@@ -277,7 +286,7 @@
                             <input type="hidden" name="product_id" value="{{ product.id }}">
                             <div class="stock-adjust">
                                 <div style="color: var(--muted); font-size: 12px;">
-                                    Actual: {{ product.comun_qty|latam_number:2 }}
+                                    Actual: {% if product.is_low_stock %}<strong style="color:var(--negative);">{{ product.comun_qty|latam_number:0 }}</strong>{% else %}{{ product.comun_qty|latam_number:2 }}{% endif %}
                                 </div>
                                 <input name="quantity" type="text" value="{{ product.comun_qty|latam_number:2 }}">
                                 <button type="submit">Actualizar</button>
@@ -285,10 +294,23 @@
                         </form>
                     {% endif %}
                 </td>
+                <td>
+                    <form method="post">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="set_min_stock">
+                        <input type="hidden" name="product_id" value="{{ product.id }}">
+                        <div class="stock-adjust">
+                            <input name="min_stock" type="number" min="0" placeholder="—"
+                                value="{{ product.min_stock|default:'' }}"
+                                style="{% if product.is_low_stock %}border-color:var(--negative);{% endif %}">
+                            <button type="submit" style="font-size:12px;">Guardar</button>
+                        </div>
+                    </form>
+                </td>
                 <td>{{ product.total_qty|latam_number:2 }}</td>
             </tr>
             {% empty %}
-            <tr><td colspan="4">Aún no hay stock registrado.</td></tr>
+            <tr><td colspan="5">Aún no hay stock registrado.</td></tr>
             {% endfor %}
         </tbody>
     </table>
@@ -310,17 +332,20 @@
             const value = parseFloat(normalized);
             return Number.isNaN(value) ? 0 : value;
         };
+        const lowStockOnly = document.getElementById("low-stock-only");
         const applyFilter = () => {
             const query = filterInput.value.trim().toLowerCase();
             rows.forEach((row) => {
                 if (!row.querySelector("td")) return;
                 const matchesText = !query || getRowText(row).includes(query);
                 const matchesStock = !stockOnly?.checked || parseTotal(row) > 0;
-                row.style.display = matchesText && matchesStock ? "" : "none";
+                const matchesLow = !lowStockOnly?.checked || row.getAttribute("data-low") === "1";
+                row.style.display = matchesText && matchesStock && matchesLow ? "" : "none";
             });
         };
         filterInput.addEventListener("input", applyFilter);
         stockOnly?.addEventListener("change", applyFilter);
+        lowStockOnly?.addEventListener("change", applyFilter);
     })();
 </script>
 {{ variant_data|json_script:"ml-variant-data" }}

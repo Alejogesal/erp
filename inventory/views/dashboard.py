@@ -8,9 +8,11 @@ from django.shortcuts import render
 from django.utils import timezone
 
 from ..models import (
+    Product,
     Purchase,
     Sale,
     SaleItem,
+    Stock,
     TaxExpense,
     Warehouse,
 )
@@ -146,6 +148,28 @@ def dashboard(request):
         reverse=True,
     )
 
+    # Low stock alerts: products with min_stock set and COMUN stock below threshold
+    comun_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
+    low_stock_alerts = []
+    if comun_wh:
+        products_with_min = Product.objects.filter(min_stock__isnull=False).order_by("name")
+        stock_map = {
+            s.product_id: s.quantity
+            for s in Stock.objects.filter(warehouse=comun_wh, product__in=products_with_min)
+        }
+        for p in products_with_min:
+            qty = stock_map.get(p.id, Decimal("0.00"))
+            if qty < Decimal(str(p.min_stock)):
+                low_stock_alerts.append({
+                    "product_id": p.id,
+                    "sku": p.sku or "",
+                    "name": p.name,
+                    "group": p.group or "",
+                    "current": qty,
+                    "min": p.min_stock,
+                    "diff": p.min_stock - int(qty),
+                })
+
     context = {
         "purchase_total": purchase_total,
         "sale_total": sale_total,
@@ -158,5 +182,6 @@ def dashboard(request):
         "start_date": start_date,
         "end_date": end_date,
         "tax_total": tax_total,
+        "low_stock_alerts": low_stock_alerts,
     }
     return render(request, "inventory/dashboard.html", context)

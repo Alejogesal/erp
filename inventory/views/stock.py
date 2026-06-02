@@ -96,6 +96,24 @@ def stock_list(request):
                 return redirect("inventory_stock_list")
             except services.InvalidMovementError as exc:
                 messages.error(request, str(exc))
+        elif action == "set_min_stock":
+            product_id = request.POST.get("product_id")
+            min_raw = (request.POST.get("min_stock") or "").strip()
+            product = Product.objects.filter(pk=product_id).first()
+            if not product:
+                messages.error(request, "Producto no encontrado.")
+                return redirect("inventory_stock_list")
+            if min_raw == "" or min_raw == "0":
+                product.min_stock = None
+            else:
+                try:
+                    product.min_stock = max(0, int(min_raw))
+                except ValueError:
+                    messages.error(request, "Stock mínimo inválido.")
+                    return redirect("inventory_stock_list")
+            product.save(update_fields=["min_stock"])
+            messages.success(request, f"Stock mínimo de '{product.name}' actualizado.")
+            return redirect("inventory_stock_list")
         elif action == "create_ml_purchase":
             if not ml_wh:
                 messages.error(request, "Falta el depósito MercadoLibre.")
@@ -354,6 +372,10 @@ def stock_list(request):
         else:
             product.has_variants = False
         product.total_qty = product.comun_qty
+        product.is_low_stock = (
+            product.min_stock is not None and
+            product.comun_qty < Decimal(str(product.min_stock))
+        )
     if ml_wh and show_history:
         transfer_movements = (
             StockMovement.objects.filter(

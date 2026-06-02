@@ -95,6 +95,7 @@ class Product(models.Model):
         blank=True,
     )
     is_kit = models.BooleanField(default=False)
+    min_stock = models.PositiveIntegerField(null=True, blank=True, help_text="Stock mínimo — genera alerta si el stock COMUN cae por debajo")
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
