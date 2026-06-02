@@ -465,6 +465,26 @@ def mercadolibre_dashboard(request):
 
     fraud_sales = Sale.objects.filter(ml_fraud_risk=True).order_by("-created_at")[:20]
 
+    # ML low stock alerts: publications where available_quantity < product.min_stock
+    ml_low_stock = []
+    for ml_item in MercadoLibreItem.objects.select_related("product").filter(
+        product__min_stock__isnull=False,
+        status__in=["active", "paused"],
+    ):
+        if ml_item.available_quantity < ml_item.product.min_stock:
+            ml_low_stock.append({
+                "item_id": ml_item.item_id,
+                "title": ml_item.title,
+                "permalink": ml_item.permalink,
+                "status": ml_item.status,
+                "logistic_type": ml_item.logistic_type,
+                "available": ml_item.available_quantity,
+                "min": ml_item.product.min_stock,
+                "diff": ml_item.product.min_stock - ml_item.available_quantity,
+                "product_name": ml_item.product.name,
+            })
+    ml_low_stock.sort(key=lambda x: x["available"])
+
     # Annotate ML items with ERP stock and calculated price
     from decimal import Decimal as _Dec
     comun_wh_for_items = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
@@ -542,6 +562,7 @@ def mercadolibre_dashboard(request):
             "db_metrics": db_metrics,
             "reputation": reputation,
             "fraud_sales": fraud_sales,
+            "ml_low_stock": ml_low_stock,
         },
     )
 
