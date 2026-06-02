@@ -2,7 +2,11 @@
 {% load latam_numbers %}
 {% block title %}Ventas{% endblock %}
 {% block content %}
-<h1>Ventas</h1>
+<div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:4px;">
+    <h1 style="margin:0;">Ventas</h1>
+    <a href="{% url 'inventory_sales_export_xlsx' %}?start_date={{ start_date }}&end_date={{ end_date }}"
+        class="pill" style="font-size:13px;">⬇ Exportar Excel</a>
+</div>
 <p class="subtitle">Registrá ventas y consultá comprobantes emitidos.</p>
 <style>
     .delivery-status-select {

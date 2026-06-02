@@ -176,6 +176,26 @@ def send_order_message(order_id: str, seller_id: str, text: str, access_token: s
     )
 
 
+def get_open_claims(user_id: str, access_token: str, days: int = 30) -> list[dict]:
+    """Fetch orders with active mediations (reclamos)."""
+    date_from = (timezone.now() - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S.000-00:00")
+    try:
+        data = _request(
+            "GET", "/orders/search",
+            access_token=access_token,
+            params={
+                "seller": user_id,
+                "order.date_last_updated.from": date_from,
+                "mediations.status": "opened,under_review",
+                "sort": "date_desc",
+                "limit": 50,
+            },
+        )
+        return data.get("results") or []
+    except Exception:
+        return []
+
+
 def get_seller_reputation(user_id: str, access_token: str) -> dict:
     data = _request("GET", f"/users/{user_id}", access_token=access_token)
     return data.get("seller_reputation") or {}

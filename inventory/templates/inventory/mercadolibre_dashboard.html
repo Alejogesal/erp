@@ -282,6 +282,42 @@
 </details>
 {% endif %}
 
+{% if open_claims %}
+<div class="card table-card" style="border:1px solid #c0392b; margin-bottom:16px;">
+    <div class="card-title" style="color:#c0392b;">⚠ Reclamos abiertos — {{ open_claims|length }}</div>
+    <table style="font-size:13px; width:100%; border-collapse:collapse;">
+        <thead>
+            <tr style="color:var(--muted);">
+                <th style="padding:5px; text-align:left;">Orden ML</th>
+                <th style="padding:5px; text-align:left;">Comprador</th>
+                <th style="padding:5px; text-align:right;">Total</th>
+                <th style="padding:5px; text-align:left;">Estado mediación</th>
+                <th style="padding:5px;"></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for claim in open_claims %}
+            <tr style="border-top:1px solid #2a313c;">
+                <td style="padding:5px; font-family:monospace; font-size:11px;">{{ claim.ml_order_id }}</td>
+                <td style="padding:5px;">{{ claim.buyer }}</td>
+                <td style="padding:5px; text-align:right;">${{ claim.total }}</td>
+                <td style="padding:5px; font-size:11px;">
+                    {% for m in claim.mediations %}
+                    <span style="background:rgba(192,57,43,0.2); padding:2px 6px; border-radius:4px; margin-right:4px;">{{ m.status|default:"-" }}</span>
+                    {% endfor %}
+                </td>
+                <td style="padding:5px;">
+                    {% if claim.sale %}
+                    <a href="{% url 'inventory_mercadolibre_messages' claim.ml_order_id %}" style="font-size:12px; color:var(--accent);">Mensajes</a>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
 {% if fraud_sales %}
 <div class="card table-card" style="border: 1px solid var(--negative); margin-bottom:16px;">
     <div class="card-title" style="color: var(--negative);">⚠ Alertas de fraude detectadas por ML ({{ fraud_sales|length }})</div>

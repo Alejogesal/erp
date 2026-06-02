@@ -44,6 +44,7 @@ urlpatterns = [
     path("ventas/<int:sale_id>/comprobante/", views.sale_receipt, name="inventory_sale_receipt"),
     path("ventas/<int:sale_id>/comprobante.pdf", views.sale_receipt_pdf, name="inventory_sale_receipt_pdf"),
     path("ventas/<int:sale_id>/eliminar/", views.sale_delete, name="inventory_sale_delete"),
+    path("ventas/exportar/", views.sales_export_xlsx, name="inventory_sales_export_xlsx"),
     path("stock/", views.stock_list, name="inventory_stock_list"),
     path("impuestos/", views.taxes_view, name="inventory_taxes"),
     path("iva/", views.iva_position, name="inventory_iva_position"),

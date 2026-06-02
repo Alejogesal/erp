@@ -1,9 +1,11 @@
 """Dashboard view."""
+import json
 from decimal import Decimal
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 
 from django.contrib.auth.decorators import login_required
-from django.db.models import Sum
+from django.db.models import Sum, Count
+from django.db.models.functions import TruncDate
 from django.shortcuts import render
 from django.utils import timezone
 
@@ -170,6 +172,30 @@ def dashboard(request):
                     "diff": p.min_stock - int(qty),
                 })
 
+    # --- Chart data: daily revenue last 30 days ---
+    chart_from = timezone.now() - timedelta(days=29)
+    daily_qs = (
+        Sale.objects.filter(created_at__gte=chart_from)
+        .annotate(day=TruncDate("created_at"))
+        .values("day", "warehouse__type")
+        .annotate(revenue=Sum("total"))
+        .order_by("day")
+    )
+    # Build date range
+    all_days = [(chart_from + timedelta(days=i)).date() for i in range(30)]
+    ml_by_day = {}
+    comun_by_day = {}
+    for row in daily_qs:
+        d = row["day"]
+        rev = float(row["revenue"] or 0)
+        if row["warehouse__type"] == Warehouse.WarehouseType.MERCADOLIBRE:
+            ml_by_day[d] = ml_by_day.get(d, 0) + rev
+        else:
+            comun_by_day[d] = comun_by_day.get(d, 0) + rev
+    chart_labels = [d.strftime("%-d/%-m") for d in all_days]
+    chart_ml = [round(ml_by_day.get(d, 0), 2) for d in all_days]
+    chart_comun = [round(comun_by_day.get(d, 0), 2) for d in all_days]
+
     context = {
         "purchase_total": purchase_total,
         "sale_total": sale_total,
@@ -183,5 +209,8 @@ def dashboard(request):
         "end_date": end_date,
         "tax_total": tax_total,
         "low_stock_alerts": low_stock_alerts,
+        "chart_labels": json.dumps(chart_labels),
+        "chart_ml": json.dumps(chart_ml),
+        "chart_comun": json.dumps(chart_comun),
     }
     return render(request, "inventory/dashboard.html", context)

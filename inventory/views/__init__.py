@@ -17,6 +17,7 @@ from .products import (
 from .sales import (
     register_sale,
     sale_delete,
+    sales_export_xlsx,
     sale_delivery_status_update,
     sale_edit,
     sale_receipt,
@@ -61,6 +62,7 @@ __all__ = [
     "product_variants",
     "register_sale",
     "sale_delete",
+    "sales_export_xlsx",
     "sale_delivery_status_update",
     "sale_edit",
     "sale_receipt",

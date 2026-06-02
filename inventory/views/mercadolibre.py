@@ -568,13 +568,28 @@ def mercadolibre_dashboard(request):
         delta = timezone.now() - connection.last_sync_at
         sync_age_minutes = int(delta.total_seconds() / 60)
 
-    # Seller reputation from ML API
+    # Seller reputation + open claims from ML API
     reputation = {}
+    open_claims = []
     if connection and connection.access_token and connection.ml_user_id:
         try:
             access_token_rep = ml.get_valid_access_token(connection)
             if access_token_rep:
                 reputation = ml.get_seller_reputation(connection.ml_user_id, access_token_rep)
+                raw_claims = ml.get_open_claims(connection.ml_user_id, access_token_rep)
+                for order in raw_claims:
+                    mediations = order.get("mediations") or []
+                    if not mediations:
+                        continue
+                    open_claims.append({
+                        "order_id": order.get("id", ""),
+                        "ml_order_id": str(order.get("id", "")),
+                        "date": order.get("date_last_updated") or order.get("date_created") or "",
+                        "total": order.get("total_amount", 0),
+                        "buyer": (order.get("buyer") or {}).get("nickname", ""),
+                        "mediations": mediations,
+                        "sale": Sale.objects.filter(ml_order_id=str(order.get("id", ""))).first(),
+                    })
         except Exception:
             pass
 
@@ -616,6 +631,7 @@ def mercadolibre_dashboard(request):
             "sync_age_minutes": sync_age_minutes,
             "db_metrics": db_metrics,
             "reputation": reputation,
+            "open_claims": open_claims,
             "fraud_sales": fraud_sales,
             "ml_low_stock": ml_low_stock_priority,
             "ml_low_stock_lowprio": ml_low_stock_lowprio,

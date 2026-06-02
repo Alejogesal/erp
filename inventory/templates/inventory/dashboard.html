@@ -127,6 +127,11 @@
     </div>
     </div>
 
+    <div class="card" style="margin-bottom:16px;">
+        <div class="card-title">Facturación diaria — últimos 30 días</div>
+        <canvas id="revenueChart" style="max-height:220px;"></canvas>
+    </div>
+
     <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px; align-items:start;">
         <div class="card table-card">
             <div class="card-title">Ranking por ganancia</div>
@@ -192,16 +197,65 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
     <script>
         (function() {
             if (!window.flatpickr) return;
-            const shared = {
-                dateFormat: "Y-m-d",
-                allowInput: true,
-                disableMobile: true,
-            };
+            const shared = { dateFormat: "Y-m-d", allowInput: true, disableMobile: true };
             flatpickr("#start_date", shared);
             flatpickr("#end_date", shared);
+        })();
+
+        (function() {
+            const ctx = document.getElementById("revenueChart");
+            if (!ctx || typeof Chart === "undefined") return;
+            const labels = {{ chart_labels|safe }};
+            const ml = {{ chart_ml|safe }};
+            const comun = {{ chart_comun|safe }};
+            new Chart(ctx, {
+                type: "bar",
+                data: {
+                    labels,
+                    datasets: [
+                        {
+                            label: "MercadoLibre",
+                            data: ml,
+                            backgroundColor: "rgba(47,129,247,0.7)",
+                            borderRadius: 4,
+                            stack: "revenue",
+                        },
+                        {
+                            label: "Depósito Común",
+                            data: comun,
+                            backgroundColor: "rgba(46,204,113,0.7)",
+                            borderRadius: 4,
+                            stack: "revenue",
+                        },
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { labels: { color: "#8899aa", font: { size: 12 } } },
+                        tooltip: {
+                            callbacks: {
+                                label: ctx => " $" + ctx.raw.toLocaleString("es-AR", { minimumFractionDigits: 0 }),
+                            },
+                        },
+                    },
+                    scales: {
+                        x: { ticks: { color: "#8899aa", font: { size: 11 } }, grid: { color: "rgba(255,255,255,0.05)" } },
+                        y: {
+                            ticks: {
+                                color: "#8899aa", font: { size: 11 },
+                                callback: v => "$" + (v >= 1000000 ? (v/1000000).toFixed(1)+"M" : v >= 1000 ? (v/1000).toFixed(0)+"K" : v),
+                            },
+                            grid: { color: "rgba(255,255,255,0.05)" },
+                            stacked: true,
+                        },
+                    },
+                },
+            });
         })();
     </script>
 {% endblock %}

@@ -1448,3 +1448,71 @@ def sale_delete(request, sale_id: int):
     except Exception as exc:
         messages.error(request, f"No se pudo eliminar la venta: {exc}")
     return redirect("inventory_sales_list")
+
+
+@login_required
+@require_http_methods(["GET"])
+def sales_export_xlsx(request):
+    """Export sales list as Excel file."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from django.http import HttpResponse as _HR
+
+    start_raw = (request.GET.get("start_date") or "").strip()
+    end_raw = (request.GET.get("end_date") or "").strip()
+    wh_filter = (request.GET.get("wh") or "all").strip()
+
+    qs = Sale.objects.select_related("customer", "warehouse").prefetch_related("items__product").order_by("-created_at", "-id")
+    if start_raw:
+        try:
+            from datetime import datetime as _dt
+            s = timezone.make_aware(_dt.fromisoformat(start_raw))
+            qs = qs.filter(created_at__gte=s)
+        except ValueError:
+            pass
+    if end_raw:
+        try:
+            from datetime import datetime as _dt
+            e = timezone.make_aware(_dt.fromisoformat(end_raw + "T23:59:59"))
+            qs = qs.filter(created_at__lte=e)
+        except ValueError:
+            pass
+    if wh_filter == "ml":
+        qs = qs.filter(warehouse__type=Warehouse.WarehouseType.MERCADOLIBRE)
+    elif wh_filter == "comun":
+        qs = qs.filter(warehouse__type=Warehouse.WarehouseType.COMUN)
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Ventas"
+
+    header_fill = PatternFill("solid", fgColor="1A2133")
+    header_font = Font(bold=True, color="FFFFFF")
+    headers = ["Fecha", "Comprobante/Orden ML", "Depósito", "Cliente", "Productos", "Total", "Comisión ML", "Estado entrega"]
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center")
+
+    for row_idx, sale in enumerate(qs, 2):
+        products_str = "; ".join(
+            f"{item.product.name} x{item.quantity:.0f}" for item in sale.items.all()
+        )
+        ws.cell(row=row_idx, column=1, value=timezone.localtime(sale.created_at).strftime("%d/%m/%Y"))
+        ws.cell(row=row_idx, column=2, value=sale.ml_order_id or sale.invoice_number)
+        ws.cell(row=row_idx, column=3, value=sale.warehouse.name)
+        ws.cell(row=row_idx, column=4, value=str(sale.customer) if sale.customer else "Consumidor final")
+        ws.cell(row=row_idx, column=5, value=products_str)
+        ws.cell(row=row_idx, column=6, value=float(sale.total or 0))
+        ws.cell(row=row_idx, column=7, value=float(sale.ml_commission_total or 0))
+        ws.cell(row=row_idx, column=8, value=sale.get_delivery_status_display())
+
+    for col in ws.columns:
+        max_len = max((len(str(c.value or "")) for c in col), default=10)
+        ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 50)
+
+    response = _HR(content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    response["Content-Disposition"] = 'attachment; filename="ventas.xlsx"'
+    wb.save(response)
+    return response
