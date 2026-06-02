@@ -89,19 +89,7 @@ def mercadolibre_callback(request):
     connection.nickname = profile.get("nickname", "") or ""
     connection.save(update_fields=["access_token", "refresh_token", "expires_at", "last_sync_at", "ml_user_id", "nickname"])
 
-    # Auto-sync last 60 days to recover any missed orders (especially those that came
-    # via orders_v2 webhook topic which the old code ignored)
-    try:
-        result = ml.sync_recent_orders(connection, request.user, days=60)
-        created = result.get("created", 0)
-        updated = result.get("updated", 0)
-        messages.success(
-            request,
-            f"MercadoLibre conectado. Sincronización automática: {created} órdenes nuevas, {updated} actualizadas."
-        )
-    except Exception:
-        messages.success(request, "MercadoLibre conectado correctamente.")
-
+    messages.success(request, "MercadoLibre conectado correctamente. Podés recuperar órdenes históricas desde Herramientas avanzadas.")
     return redirect("inventory_mercadolibre_dashboard")
 
 
@@ -223,6 +211,40 @@ def mercadolibre_dashboard(request):
                             f"{result['total']}, nuevas: {result['created']}, "
                             f"actualizadas: {result.get('updated', 0)}.{reason_text}{no_match_text}",
                         )
+        elif action == "recover_orders":
+            if not connection or not connection.access_token:
+                messages.error(request, "Primero conectá la cuenta de MercadoLibre.")
+            else:
+                from datetime import date as date_type, timedelta as td
+                from_str = (request.POST.get("recover_from") or "").strip()
+                to_str = (request.POST.get("recover_to") or "").strip()
+                try:
+                    d_from = date_type.fromisoformat(from_str)
+                    d_to = date_type.fromisoformat(to_str)
+                except ValueError:
+                    messages.error(request, "Fechas inválidas.")
+                    d_from = d_to = None
+                if d_from and d_to and d_from <= d_to:
+                    total_created = total_updated = total_reviewed = 0
+                    current = d_from
+                    while current <= d_to:
+                        date_from_str = f"{current.isoformat()}T00:00:00.000-03:00"
+                        date_to_str = f"{current.isoformat()}T23:59:59.999-03:00"
+                        result = ml.sync_recent_orders(
+                            connection, request.user, days=1,
+                            date_from_str=date_from_str, date_to_str=date_to_str,
+                        )
+                        total_created += result.get("created", 0)
+                        total_updated += result.get("updated", 0)
+                        total_reviewed += result.get("total", 0)
+                        current += td(days=1)
+                    messages.success(
+                        request,
+                        f"Recuperación completada ({d_from} → {d_to}): "
+                        f"{total_reviewed} revisadas, {total_created} nuevas, {total_updated} actualizadas."
+                    )
+                elif d_from and d_to:
+                    messages.error(request, "La fecha de inicio debe ser anterior a la de fin.")
         elif action == "sync_item":
             item_id = (request.POST.get("ml_item_id") or "").strip()
             if not item_id:

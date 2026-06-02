@@ -107,6 +107,27 @@
 </div>
 
 {% if connection and connection.access_token %}
+<div class="card" style="margin-bottom:16px; border:1px solid #2a3a4a;">
+    <div class="card-title">Recuperar órdenes históricas</div>
+    <p style="font-size:13px; color:var(--muted); margin-bottom:12px;">
+        Sincronizá un rango de fechas para traer órdenes que no se grabaron automáticamente.
+        Se procesa día a día — puede tardar unos minutos según el rango.
+    </p>
+    <form method="post" style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="recover_orders">
+        <div>
+            <label style="font-size:12px; display:block; margin-bottom:3px; color:var(--muted);">Desde</label>
+            <input type="date" name="recover_from" style="padding:6px 10px; border-radius:8px; background:#0f1622; border:1px solid #2a313c; color:var(--text);">
+        </div>
+        <div>
+            <label style="font-size:12px; display:block; margin-bottom:3px; color:var(--muted);">Hasta</label>
+            <input type="date" name="recover_to" style="padding:6px 10px; border-radius:8px; background:#0f1622; border:1px solid #2a313c; color:var(--text);">
+        </div>
+        <button type="submit" onclick="return confirm('Esto puede tardar varios minutos según el rango. ¿Continuar?')">Recuperar órdenes</button>
+    </form>
+</div>
+
 <details style="margin-bottom:16px;">
     <summary style="cursor:pointer; color:var(--muted); font-size:13px; padding:8px 0; user-select:none;">Herramientas avanzadas</summary>
     <div class="card" style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:14px;">
