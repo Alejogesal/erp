@@ -50,6 +50,36 @@
         {% endif %}
     </div>
 
+    {% if reputation %}
+    <div class="card">
+        <div class="card-title">Reputación ML</div>
+        {% with lvl=reputation.level_id %}
+        <p style="font-size:18px; font-weight:700; margin-bottom:6px;
+            color:{% if lvl == '5_green' or lvl == '4_light_green' %}var(--positive){% elif lvl == '3_yellow' %}#f0ad4e{% elif lvl == '2_orange' %}#e67e22{% else %}var(--negative){% endif %};">
+            {% if lvl == '5_green' %}Mercado Líder Platinum / Verde
+            {% elif lvl == '4_light_green' %}Verde Claro
+            {% elif lvl == '3_yellow' %}Amarillo
+            {% elif lvl == '2_orange' %}Naranja
+            {% else %}Rojo
+            {% endif %}
+        </p>
+        {% endwith %}
+        {% if reputation.power_seller_status %}
+        <p style="font-size:12px; color:var(--muted);">{{ reputation.power_seller_status|capfirst }}</p>
+        {% endif %}
+        {% with m=reputation.metrics %}
+        {% if m %}
+        <div style="margin-top:8px; font-size:13px;">
+            <p>Reclamos: <strong>{{ m.claims.rate|floatformat:1 }}%</strong> <span style="color:var(--muted); font-size:11px;">({{ m.claims.period }})</span></p>
+            <p>Cancelaciones: <strong>{{ m.cancellations.rate|floatformat:1 }}%</strong></p>
+            <p>Envíos tardíos: <strong>{{ m.delayed_handling_time.rate|floatformat:1 }}%</strong></p>
+            <p style="color:var(--muted); font-size:11px; margin-top:4px;">{{ m.sales.completed }} ventas completadas</p>
+        </div>
+        {% endif %}
+        {% endwith %}
+    </div>
+    {% endif %}
+
     {% if db_metrics %}
     <div class="card">
         <div class="card-title">Este mes — {{ db_metrics.month_label }}</div>

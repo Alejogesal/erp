@@ -385,6 +385,16 @@ def mercadolibre_dashboard(request):
         delta = timezone.now() - connection.last_sync_at
         sync_age_minutes = int(delta.total_seconds() / 60)
 
+    # Seller reputation from ML API
+    reputation = {}
+    if connection and connection.access_token and connection.ml_user_id:
+        try:
+            access_token_rep = ml.get_valid_access_token(connection)
+            if access_token_rep:
+                reputation = ml.get_seller_reputation(connection.ml_user_id, access_token_rep)
+        except Exception:
+            pass
+
     # DB-based metrics (accurate, from local data)
     from decimal import Decimal as _Dec
     from django.db.models import Sum, Count
@@ -422,6 +432,7 @@ def mercadolibre_dashboard(request):
             "duplicate_sales": duplicate_sales,
             "sync_age_minutes": sync_age_minutes,
             "db_metrics": db_metrics,
+            "reputation": reputation,
         },
     )
 
@@ -479,7 +490,7 @@ def mercadolibre_webhook(request):
         raw_payload=request.body.decode("utf-8"),
     )
     try:
-        if notification.topic == "orders":
+        if notification.topic in {"orders_v2", "orders"}:
             resource = notification.resource or ""
             parts = resource.strip("/").split("/")
             order_id = ""
