@@ -349,7 +349,10 @@
                 <th>Item</th>
                 <th>Producto (match)</th>
                 <th>Stock ML</th>
+                <th>Stock ERP</th>
+                <th>Precio ERP</th>
                 <th>Estado</th>
+                <th></th>
             </tr>
         </thead>
         <tbody>
@@ -400,10 +403,43 @@
                     </form>
                 </td>
                 <td>{{ item.available_quantity }}</td>
+                <td>
+                    {% if item.erp_stock is not None %}
+                        {% if item.erp_stock != item.available_quantity %}
+                        <span style="color:#f0ad4e; font-weight:600;">{{ item.erp_stock|floatformat:0 }}</span>
+                        {% else %}
+                        {{ item.erp_stock|floatformat:0 }}
+                        {% endif %}
+                    {% else %}
+                    <span style="color:var(--muted);">-</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if item.erp_price %}
+                    ${{ item.erp_price|latam_number:2 }}
+                    {% else %}
+                    <span style="color:var(--muted);">-</span>
+                    {% endif %}
+                </td>
                 <td>{{ item.status }}</td>
+                <td>
+                    {% if item.product and item.erp_price %}
+                    <form method="post" style="display:inline;">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="push_price_ml">
+                        <input type="hidden" name="ml_item_id" value="{{ item.item_id }}">
+                        <input type="hidden" name="price" value="{{ item.erp_price }}">
+                        <input type="hidden" name="quantity" value="{{ item.erp_stock|floatformat:0 }}">
+                        <button type="submit" style="font-size:11px; padding:4px 8px;"
+                            title="Actualizar stock={{ item.erp_stock|floatformat:0 }} y precio=${{ item.erp_price|latam_number:2 }} en ML">
+                            ↑ ML
+                        </button>
+                    </form>
+                    {% endif %}
+                </td>
             </tr>
             {% empty %}
-            <tr><td colspan="4">Aún no hay publicaciones sincronizadas.</td></tr>
+            <tr><td colspan="7">Aún no hay publicaciones sincronizadas.</td></tr>
             {% endfor %}
         </tbody>
     </table>

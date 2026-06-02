@@ -36,6 +36,39 @@ from .common import _resolve_sale_item_pricing
 from .forms import SaleHeaderForm, SaleItemForm
 from .stock import _sync_common_with_variants
 from .utils_xlsx import _read_ml_sales_xlsx_rows
+from ..models import MercadoLibreConnection
+
+
+def _push_products_stock_to_ml(products, user):
+    """After a COMUN sale, push updated stock to linked ML publications."""
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+    connection = MercadoLibreConnection.objects.filter(
+        user__in=User.objects.filter(is_superuser=True).order_by("id")[:1]
+    ).first() or MercadoLibreConnection.objects.first()
+    if not connection or not connection.access_token:
+        return
+    access_token = ml.get_valid_access_token(connection)
+    if not access_token:
+        return
+    comun_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
+    if not comun_wh:
+        return
+    seen = set()
+    for product in products:
+        if product.id in seen:
+            continue
+        seen.add(product.id)
+        ml_items = MercadoLibreItem.objects.filter(product=product)
+        if not ml_items.exists():
+            continue
+        stock = Stock.objects.filter(product=product, warehouse=comun_wh).first()
+        qty = max(0, int(stock.quantity)) if stock else 0
+        for ml_item in ml_items:
+            try:
+                ml.push_item_stock_and_price(ml_item.item_id, qty, None, access_token)
+            except Exception:
+                pass
 
 
 @login_required
@@ -1173,6 +1206,12 @@ def sales_list(request):
                         sale.discount_total = (discount_total + extra_discount_amount).quantize(Decimal("0.01"))
                         sale.save(update_fields=["total", "discount_total"])
                     messages.success(request, "Venta registrada.")
+                    # After transaction commits, push updated stock to ML (non-blocking)
+                    if warehouse.type == Warehouse.WarehouseType.COMUN:
+                        try:
+                            _push_products_stock_to_ml([data["product"] for data in items], request.user)
+                        except Exception:
+                            pass
                     if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE:
                         return redirect("inventory_sales_list")
                     return redirect("inventory_sale_receipt", sale_id=sale.id)

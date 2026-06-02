@@ -141,6 +141,14 @@ def get_user_profile(access_token: str) -> dict:
     return _request("GET", "/users/me", access_token=access_token)
 
 
+def push_item_stock_and_price(item_id: str, quantity: int, price: "Decimal | None", access_token: str) -> dict:
+    """Update stock (and optionally price) on a ML publication."""
+    data: dict = {"available_quantity": max(0, quantity)}
+    if price is not None and price > 0:
+        data["price"] = float(price)
+    return _request("PUT", f"/items/{item_id}", access_token=access_token, data=data)
+
+
 def get_order_messages(order_id: str, seller_id: str, access_token: str) -> dict:
     return _request(
         "GET",

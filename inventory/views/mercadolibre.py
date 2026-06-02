@@ -211,6 +211,28 @@ def mercadolibre_dashboard(request):
                             f"{result['total']}, nuevas: {result['created']}, "
                             f"actualizadas: {result.get('updated', 0)}.{reason_text}{no_match_text}",
                         )
+        elif action == "push_price_ml":
+            ml_item_id = (request.POST.get("ml_item_id") or "").strip()
+            price_str = (request.POST.get("price") or "").strip()
+            qty_str = (request.POST.get("quantity") or "").strip()
+            if not ml_item_id:
+                messages.error(request, "ID de publicación requerido.")
+            elif not connection or not connection.access_token:
+                messages.error(request, "No hay conexión ML.")
+            else:
+                from decimal import Decimal as _Dec
+                try:
+                    price = _Dec(price_str) if price_str else None
+                    qty = int(qty_str) if qty_str else 0
+                    access_token_push = ml.get_valid_access_token(connection)
+                    ml._call_with_refresh(
+                        connection, ml.push_item_stock_and_price,
+                        ml_item_id, qty, price,
+                        access_token=access_token_push,
+                    )
+                    messages.success(request, f"Publicación {ml_item_id} actualizada en ML.")
+                except Exception as exc:
+                    messages.error(request, f"Error al actualizar: {exc}")
         elif action == "recover_orders":
             if not connection or not connection.access_token:
                 messages.error(request, "Primero conectá la cuenta de MercadoLibre.")
@@ -413,6 +435,27 @@ def mercadolibre_dashboard(request):
             duplicate_sales.append(group)
 
     fraud_sales = Sale.objects.filter(ml_fraud_risk=True).order_by("-created_at")[:20]
+
+    # Annotate ML items with ERP stock and calculated price
+    from decimal import Decimal as _Dec
+    comun_wh_for_items = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
+    if comun_wh_for_items:
+        product_ids = [item.product_id for item in items if item.product_id]
+        erp_stocks = {
+            s.product_id: s.quantity
+            for s in Stock.objects.filter(product_id__in=product_ids, warehouse=comun_wh_for_items)
+        }
+    else:
+        erp_stocks = {}
+    for item in items:
+        if item.product:
+            item.erp_stock = erp_stocks.get(item.product_id, _Dec("0"))
+            cost = item.product.avg_cost or _Dec("0")
+            margin = item.product.margin_consumer or _Dec("0")
+            item.erp_price = (cost * (1 + margin / 100)).quantize(_Dec("0.01"))
+        else:
+            item.erp_stock = None
+            item.erp_price = None
 
     products = Product.objects.order_by("name")
     recent_cutoff = timezone.now() - timedelta(days=30)
