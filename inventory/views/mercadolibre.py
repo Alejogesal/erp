@@ -318,6 +318,13 @@ def mercadolibre_dashboard(request):
                         messages.error(request, f"No se pudo sincronizar: HTTP {exc.code}")
                 except Exception as exc:
                     messages.error(request, f"No se pudo sincronizar: {exc}")
+        elif action == "delete_ml_item":
+            ml_item_db_id = request.POST.get("ml_item_db_id")
+            deleted, _ = MercadoLibreItem.objects.filter(id=ml_item_db_id).delete()
+            if deleted:
+                messages.success(request, "Publicación eliminada del ERP.")
+            else:
+                messages.error(request, "No se encontró la publicación.")
         elif action == "link_item":
             item_id = request.POST.get("item_id")
             product_id = request.POST.get("product_id")

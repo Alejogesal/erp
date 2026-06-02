@@ -429,8 +429,18 @@
                     {% endif %}
                 </td>
                 <td>{{ item.status }}</td>
-                <td>
-                    {% if item.logistic_type == "fulfillment" %}
+                <td style="white-space:nowrap;">
+                    {% if item.status == "closed" %}
+                        <form method="post" style="display:inline;">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="delete_ml_item">
+                            <input type="hidden" name="ml_item_db_id" value="{{ item.id }}">
+                            <button type="submit" style="font-size:11px; padding:4px 8px; background:var(--negative);"
+                                onclick="return confirm('Esta publicación ya no existe en tu cuenta ML. ¿Eliminarla del ERP?')">
+                                Eliminar
+                            </button>
+                        </form>
+                    {% elif item.logistic_type == "fulfillment" %}
                         <span style="color:var(--muted); font-size:11px;" title="Stock Full gestionado por ML — no editable vía API">Full</span>
                     {% elif item.product and item.erp_price %}
                     <form method="post" style="display:inline;">

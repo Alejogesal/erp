@@ -637,6 +637,16 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
             last_sold_at=data.get("last_sold_at"),
             units_sold_30d=data.get("units", 0),
         )
+    # Mark items that no longer exist in seller's account as closed (only on full scan)
+    if not truncated:
+        scanned_ids = set(item_ids)
+        orphaned_count = MercadoLibreItem.objects.exclude(item_id__in=scanned_ids).update(
+            available_quantity=0,
+            status="closed",
+        )
+    else:
+        orphaned_count = 0
+
     connection.last_sync_at = timezone.now()
     connection.last_metrics = json.dumps(metrics)
     connection.last_metrics_at = timezone.now()
