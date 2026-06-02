@@ -32,6 +32,9 @@ class Command(BaseCommand):
             total_reviewed += result.get("total", 0)
             for key, count in result.get("reasons", {}).items():
                 reasons[key] = reasons.get(key, 0) + count
+            if not result.get("reasons", {}).get("unauthorized"):
+                connection.last_sync_at = timezone.now()
+                connection.save(update_fields=["last_sync_at"])
         reason_text = ", ".join([f"{k}:{v}" for k, v in reasons.items()]) if reasons else "none"
         self.stdout.write(
             f"[{timezone.now():%Y-%m-%d %H:%M:%S}] "

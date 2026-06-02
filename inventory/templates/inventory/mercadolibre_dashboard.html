@@ -4,6 +4,7 @@
 <h1>MercadoLibre</h1>
 <p class="subtitle">Conexión, stock y ventas sincronizadas con el depósito MERCADOLIBRE.</p>
 
+{% load latam_numbers %}
 <div class="cards">
     <div class="card">
         <div class="card-title">Estado de conexión</div>
@@ -11,76 +12,96 @@
             <p style="color: var(--negative);">Faltan credenciales ML en el servidor.</p>
         {% endif %}
         {% if connection and connection.access_token %}
-            <p><strong>Conectado:</strong> {{ connection.nickname|default:"Cuenta ML" }}</p>
-            {% if connection.ml_user_id %}
-            <p><strong>User ID:</strong> {{ connection.ml_user_id }}</p>
-            {% endif %}
-            {% if connection.last_sync_at %}
-            <p><strong>Último sync:</strong> {{ connection.last_sync_at }}</p>
-            {% endif %}
-        {% else %}
-            <p>Cuenta no conectada.</p>
-        {% endif %}
-        <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
-            {% if connection and connection.access_token %}
-                <form method="post" style="display:inline;">
-                    {% csrf_token %}
-                    <input type="hidden" name="action" value="sync_full">
-                    <button type="submit">Sincronizar stock</button>
-                </form>
-                <form method="post" style="display:inline; display:flex; gap:6px; align-items:center;">
-                    {% csrf_token %}
-                    <input type="hidden" name="action" value="sync_orders">
-                    <input type="date" name="sync_date" style="padding:6px 10px; border-radius:8px; background:#0f1622; border:1px solid #2a313c; color:var(--text); font-size:13px;">
-                    <button type="submit">Sincronizar ventas</button>
-                </form>
-                <form method="post" style="display:inline;">
-                    {% csrf_token %}
-                    <input type="hidden" name="action" value="sync_item">
-                    <input type="text" name="ml_item_id" placeholder="ID publicación" style="width:160px;">
-                    <button type="submit">Traer ID</button>
-                </form>
-<form method="post" style="display:inline;">
-                    {% csrf_token %}
-                    <input type="hidden" name="action" value="resync_commissions">
-                    <button type="submit" style="background:#e67e22;" onclick="return confirm('Esto va a re-sincronizar todas las ventas ML con comisión $0. Puede tardar varios minutos. ¿Continuar?')">Recalcular comisiones</button>
-                </form>
-                <form method="post" style="display:inline;">
-                    {% csrf_token %}
-                    <input type="hidden" name="action" value="recost_ml_sales">
-                    <button type="submit" style="background:#1a6a9a;" onclick="return confirm('Esto va a actualizar el costo de todos los items ML con costo $0 usando el costo actual del producto. ¿Continuar?')">Recostear ventas ML</button>
-                </form>
-                {% if missing_credentials %}
-                    <button type="button" disabled style="opacity:0.6;">Reconectar MercadoLibre</button>
+            <p style="font-size:15px;"><strong>{{ connection.nickname|default:"Cuenta ML" }}</strong></p>
+            {% if sync_age_minutes is not None %}
+                {% if sync_age_minutes < 15 %}
+                    <p style="color: var(--positive); font-weight:600; margin-top:8px;">
+                        &#10003; Auto-sync activo
+                        <span style="font-weight:400; color:var(--muted); font-size:12px;">— hace {{ sync_age_minutes }} min</span>
+                    </p>
+                {% elif sync_age_minutes < 60 %}
+                    <p style="color: #f0ad4e; font-weight:600; margin-top:8px;">
+                        &#9888; Último sync hace {{ sync_age_minutes }} min
+                    </p>
                 {% else %}
-                    <a class="pill cta sm" href="{% url 'inventory_mercadolibre_connect' %}">Reconectar MercadoLibre</a>
+                    <p style="color: var(--negative); font-weight:600; margin-top:8px;">
+                        &#10007; Sin sync hace {{ sync_age_minutes }} min
+                    </p>
+                    {% if not missing_credentials %}
+                    <a href="{% url 'inventory_mercadolibre_connect' %}" style="display:inline-block; margin-top:8px; font-size:13px; color:var(--accent);">Reautorizar con MercadoLibre</a>
+                    {% endif %}
                 {% endif %}
             {% else %}
-                {% if missing_credentials %}
-                    <button type="button" disabled style="opacity:0.6;">Conectar MercadoLibre</button>
-                {% else %}
-                    <a class="pill" href="{% url 'inventory_mercadolibre_connect' %}">Conectar MercadoLibre</a>
+                <p style="color: var(--muted); font-size:13px; margin-top:8px;">Esperando primer sync automático...</p>
+                {% if not missing_credentials %}
+                <a href="{% url 'inventory_mercadolibre_connect' %}" style="display:inline-block; margin-top:8px; font-size:13px; color:var(--accent);">Autorizar conexión</a>
                 {% endif %}
             {% endif %}
-        </div>
-    </div>
-<div class="card">
-    <div class="card-title">Métricas (últimos {{ metrics.window_days|default:"30" }} días)</div>
-    {% if metrics.orders %}
-            <p><strong>Órdenes (muestra):</strong> {{ metrics.orders_sampled|default:metrics.orders }}</p>
-            {% if metrics.orders_total and metrics.orders_total != metrics.orders_sampled %}
-            <p><strong>Órdenes totales ML:</strong> {{ metrics.orders_total }}</p>
-            {% endif %}
-            <p><strong>Unidades vendidas:</strong> {{ metrics.items_sold }}</p>
-            <p><strong>Monto total:</strong> ${{ metrics.total_amount }}</p>
-            <p style="color: var(--muted); font-size: 12px; margin-top: 8px;">
-                Las métricas se calculan sobre la muestra sincronizada del período.
+            {% if sync_age_minutes is not None and sync_age_minutes < 60 %}
+            <p style="color:var(--muted); font-size:11px; margin-top:10px;">
+                El token se renueva solo. <a href="{% url 'inventory_mercadolibre_connect' %}" style="color:var(--muted);">Reautorizar</a> solo si hay errores.
             </p>
-    {% else %}
-            <p>Sin métricas disponibles. Ejecutá un sync.</p>
+            {% endif %}
+        {% else %}
+            <p style="color:var(--muted);">Cuenta no conectada.</p>
+            {% if not missing_credentials %}
+            <a class="pill" href="{% url 'inventory_mercadolibre_connect' %}" style="margin-top:10px; display:inline-block;">Conectar MercadoLibre</a>
+            {% endif %}
+        {% endif %}
+    </div>
+
+    {% if db_metrics %}
+    <div class="card">
+        <div class="card-title">Este mes — {{ db_metrics.month_label }}</div>
+        <p><strong>Ventas:</strong> {{ db_metrics.month.count }}</p>
+        <p><strong>Facturación:</strong> ${{ db_metrics.month.revenue|latam_number:2 }}</p>
+        <p><strong>Comisión ML:</strong> ${{ db_metrics.month.commission|latam_number:2 }}</p>
+        <p style="color:var(--muted); font-size:11px; margin-top:8px;">Datos del ERP (ventas sincronizadas)</p>
+    </div>
+    <div class="card">
+        <div class="card-title">Últimos 30 días</div>
+        <p><strong>Ventas:</strong> {{ db_metrics.days30.count }}</p>
+        <p><strong>Facturación:</strong> ${{ db_metrics.days30.revenue|latam_number:2 }}</p>
+        <p><strong>Comisión ML:</strong> ${{ db_metrics.days30.commission|latam_number:2 }}</p>
+        <p style="color:var(--muted); font-size:11px; margin-top:8px;">Datos del ERP (ventas sincronizadas)</p>
+    </div>
     {% endif %}
 </div>
-</div>
+
+{% if connection and connection.access_token %}
+<details style="margin-bottom:16px;">
+    <summary style="cursor:pointer; color:var(--muted); font-size:13px; padding:8px 0; user-select:none;">Herramientas avanzadas</summary>
+    <div class="card" style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:14px;">
+        <form method="post" style="display:inline;">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="sync_full">
+            <button type="submit" style="font-size:12px;">Sync stock ahora</button>
+        </form>
+        <form method="post" style="display:inline; display:flex; gap:6px; align-items:center;">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="sync_orders">
+            <input type="date" name="sync_date" style="padding:5px 8px; border-radius:8px; background:#0f1622; border:1px solid #2a313c; color:var(--text); font-size:12px;">
+            <button type="submit" style="font-size:12px;">Sync ventas por fecha</button>
+        </form>
+        <form method="post" style="display:inline;">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="sync_item">
+            <input type="text" name="ml_item_id" placeholder="ID publicación" style="width:140px; font-size:12px;">
+            <button type="submit" style="font-size:12px;">Traer publicación</button>
+        </form>
+        <form method="post" style="display:inline;">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="resync_commissions">
+            <button type="submit" style="background:#e67e22; font-size:12px;" onclick="return confirm('Esto re-sincroniza todas las ventas ML con comisión $0. Puede tardar varios minutos. ¿Continuar?')">Recalcular comisiones</button>
+        </form>
+        <form method="post" style="display:inline;">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="recost_ml_sales">
+            <button type="submit" style="background:#1a6a9a; font-size:12px;" onclick="return confirm('Actualiza el costo de todos los items ML con costo $0. ¿Continuar?')">Recostear ventas ML</button>
+        </form>
+    </div>
+</details>
+{% endif %}
 
 {% if duplicate_sales %}
 <div class="card table-card" id="duplicados" style="border: 1px solid var(--negative);">

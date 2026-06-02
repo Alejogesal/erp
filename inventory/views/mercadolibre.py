@@ -379,19 +379,48 @@ def mercadolibre_dashboard(request):
 
     products = Product.objects.order_by("name")
     recent_cutoff = timezone.now() - timedelta(days=30)
+    sync_age_minutes = None
+    if connection and connection.last_sync_at:
+        delta = timezone.now() - connection.last_sync_at
+        sync_age_minutes = int(delta.total_seconds() / 60)
+
+    # DB-based metrics (accurate, from local data)
+    from decimal import Decimal as _Dec
+    from django.db.models import Sum, Count
+    now = timezone.now()
+    thirty_days_ago = now - timedelta(days=30)
+    this_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    ml_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.MERCADOLIBRE).first()
+    db_metrics = {}
+    if ml_wh:
+        def _agg(qs):
+            r = qs.aggregate(count=Count("id"), revenue=Sum("total"), commission=Sum("ml_commission_total"), taxes=Sum("ml_tax_total"))
+            return {
+                "count": r["count"] or 0,
+                "revenue": r["revenue"] or _Dec("0.00"),
+                "commission": r["commission"] or _Dec("0.00"),
+                "taxes": r["taxes"] or _Dec("0.00"),
+            }
+        base = Sale.objects.filter(warehouse=ml_wh)
+        db_metrics["month"] = _agg(base.filter(created_at__gte=this_month_start))
+        db_metrics["days30"] = _agg(base.filter(created_at__gte=thirty_days_ago))
+        _meses = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]
+        db_metrics["month_label"] = f"{_meses[now.month - 1]} {now.year}"
+
     return render(
         request,
         "inventory/mercadolibre_dashboard.html",
         {
             "connection": connection,
             "items": items,
-            "metrics": metrics,
             "missing_credentials": missing_credentials,
             "page_obj": page_obj,
             "search_query": search_query,
             "recent_cutoff": recent_cutoff,
             "products": products,
             "duplicate_sales": duplicate_sales,
+            "sync_age_minutes": sync_age_minutes,
+            "db_metrics": db_metrics,
         },
     )
 
