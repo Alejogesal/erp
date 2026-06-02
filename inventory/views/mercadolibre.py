@@ -465,13 +465,53 @@ def mercadolibre_dashboard(request):
 
     fraud_sales = Sale.objects.filter(ml_fraud_risk=True).order_by("-created_at")[:20]
 
-    # ML low stock alerts: publications where available_quantity < product.min_stock
+    import math as _math
+
+    def _stock_thresholds(units_sold_30d, manual_min=None):
+        """
+        Returns (min_stock, buffer) for semaphore calculation.
+        min_stock = units_sold_30d / 4  (auto) or manual override
+        buffer = extra units above min before turning green:
+          >100 sold → buffer 20 | >50 → 10 | >10 → 3 | else → 0
+        """
+        if units_sold_30d and units_sold_30d > 0:
+            auto_min = _math.ceil(units_sold_30d / 4)
+            if units_sold_30d > 100:
+                buffer = 20
+            elif units_sold_30d > 50:
+                buffer = 10
+            elif units_sold_30d > 10:
+                buffer = 3
+            else:
+                buffer = 0
+        else:
+            auto_min = None
+            buffer = 0
+        effective_min = manual_min if manual_min is not None else auto_min
+        return effective_min, buffer
+
+    def _semaphore(available, units_sold_30d, status, manual_min=None):
+        if status == "closed":
+            return "gray", None, 0
+        effective_min, buffer = _stock_thresholds(units_sold_30d, manual_min)
+        if effective_min is None:
+            return "gray", None, 0
+        if available <= effective_min:
+            return "red", effective_min, buffer
+        elif available < effective_min + buffer:
+            return "yellow", effective_min, buffer
+        else:
+            return "green", effective_min, buffer
+
+    # ML low stock alerts: red or yellow publications
     ml_low_stock = []
     for ml_item in MercadoLibreItem.objects.select_related("product").filter(
-        product__min_stock__isnull=False,
         status__in=["active", "paused"],
     ):
-        if ml_item.available_quantity < ml_item.product.min_stock:
+        sold = ml_item.units_sold_30d or 0
+        manual_min = ml_item.product.min_stock if ml_item.product else None
+        color, eff_min, buf = _semaphore(ml_item.available_quantity, sold, ml_item.status, manual_min)
+        if color in ("red", "yellow") and eff_min is not None:
             ml_low_stock.append({
                 "item_id": ml_item.item_id,
                 "title": ml_item.title,
@@ -479,11 +519,13 @@ def mercadolibre_dashboard(request):
                 "status": ml_item.status,
                 "logistic_type": ml_item.logistic_type,
                 "available": ml_item.available_quantity,
-                "min": ml_item.product.min_stock,
-                "diff": ml_item.product.min_stock - ml_item.available_quantity,
-                "product_name": ml_item.product.name,
+                "min": eff_min,
+                "buffer": buf,
+                "diff": max(0, eff_min + buf - ml_item.available_quantity),
+                "color": color,
+                "sold_30d": sold,
             })
-    ml_low_stock.sort(key=lambda x: x["available"])
+    ml_low_stock.sort(key=lambda x: (0 if x["color"] == "red" else 1, x["available"]))
 
     # Annotate ML items with ERP stock and calculated price
     from decimal import Decimal as _Dec
@@ -507,19 +549,13 @@ def mercadolibre_dashboard(request):
             item.erp_stock = None
             item.erp_price = None
             item.min_stock = None
-        # Semaphore: 'red' | 'yellow' | 'green' | 'gray'
-        avail = item.available_quantity
-        min_s = getattr(item, "min_stock", None)
-        if item.status == "closed":
-            item.semaphore = "gray"
-        elif avail == 0:
-            item.semaphore = "red"
-        elif min_s is not None and avail < min_s:
-            item.semaphore = "yellow"
-        elif min_s is not None:
-            item.semaphore = "green"
-        else:
-            item.semaphore = "gray"
+        # Semaphore based on sales velocity
+        sold = item.units_sold_30d or 0
+        manual_min = item.product.min_stock if item.product else None
+        color, eff_min, buf = _semaphore(item.available_quantity, sold, item.status, manual_min)
+        item.semaphore = color
+        item.calc_min = eff_min
+        item.calc_buffer = buf
 
     products = Product.objects.order_by("name")
     recent_cutoff = timezone.now() - timedelta(days=30)

@@ -177,36 +177,39 @@
     <table style="font-size:13px; width:100%; border-collapse:collapse;">
         <thead>
             <tr style="color:var(--muted);">
+                <th style="padding:5px;"></th>
                 <th style="padding:5px; text-align:left;">Publicación</th>
                 <th style="padding:5px; text-align:center;">Tipo</th>
                 <th style="padding:5px; text-align:right;">Stock ML</th>
                 <th style="padding:5px; text-align:right;">Mínimo</th>
-                <th style="padding:5px; text-align:right;">Faltan</th>
-                <th style="padding:5px; text-align:left;">Estado</th>
+                <th style="padding:5px; text-align:right;">Vendidas 30d</th>
+                <th style="padding:5px; text-align:right;">Para verde</th>
             </tr>
         </thead>
         <tbody>
             {% for item in ml_low_stock %}
-            <tr style="border-top:1px solid #2a313c; {% if item.available == 0 %}background:rgba(192,57,43,0.08);{% endif %}">
+            <tr style="border-top:1px solid #2a313c;">
+                <td style="padding:5px;">
+                    <span style="width:10px; height:10px; border-radius:50%; display:inline-block;
+                        background:{% if item.color == 'red' %}#e74c3c{% else %}#f39c12{% endif %};">
+                    </span>
+                </td>
                 <td style="padding:5px;">
                     {% if item.permalink %}
-                    <a href="{{ item.permalink }}" target="_blank" rel="noreferrer" style="color:var(--text);">{{ item.title|truncatechars:50 }}</a>
-                    {% else %}{{ item.title|truncatechars:50 }}{% endif %}
+                    <a href="{{ item.permalink }}" target="_blank" rel="noreferrer" style="color:var(--text);">{{ item.title|truncatechars:45 }}</a>
+                    {% else %}{{ item.title|truncatechars:45 }}{% endif %}
                     <div style="font-size:10px; color:var(--muted); font-family:monospace;">{{ item.item_id }}</div>
                 </td>
                 <td style="padding:5px; text-align:center; color:var(--muted); font-size:11px;">
                     {% if item.logistic_type == "fulfillment" %}Full{% else %}Normal{% endif %}
                 </td>
                 <td style="padding:5px; text-align:right; font-weight:700;
-                    color:{% if item.available == 0 %}var(--negative){% else %}#e67e22{% endif %};">
+                    color:{% if item.color == 'red' %}#e74c3c{% else %}#f39c12{% endif %};">
                     {{ item.available }}
                 </td>
                 <td style="padding:5px; text-align:right;">{{ item.min }}</td>
-                <td style="padding:5px; text-align:right; color:#f0ad4e; font-weight:600;">+{{ item.diff }}</td>
-                <td style="padding:5px; font-size:11px;">
-                    {% if item.status == "paused" %}<span style="color:var(--negative);">Pausada</span>
-                    {% else %}<span style="color:#f0ad4e;">Activa</span>{% endif %}
-                </td>
+                <td style="padding:5px; text-align:right; color:var(--muted);">{{ item.sold_30d }}</td>
+                <td style="padding:5px; text-align:right; color:#2ecc71; font-weight:600;">{{ item.min|add:item.buffer }}</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -414,7 +417,7 @@
                     <div style="display:flex; align-items:center; gap:7px;">
                         <span style="flex-shrink:0; width:10px; height:10px; border-radius:50%; display:inline-block;
                             background:{% if item.semaphore == 'red' %}#e74c3c{% elif item.semaphore == 'yellow' %}#f39c12{% elif item.semaphore == 'green' %}#2ecc71{% else %}#555{% endif %};"
-                            title="{% if item.semaphore == 'red' %}Sin stock{% elif item.semaphore == 'yellow' %}Stock bajo{% elif item.semaphore == 'green' %}Stock OK{% else %}Sin umbral configurado{% endif %}">
+                            title="{% if item.semaphore == 'red' %}ROJO — Stock ≤ mínimo ({{ item.calc_min }} u.) · vendidas 30d: {{ item.units_sold_30d|default:0 }}{% elif item.semaphore == 'yellow' %}AMARILLO — Stock próximo al mínimo (mín {{ item.calc_min }}, verde en {{ item.calc_min|add:item.calc_buffer }}) · vendidas 30d: {{ item.units_sold_30d|default:0 }}{% elif item.semaphore == 'green' %}VERDE — Stock OK (mín {{ item.calc_min }}, zona verde ≥ {{ item.calc_min|add:item.calc_buffer }}) · vendidas 30d: {{ item.units_sold_30d|default:0 }}{% else %}Sin datos de ventas suficientes para calcular mínimo{% endif %}">
                         </span>
                         {% if item.permalink %}
                         <a class="ml-item-link" href="{{ item.permalink }}" target="_blank" rel="noreferrer">{{ item.title }}</a>
