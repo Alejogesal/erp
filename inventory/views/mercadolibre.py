@@ -378,6 +378,8 @@ def mercadolibre_dashboard(request):
         if group:
             duplicate_sales.append(group)
 
+    fraud_sales = Sale.objects.filter(ml_fraud_risk=True).order_by("-created_at")[:20]
+
     products = Product.objects.order_by("name")
     recent_cutoff = timezone.now() - timedelta(days=30)
     sync_age_minutes = None
@@ -433,8 +435,54 @@ def mercadolibre_dashboard(request):
             "sync_age_minutes": sync_age_minutes,
             "db_metrics": db_metrics,
             "reputation": reputation,
+            "fraud_sales": fraud_sales,
         },
     )
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def mercadolibre_messages(request, order_id):
+    connection = MercadoLibreConnection.objects.filter(user=request.user).first()
+    if not connection or not connection.access_token:
+        messages.error(request, "Cuenta de MercadoLibre no conectada.")
+        return redirect("inventory_mercadolibre_dashboard")
+
+    sale = Sale.objects.filter(ml_order_id=str(order_id)).first()
+    conversation = {}
+    send_error = None
+
+    if request.method == "POST":
+        text = (request.POST.get("text") or "").strip()
+        if not text:
+            send_error = "El mensaje no puede estar vacío."
+        elif len(text) > 350:
+            send_error = "Máximo 350 caracteres."
+        else:
+            try:
+                access_token = ml.get_valid_access_token(connection)
+                ml.send_order_message(str(order_id), connection.ml_user_id, text, access_token)
+                messages.success(request, "Mensaje enviado.")
+            except Exception as exc:
+                send_error = f"No se pudo enviar: {exc}"
+
+    try:
+        access_token = ml.get_valid_access_token(connection)
+        conversation = ml._call_with_refresh(
+            connection, ml.get_order_messages,
+            str(order_id), connection.ml_user_id,
+            access_token=access_token,
+        )
+    except Exception as exc:
+        messages.error(request, f"No se pudieron cargar los mensajes: {exc}")
+
+    return render(request, "inventory/mercadolibre_messages.html", {
+        "order_id": order_id,
+        "sale": sale,
+        "conversation": conversation,
+        "send_error": send_error,
+        "seller_id": connection.ml_user_id,
+    })
 
 
 @login_required

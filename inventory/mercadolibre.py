@@ -141,6 +141,33 @@ def get_user_profile(access_token: str) -> dict:
     return _request("GET", "/users/me", access_token=access_token)
 
 
+def get_order_messages(order_id: str, seller_id: str, access_token: str) -> dict:
+    return _request(
+        "GET",
+        f"/messages/packs/{order_id}/sellers/{seller_id}",
+        access_token=access_token,
+        params={"tag": "post_sale"},
+    )
+
+
+# MLA agent user ID (messages must be addressed to the agent, not the buyer directly)
+_ML_AGENT_MLA = "3037674934"
+
+
+def send_order_message(order_id: str, seller_id: str, text: str, access_token: str) -> dict:
+    return _request(
+        "POST",
+        f"/messages/packs/{order_id}/sellers/{seller_id}",
+        access_token=access_token,
+        params={"tag": "post_sale"},
+        data={
+            "from": {"user_id": seller_id},
+            "to": {"user_id": _ML_AGENT_MLA},
+            "text": text,
+        },
+    )
+
+
 def get_seller_reputation(user_id: str, access_token: str) -> dict:
     data = _request("GET", f"/users/{user_id}", access_token=access_token)
     return data.get("seller_reputation") or {}
@@ -617,8 +644,9 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
 
     order_date = _parse_ml_datetime(order.get("date_created"))
 
-    # Delivery status from order tags (no extra API call needed)
+    # Delivery status and fraud risk from order tags (no extra API call needed)
     order_tags = {str(t).lower() for t in (order.get("tags") or [])}
+    fraud_risk = "fraud_risk_detected" in order_tags
     if "delivered" in order_tags:
         delivery_status = Sale.DeliveryStatus.DELIVERED
     elif order_status == "paid" and "not_delivered" not in order_tags:
@@ -717,7 +745,8 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
         existing_sale.ml_tax_total = tax_total.quantize(Decimal("0.01"))
         existing_sale.ml_order_id = str(order_id)
         existing_sale.delivery_status = delivery_status
-        existing_sale.save(update_fields=["ml_commission_total", "ml_tax_total", "ml_order_id", "delivery_status"])
+        existing_sale.ml_fraud_risk = fraud_risk
+        existing_sale.save(update_fields=["ml_commission_total", "ml_tax_total", "ml_order_id", "delivery_status", "ml_fraud_risk"])
         for product, quantity, unit_price, vat_percent, variant in matched_items:
             target = (
                 SaleItem.objects.filter(sale=existing_sale, product=product, quantity=quantity)
@@ -749,6 +778,7 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
         ml_commission_total=fee_total.quantize(Decimal("0.01")),
         ml_tax_total=tax_total.quantize(Decimal("0.01")),
         delivery_status=delivery_status,
+        ml_fraud_risk=fraud_risk,
         user=user,
     )
     if order_date:

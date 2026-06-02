@@ -133,6 +133,37 @@
 </details>
 {% endif %}
 
+{% if fraud_sales %}
+<div class="card table-card" style="border: 1px solid var(--negative); margin-bottom:16px;">
+    <div class="card-title" style="color: var(--negative);">⚠ Alertas de fraude detectadas por ML ({{ fraud_sales|length }})</div>
+    <p style="font-size:13px; color:var(--muted); margin-bottom:12px;">
+        MercadoLibre marcó estas órdenes con riesgo de fraude. <strong>No despachar</strong> hasta verificar con soporte.
+    </p>
+    <table style="width:100%; font-size:13px; border-collapse:collapse;">
+        <thead>
+            <tr style="color:var(--muted); border-bottom:1px solid #2a313c;">
+                <th style="padding:6px; text-align:left;">Order ML</th>
+                <th style="padding:6px; text-align:left;">Fecha</th>
+                <th style="padding:6px; text-align:right;">Total</th>
+                <th style="padding:6px;"></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in fraud_sales %}
+            <tr style="border-bottom:1px solid #1a2133;">
+                <td style="padding:6px; font-family:monospace;">{{ s.ml_order_id }}</td>
+                <td style="padding:6px;">{{ s.created_at|date:"d/m/Y" }}</td>
+                <td style="padding:6px; text-align:right;">${{ s.total }}</td>
+                <td style="padding:6px;">
+                    <a href="{% url 'inventory_sale_receipt' s.id %}" style="font-size:12px; color:var(--accent);">Ver comprobante</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
 {% if duplicate_sales %}
 <div class="card table-card" id="duplicados" style="border: 1px solid var(--negative);">
     <div class="card-title" style="color: var(--negative);">⚠ Ventas duplicadas detectadas ({{ duplicate_sales|length }} grupos)</div>

@@ -1,0 +1,62 @@
+{% extends "inventory/base.html" %}
+{% block title %}Mensajes — Orden {{ order_id }}{% endblock %}
+{% block content %}
+<h1>Mensajes post-venta</h1>
+<p class="subtitle">
+    Orden ML: <strong>{{ order_id }}</strong>
+    {% if sale %}— <a href="{% url 'inventory_sale_receipt' sale.id %}">Ver comprobante</a>{% endif %}
+</p>
+
+<style>
+    .msg-bubble { padding:10px 14px; border-radius:12px; max-width:70%; margin-bottom:10px; font-size:14px; line-height:1.5; }
+    .msg-seller { background:var(--accent); color:#fff; margin-left:auto; border-bottom-right-radius:4px; }
+    .msg-buyer  { background:#1a2133; color:var(--text); border-bottom-left-radius:4px; }
+    .msg-row    { display:flex; flex-direction:column; }
+    .msg-meta   { font-size:11px; color:var(--muted); margin-bottom:3px; }
+    .msg-seller-meta { text-align:right; }
+</style>
+
+<div class="card" style="margin-bottom:16px; max-height:500px; overflow-y:auto; display:flex; flex-direction:column; gap:4px;" id="chat-container">
+    {% with msgs=conversation.messages %}
+    {% if msgs %}
+        {% for msg in msgs %}
+        {% with from_id=msg.from.user_id|stringformat:"s" seller_id=seller_id|stringformat:"s" %}
+        {% if from_id == seller_id %}
+        <div class="msg-row">
+            <div class="msg-meta msg-seller-meta">Vos — {{ msg.message_date.created|date:"d/m/Y H:i" }}</div>
+            <div class="msg-bubble msg-seller">{{ msg.text }}</div>
+        </div>
+        {% else %}
+        <div class="msg-row">
+            <div class="msg-meta">Comprador — {{ msg.message_date.created|date:"d/m/Y H:i" }}</div>
+            <div class="msg-bubble msg-buyer">{{ msg.text }}</div>
+        </div>
+        {% endif %}
+        {% endwith %}
+        {% endfor %}
+    {% else %}
+        <p class="subtitle" style="padding:16px;">No hay mensajes en esta conversación todavía.</p>
+    {% endif %}
+    {% endwith %}
+</div>
+
+<div class="card">
+    <div class="card-title">Responder al comprador</div>
+    {% if send_error %}
+    <p style="color:var(--negative); margin-bottom:10px;">{{ send_error }}</p>
+    {% endif %}
+    <form method="post">
+        {% csrf_token %}
+        <textarea name="text" rows="3" maxlength="350" placeholder="Escribí tu mensaje... (máx. 350 caracteres)"
+            style="width:100%; background:#0f1622; border:1px solid #2a313c; color:var(--text); border-radius:8px; padding:10px; font-size:14px; resize:vertical; margin-bottom:10px;"></textarea>
+        <button type="submit">Enviar mensaje</button>
+        <span style="color:var(--muted); font-size:12px; margin-left:10px;">El comprador recibe el mensaje en MercadoLibre.</span>
+    </form>
+</div>
+
+<script>
+    // Auto-scroll to bottom of chat
+    const chat = document.getElementById("chat-container");
+    if (chat) chat.scrollTop = chat.scrollHeight;
+</script>
+{% endblock %}
