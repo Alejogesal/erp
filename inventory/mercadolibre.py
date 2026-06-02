@@ -579,16 +579,10 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
         shipping = item.get("shipping") or {}
         logistic_type = item.get("logistic_type", "") or shipping.get("logistic_type", "") or ""
         permalink = item.get("permalink", "") or ""
-        # For Full items, use the fulfillment inventory endpoint for accurate stock
-        if logistic_type == "fulfillment":
-            inventory_id = item.get("inventory_id", "") or ""
-            if inventory_id:
-                full_stock = get_fulfillment_stock(inventory_id, access_token)
-                available = full_stock if full_stock >= 0 else int(item.get("available_quantity", 0) or 0)
-            else:
-                available = int(item.get("available_quantity", 0) or 0)
-        else:
-            available = int(item.get("available_quantity", 0) or 0)
+        # available_quantity from /items is "available for sale" — the authoritative source.
+        # The fulfillment inventory endpoint returns physical stock including blocked units,
+        # which can differ from what's actually sellable (e.g. items with noFiscalCoverage).
+        available = int(item.get("available_quantity", 0) or 0)
         existing = MercadoLibreItem.objects.filter(item_id=item_id).first()
         product = existing.product if existing else None
         matched_name = existing.matched_name if existing else ""
