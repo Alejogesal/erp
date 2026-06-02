@@ -195,6 +195,15 @@ def get_valid_access_token(connection: MercadoLibreConnection) -> str:
     return connection.access_token
 
 
+def get_fulfillment_stock(inventory_id: str, access_token: str) -> int:
+    """Get real available quantity for a Full item from the fulfillment inventory endpoint."""
+    try:
+        data = _request("GET", f"/inventories/{inventory_id}/stock/fulfillment", access_token=access_token)
+        return int(data.get("available_quantity", 0) or 0)
+    except Exception:
+        return -1
+
+
 def get_item_ids(user_id: str, access_token: str, max_items: int | None = None) -> tuple[list[str], bool]:
     """Fetch all item IDs for a seller using scroll-based pagination."""
     item_ids: list[str] = []
@@ -566,11 +575,20 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
                 return SyncResult(total, matched, unmatched, updated_stock, {"error": "unauthorized"})
             raise
         title = item.get("title", "") or ""
-        available = int(item.get("available_quantity", 0) or 0)
         status = item.get("status", "") or ""
         shipping = item.get("shipping") or {}
         logistic_type = item.get("logistic_type", "") or shipping.get("logistic_type", "") or ""
         permalink = item.get("permalink", "") or ""
+        # For Full items, use the fulfillment inventory endpoint for accurate stock
+        if logistic_type == "fulfillment":
+            inventory_id = item.get("inventory_id", "") or ""
+            if inventory_id:
+                full_stock = get_fulfillment_stock(inventory_id, access_token)
+                available = full_stock if full_stock >= 0 else int(item.get("available_quantity", 0) or 0)
+            else:
+                available = int(item.get("available_quantity", 0) or 0)
+        else:
+            available = int(item.get("available_quantity", 0) or 0)
         existing = MercadoLibreItem.objects.filter(item_id=item_id).first()
         product = existing.product if existing else None
         matched_name = existing.matched_name if existing else ""
