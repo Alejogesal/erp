@@ -4,7 +4,7 @@ from decimal import Decimal, InvalidOperation
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
-from django.db.models import Case, DecimalField, Sum, Value, When, Q
+from django.db.models import Case, DecimalField, OuterRef, Q, Subquery, Sum, Value, When
 from django.db.models.fields import DecimalField as ModelDecimalField
 from django.db.models.functions import Coalesce
 from django.http import JsonResponse
@@ -339,19 +339,17 @@ def stock_list(request):
                 else:
                     messages.error(request, "Revisá los datos de la transferencia.")
 
+    comun_stock_sq = (
+        Stock.objects.filter(product=OuterRef("pk"), warehouse__type=comun_code)
+        .values("quantity")[:1]
+    )
     products = (
         Product.objects.order_by("sku")
         .annotate(
             comun_qty=Coalesce(
-                Sum(
-                    Case(
-                        When(stocks__warehouse__type=comun_code, then="stocks__quantity"),
-                        output_field=decimal_field,
-                    )
-                ),
-                Value(0, output_field=decimal_field),
-                output_field=decimal_field,
-            ),
+                Subquery(comun_stock_sq, output_field=decimal_field),
+                Value(Decimal("0.00"), output_field=decimal_field),
+            )
         )
     )
     variant_qty_map = {
