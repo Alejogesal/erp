@@ -49,15 +49,22 @@
             <p class="value" style="color:var(--negative);">${{ debito_global|latam_number:2 }}</p>
             <div style="font-size:12px; color:var(--muted);">desde {{ debito_start_date|date:"d/m/Y" }}</div>
         </div>
+        {% if pagos_total %}
+        <div class="card">
+            <div class="card-title" style="font-size:13px;">Pagos realizados a AFIP</div>
+            <p class="value" style="color:var(--positive);">${{ pagos_total|latam_number:2 }}</p>
+            <div style="font-size:12px; color:var(--muted);">suma como saldo a favor</div>
+        </div>
+        {% endif %}
         <div class="card">
             {% if posicion_global <= 0 %}
             <div class="card-title" style="font-size:13px;">Saldo a favor remanente</div>
             <p class="value" style="color:var(--positive);">${{ posicion_global|latam_number:2|slice:"1:" }}</p>
-            <div style="font-size:12px; color:var(--muted);">crédito supera al débito</div>
+            <div style="font-size:12px; color:var(--muted);">crédito + pagos superan al débito</div>
             {% else %}
             <div class="card-title" style="font-size:13px;">IVA a pagar</div>
             <p class="value" style="color:var(--negative);">${{ posicion_global|latam_number:2 }}</p>
-            <div style="font-size:12px; color:var(--muted);">débito supera al crédito</div>
+            <div style="font-size:12px; color:var(--muted);">débito supera crédito y pagos</div>
             {% endif %}
         </div>
     </div>

@@ -7,6 +7,7 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import redirect, render
 from django.utils import timezone
 
+from django.db import models
 from ..models import IVAPayment, PurchaseItem, Sale, SaleItem, TaxExpense, Warehouse
 from .forms import IVAPaymentForm, TaxExpenseForm
 
@@ -188,7 +189,11 @@ def taxes_view(request):
 
     _, credito_global, _ = _calc_credito(g_purchases, g_expenses, g_ml_sales_credito)
     _, debito_global = _calc_debito(g_ml_items, g_common_items)
-    posicion_global = debito_global - credito_global  # negativo = saldo a favor
+    pagos_total = IVAPayment.objects.aggregate(
+        total=models.Sum("amount")
+    )["total"] or Decimal("0.00")
+    # Posición neta: débito − crédito − pagos ya realizados a AFIP
+    posicion_global = debito_global - credito_global - pagos_total
 
     # ── Posición IVA filtrada (para el detalle) ───────────────────────────────
     iva_start = (request.GET.get("iva_start") or "").strip()
@@ -262,6 +267,7 @@ def taxes_view(request):
             # Posición global (desde inscripción RI)
             "credito_global": credito_global,
             "debito_global": debito_global,
+            "pagos_total": pagos_total,
             "posicion_global": posicion_global,
             "inscripcion_date": INSCRIPCION_DATE,
             "debito_start_date": DEBITO_START_DATE,
