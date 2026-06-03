@@ -1,0 +1,71 @@
+{% extends "inventory/base.html" %}
+{% load latam_numbers %}
+{% block title %}Comprobantes AFIP{% endblock %}
+{% block content %}
+<h1>Comprobantes recibidos AFIP</h1>
+<p class="subtitle">Importá el Excel de "Mis Comprobantes Recibidos" de AFIP. Solo se importan Facturas A y Notas de Crédito A (crédito fiscal IVA 21%).</p>
+
+<div class="card" style="margin-bottom:16px;">
+    <div class="card-title">Importar archivo</div>
+    {% if error %}
+    <div style="color:var(--negative); margin-bottom:12px;">{{ error }}</div>
+    {% endif %}
+    {% if success %}
+    <div style="color:var(--positive); margin-bottom:12px;">{{ success }}</div>
+    {% endif %}
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <label for="afip-file">Archivo XLSX (Mis Comprobantes Recibidos)</label>
+        <input id="afip-file" name="file" type="file" accept=".xlsx" required />
+        <p style="font-size:12px; color:var(--muted); margin-top:6px;">
+            El archivo debe tener la fila de encabezados con "Fecha" en la primera columna.<br>
+            Los comprobantes ya importados se omiten automáticamente (sin duplicados).
+        </p>
+        <button type="submit" style="margin-top:12px;">Importar</button>
+    </form>
+</div>
+
+{% if afip_invoices %}
+<div class="card table-card">
+    <div class="card-title">Comprobantes importados (últimos 200)</div>
+    <table>
+        <thead>
+            <tr>
+                <th>Fecha</th>
+                <th>Tipo</th>
+                <th>Comprobante</th>
+                <th>Emisor (CUIT)</th>
+                <th>Razón Social</th>
+                <th>Neto 21%</th>
+                <th>IVA 21%</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for inv in afip_invoices %}
+            <tr {% if inv.is_nota_credito %}style="color:var(--negative);"{% endif %}>
+                <td>{{ inv.date|date:"d/m/Y" }}</td>
+                <td>{{ inv.tipo_descripcion }}</td>
+                <td>{{ inv.comprobante_str }}</td>
+                <td>{{ inv.cuit_emisor }}</td>
+                <td>{{ inv.razon_social }}</td>
+                <td>
+                    {% if inv.is_nota_credito %}−{% endif %}
+                    ${{ inv.neto_21|latam_number:2 }}
+                </td>
+                <td>
+                    <strong>
+                        {% if inv.is_nota_credito %}−{% endif %}
+                        ${{ inv.iva_21|latam_number:2 }}
+                    </strong>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="card">
+    <p class="subtitle">No hay comprobantes importados todavía.</p>
+</div>
+{% endif %}
+{% endblock %}

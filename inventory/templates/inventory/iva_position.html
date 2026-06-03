@@ -3,7 +3,15 @@
 {% block title %}Posición IVA{% endblock %}
 {% block content %}
 <h1>Posición IVA</h1>
-<p class="subtitle">Débito fiscal (ventas) vs crédito fiscal (compras). Los precios son sin IVA.</p>
+<p class="subtitle">
+    Débito fiscal (ventas) vs crédito fiscal (compras).
+    {% if use_afip %}
+    Crédito basado en <strong>comprobantes importados de AFIP</strong> (Facturas A — IVA 21%).
+    {% else %}
+    Crédito basado en compras registradas en el ERP.
+    <a href="{% url 'inventory_taxes' %}#afip-section" style="margin-left:8px;">Importar comprobantes AFIP →</a>
+    {% endif %}
+</p>
 
 <div class="card" style="margin-bottom:16px;">
     <div class="card-title">Filtrar por período</div>
@@ -30,7 +38,10 @@
         <p class="value">${{ debito_total|latam_number:2 }}</p>
     </div>
     <div class="card">
-        <div class="card-title">Crédito fiscal (compras)</div>
+        <div class="card-title">
+            Crédito fiscal
+            {% if use_afip %}<span style="font-size:11px; font-weight:400; color:var(--muted);">(AFIP)</span>{% endif %}
+        </div>
         <p class="value">${{ credito_total|latam_number:2 }}</p>
     </div>
     <div class="card">
@@ -41,6 +52,129 @@
     </div>
 </div>
 
+{% if use_afip %}
+{# ── Crédito AFIP + Débito ERP ── #}
+<div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px; align-items:start;">
+
+    <div class="card table-card">
+        <div class="card-title">Débito fiscal — detalle ventas</div>
+        {% if debito_rows %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Comprobante</th>
+                    <th>Depósito</th>
+                    <th>Producto</th>
+                    <th>Neto</th>
+                    <th>IVA %</th>
+                    <th>IVA $</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in debito_rows %}
+                <tr>
+                    <td>{{ row.date|date:"d/m/Y" }}</td>
+                    <td>{{ row.comprobante }}</td>
+                    <td>{{ row.deposito }}</td>
+                    <td>{{ row.product }}</td>
+                    <td>${{ row.net|latam_number:2 }}</td>
+                    <td>{{ row.vat_percent|latam_number:0 }}%</td>
+                    <td><strong>${{ row.vat_amount|latam_number:2 }}</strong></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td colspan="6" style="text-align:right; font-weight:600;">Total débito</td>
+                    <td><strong>${{ debito_total|latam_number:2 }}</strong></td>
+                </tr>
+            </tfoot>
+        </table>
+        {% else %}
+        <p class="subtitle">No hay ventas con IVA en el período.</p>
+        {% endif %}
+    </div>
+
+    <div class="card table-card">
+        <div class="card-title">Crédito fiscal — Facturas A (AFIP)</div>
+        {% if afip_rows %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Comprobante</th>
+                    <th>Razón Social</th>
+                    <th>Neto 21%</th>
+                    <th>IVA 21%</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in afip_rows %}
+                <tr {% if row.is_nc %}style="color:var(--negative);"{% endif %}>
+                    <td>{{ row.date|date:"d/m/Y" }}</td>
+                    <td>{{ row.comprobante }}</td>
+                    <td>{{ row.razon_social }}</td>
+                    <td>{% if row.is_nc %}−{% endif %}${{ row.neto_21|latam_number:2 }}</td>
+                    <td><strong>{% if row.is_nc %}−{% endif %}${{ row.iva_21|latam_number:2 }}</strong></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td colspan="4" style="text-align:right; font-weight:600;">Total crédito AFIP</td>
+                    <td><strong>${{ credito_afip_total|latam_number:2 }}</strong></td>
+                </tr>
+            </tfoot>
+        </table>
+        {% else %}
+        <p class="subtitle">No hay comprobantes AFIP con IVA 21% en el período.</p>
+        {% endif %}
+    </div>
+
+</div>
+
+{% if credito_erp_rows %}
+<div class="card table-card" style="margin-top:16px;">
+    <div class="card-title" style="color:var(--muted);">
+        Compras ERP — referencia
+        <span style="font-size:12px; font-weight:400;">(no contadas en el total — pueden solapar con comprobantes AFIP)</span>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th>Fecha</th>
+                <th>Comprobante</th>
+                <th>Producto</th>
+                <th>Neto</th>
+                <th>IVA %</th>
+                <th>IVA $</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in credito_erp_rows %}
+            <tr style="opacity:0.6;">
+                <td>{{ row.date|date:"d/m/Y" }}</td>
+                <td>{{ row.comprobante }}</td>
+                <td>{{ row.product }}</td>
+                <td>${{ row.net|latam_number:2 }}</td>
+                <td>{{ row.vat_percent|latam_number:0 }}%</td>
+                <td>${{ row.vat_amount|latam_number:2 }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr style="opacity:0.6;">
+                <td colspan="5" style="text-align:right; font-weight:600;">Total ERP (referencia)</td>
+                <td>${{ credito_erp_total|latam_number:2 }}</td>
+            </tr>
+        </tfoot>
+    </table>
+</div>
+{% endif %}
+
+{% else %}
+{# ── Sin datos AFIP: mostrar layout original ── #}
 <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px; align-items:start;">
 
     <div class="card table-card">
@@ -85,7 +219,7 @@
 
     <div class="card table-card">
         <div class="card-title">Crédito fiscal — detalle compras</div>
-        {% if credito_rows %}
+        {% if credito_erp_rows %}
         <table>
             <thead>
                 <tr>
@@ -98,7 +232,7 @@
                 </tr>
             </thead>
             <tbody>
-                {% for row in credito_rows %}
+                {% for row in credito_erp_rows %}
                 <tr>
                     <td>{{ row.date|date:"d/m/Y" }}</td>
                     <td>{{ row.comprobante }}</td>
@@ -112,7 +246,7 @@
             <tfoot>
                 <tr>
                     <td colspan="5" style="text-align:right; font-weight:600;">Total crédito</td>
-                    <td><strong>${{ credito_total|latam_number:2 }}</strong></td>
+                    <td><strong>${{ credito_erp_total|latam_number:2 }}</strong></td>
                 </tr>
             </tfoot>
         </table>
@@ -122,4 +256,6 @@
     </div>
 
 </div>
+{% endif %}
+
 {% endblock %}

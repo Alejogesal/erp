@@ -137,6 +137,79 @@
     {% endif %}
 </div>
 
+{# ── Comprobantes AFIP ────────────────────────────────────────────────────── #}
+<div class="card" style="margin-bottom:16px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+        <div>
+            <div class="card-title" style="margin-bottom:2px;">Comprobantes recibidos (AFIP)</div>
+            {% if use_afip %}
+            <div style="font-size:12px; color:var(--muted);">
+                {{ afip_count }} comprobante{% if afip_count != 1 %}s{% endif %} importado{% if afip_count != 1 %}s{% endif %} —
+                IVA 21% total: <strong style="color:var(--positive);">${{ afip_total_iva21|latam_number:2 }}</strong>
+            </div>
+            {% else %}
+            <div style="font-size:12px; color:var(--muted);">Sin comprobantes importados — el crédito fiscal usa datos del ERP.</div>
+            {% endif %}
+        </div>
+        <button type="button" onclick="toggleSection('afip-section', this)" data-open="Cerrar" data-closed="{% if use_afip %}Ver / Actualizar{% else %}Importar{% endif %}">
+            {% if use_afip %}Ver / Actualizar{% else %}Importar{% endif %}
+        </button>
+    </div>
+
+    <div id="afip-section" style="display:none;">
+        {% if afip_import_msg %}
+        <div style="margin-bottom:12px; color:{% if afip_import_msg.0 == 'ok' %}var(--positive){% else %}var(--negative){% endif %};">
+            {{ afip_import_msg.1 }}
+        </div>
+        {% endif %}
+        <form method="post" enctype="multipart/form-data" style="margin-bottom:{% if use_afip %}16px{% else %}0{% endif %};">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="import_afip">
+            <div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
+                <div>
+                    <label style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">
+                        Excel "Mis Comprobantes Recibidos" de AFIP (.xlsx)
+                    </label>
+                    <input type="file" name="file" accept=".xlsx" required>
+                </div>
+                <button type="submit">Importar</button>
+            </div>
+            <p style="font-size:11px; color:var(--muted); margin-top:6px;">
+                Solo se importan Facturas A y Notas de Crédito A. Los duplicados se omiten automáticamente.
+            </p>
+        </form>
+
+        {% if use_afip %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Tipo</th>
+                    <th>Comprobante</th>
+                    <th>Razón Social</th>
+                    <th>CUIT Emisor</th>
+                    <th>Neto 21%</th>
+                    <th>IVA 21%</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for inv in afip_invoices %}
+                <tr {% if inv.is_nota_credito %}style="color:var(--negative);"{% endif %}>
+                    <td>{{ inv.date|date:"d/m/Y" }}</td>
+                    <td style="font-size:12px;">{{ inv.tipo_descripcion }}</td>
+                    <td>{{ inv.comprobante_str }}</td>
+                    <td>{{ inv.razon_social }}</td>
+                    <td style="color:var(--muted); font-size:12px;">{{ inv.cuit_emisor }}</td>
+                    <td>{% if inv.is_nota_credito %}−{% endif %}${{ inv.neto_21|latam_number:2 }}</td>
+                    <td><strong>{% if inv.is_nota_credito %}−{% endif %}${{ inv.iva_21|latam_number:2 }}</strong></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+    </div>
+</div>
+
 {# ── Gastos e impuestos ───────────────────────────────────────────────────── #}
 <div class="card" style="margin-bottom:16px;">
     <div class="card-title">Agregar gasto / insumo / impuesto</div>
@@ -213,9 +286,14 @@
             <div class="card-title">Crédito fiscal total</div>
             <p class="value">${{ credito_total|latam_number:2 }}</p>
             <div style="margin-top:10px; font-size:12px; color:var(--muted); display:flex; flex-direction:column; gap:3px;">
+                {% if use_afip %}
+                <div style="color:var(--positive);">Comp. AFIP: <strong>${{ credito_afip|latam_number:2 }}</strong></div>
+                <div>Gastos: <strong style="color:var(--text);">${{ credito_gastos|latam_number:2 }}</strong></div>
+                {% else %}
                 <div>Compras: <strong style="color:var(--text);">${{ credito_compras|latam_number:2 }}</strong></div>
                 <div>Gastos: <strong style="color:var(--text);">${{ credito_gastos|latam_number:2 }}</strong></div>
                 <div style="color:#2f81f7;">Comisiones ML: <strong>${{ credito_comisiones_ml|latam_number:2 }}</strong></div>
+                {% endif %}
             </div>
         </div>
         <div class="card">
@@ -271,7 +349,10 @@
             </div>
 
             <div class="card table-card">
-                <div class="card-title">Crédito fiscal — compras y gastos</div>
+                <div class="card-title">
+                    Crédito fiscal —
+                    {% if use_afip %}comprobantes AFIP{% else %}compras y gastos{% endif %}
+                </div>
                 {% if credito_rows %}
                 <table>
                     <thead>
@@ -286,11 +367,12 @@
                     </thead>
                     <tbody>
                         {% for row in credito_rows %}
-                        <tr>
+                        <tr {% if row.vat_amount < 0 %}style="color:var(--negative);"{% endif %}>
                             <td>{{ row.date|date:"d/m/Y" }}</td>
                             <td style="color:var(--muted); font-size:12px;">
                                 {% if row.source == "gasto" %}Gasto
                                 {% elif row.source == "comision_ml" %}<span style="color:#2f81f7;">Comisión ML</span>
+                                {% elif row.source == "afip" %}<span style="color:var(--positive);">AFIP</span>
                                 {% else %}Compra{% endif %}
                             </td>
                             <td>{{ row.product }}</td>
@@ -308,7 +390,7 @@
                     </tfoot>
                 </table>
                 {% else %}
-                <p class="subtitle">No hay compras ni gastos con IVA en el período.</p>
+                <p class="subtitle">No hay comprobantes con IVA en el período.</p>
                 {% endif %}
             </div>
         </div>

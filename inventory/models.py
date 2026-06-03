@@ -625,3 +625,50 @@ class TaxExpense(models.Model):
 
     def __str__(self) -> str:
         return f"{self.description} - {self.amount}"
+
+
+class AFIPInvoice(models.Model):
+    """Comprobante recibido importado desde 'Mis Comprobantes' de AFIP."""
+
+    FACTURA_A = 1
+    NOTA_CREDITO_A = 3
+    FACTURA_B = 6
+    NOTA_CREDITO_B = 8
+
+    date = models.DateField()
+    tipo_codigo = models.IntegerField()
+    tipo_descripcion = models.CharField(max_length=100, blank=True)
+    punto_venta = models.IntegerField()
+    numero = models.IntegerField()
+    cae = models.CharField(max_length=30, blank=True)
+    cuit_emisor = models.CharField(max_length=20)
+    razon_social = models.CharField(max_length=255, blank=True)
+    iva_105 = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    neto_105 = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    iva_21 = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    neto_21 = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    iva_27 = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    neto_27 = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    total_iva = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    imp_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    imported_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-date", "-id"]
+        unique_together = [("cuit_emisor", "punto_venta", "numero", "tipo_codigo")]
+
+    def __str__(self) -> str:
+        return f"{self.tipo_descripcion} {self.punto_venta:04d}-{self.numero:08d} ({self.razon_social})"
+
+    @property
+    def comprobante_str(self) -> str:
+        return f"{self.punto_venta:04d}-{self.numero:08d}"
+
+    @property
+    def is_nota_credito(self) -> bool:
+        return self.tipo_codigo in (self.NOTA_CREDITO_A, self.NOTA_CREDITO_B)
+
+    @property
+    def credito_fiscal_21(self) -> Decimal:
+        """IVA 21% computable como crédito (negativo para NC)."""
+        return -self.iva_21 if self.is_nota_credito else self.iva_21

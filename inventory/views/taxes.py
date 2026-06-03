@@ -8,8 +8,9 @@ from django.shortcuts import redirect, render
 from django.utils import timezone
 
 from django.db import models
-from ..models import IVAPayment, PurchaseItem, Sale, SaleItem, TaxExpense, Warehouse
+from ..models import AFIPInvoice, IVAPayment, PurchaseItem, Sale, SaleItem, TaxExpense, Warehouse
 from .forms import IVAPaymentForm, TaxExpenseForm
+from .afip import _parse_afip_xlsx
 
 # Fecha de inscripción como Responsable Inscripto — inicio de acumulación de crédito fiscal
 INSCRIPCION_DATE = date(2025, 5, 26)
@@ -19,7 +20,7 @@ IVA_FACTOR = Decimal("21") / Decimal("121")
 
 
 def _calc_credito(purchase_qs, expenses_qs, ml_sales_qs):
-    """Calcula crédito fiscal total y devuelve (rows, total, subtotals)."""
+    """Calcula crédito fiscal desde el ERP (compras + gastos + comisiones ML)."""
     rows = []
     total = Decimal("0.00")
 
@@ -72,6 +73,45 @@ def _calc_credito(purchase_qs, expenses_qs, ml_sales_qs):
     return rows, total, subtotals
 
 
+def _calc_credito_afip(afip_qs, expenses_qs):
+    """Calcula crédito fiscal usando comprobantes AFIP + gastos manuales."""
+    rows = []
+    total = Decimal("0.00")
+
+    for inv in afip_qs:
+        credito = inv.credito_fiscal_21
+        rows.append({
+            "date": inv.date,
+            "comprobante": inv.comprobante_str,
+            "product": inv.razon_social,
+            "net": -inv.neto_21 if inv.is_nota_credito else inv.neto_21,
+            "vat_percent": Decimal("21"),
+            "vat_amount": credito,
+            "source": "afip",
+        })
+        total += credito
+
+    for expense in expenses_qs:
+        rows.append({
+            "date": expense.paid_at,
+            "comprobante": "-",
+            "product": expense.description,
+            "net": expense.amount,
+            "vat_percent": None,
+            "vat_amount": expense.vat_amount,
+            "source": "gasto",
+        })
+        total += expense.vat_amount
+
+    rows.sort(key=lambda x: x["date"] if hasattr(x["date"], "date") else datetime.combine(x["date"], time.min))
+    subtotals = {
+        "afip": sum(r["vat_amount"] for r in rows if r["source"] == "afip"),
+        "gastos": sum(r["vat_amount"] for r in rows if r["source"] == "gasto"),
+        "comisiones_ml": Decimal("0.00"),
+    }
+    return rows, total, subtotals
+
+
 def _calc_debito(ml_items_qs, common_items_qs):
     """Calcula débito fiscal total y devuelve (rows, total)."""
     rows = []
@@ -111,6 +151,7 @@ def _calc_debito(ml_items_qs, common_items_qs):
 def taxes_view(request):
     tax_form = TaxExpenseForm()
     iva_payment_form = IVAPaymentForm()
+    afip_import_msg = None
     if request.method == "POST":
         action = request.POST.get("action") or ""
 
@@ -139,6 +180,18 @@ def taxes_view(request):
                 messages.success(request, "Pago de IVA registrado.")
                 return redirect("inventory_taxes")
             messages.error(request, "Revisá los datos del pago de IVA.")
+
+        elif action == "import_afip":
+            upload = request.FILES.get("file")
+            if not upload:
+                afip_import_msg = ("error", "Seleccioná un archivo .xlsx.")
+            else:
+                created, skipped, errors, file_err = _parse_afip_xlsx(upload)
+                if file_err:
+                    afip_import_msg = ("error", file_err)
+                else:
+                    afip_import_msg = ("ok", f"{created} comprobantes nuevos, {skipped} omitidos, {errors} con error.")
+
         else:
             tax_form = TaxExpenseForm(request.POST)
             if tax_form.is_valid():
@@ -150,26 +203,21 @@ def taxes_view(request):
     taxes = TaxExpense.objects.order_by("-paid_at", "-id")
     iva_payments = IVAPayment.objects.all()
 
+    # ── AFIP: resumen de comprobantes importados ──────────────────────────────
+    afip_invoices = AFIPInvoice.objects.filter(
+        tipo_codigo__in=(AFIPInvoice.FACTURA_A, AFIPInvoice.NOTA_CREDITO_A)
+    ).order_by("-date")
+    use_afip = afip_invoices.exists()
+    afip_count = afip_invoices.count()
+    afip_total_iva21 = sum(inv.credito_fiscal_21 for inv in afip_invoices)
+
     # ── Posición IVA global (desde inscripción como RI) ───────────────────────
-    # Crédito: desde INSCRIPCION_DATE sin límite superior
     inscripcion_dt = timezone.make_aware(datetime.combine(INSCRIPCION_DATE, time.min))
     debito_start_dt = timezone.make_aware(datetime.combine(DEBITO_START_DATE, time.min))
 
-    g_purchases = (
-        PurchaseItem.objects.filter(vat_percent__gt=0, purchase__created_at__gte=inscripcion_dt)
-        .select_related("purchase", "product")
-        .order_by("purchase__created_at", "purchase__id")
-    )
     g_expenses = (
         TaxExpense.objects.filter(vat_amount__gt=0, paid_at__gte=INSCRIPCION_DATE)
         .order_by("paid_at", "id")
-    )
-    g_ml_sales_credito = (
-        Sale.objects
-        .filter(warehouse__type=Warehouse.WarehouseType.MERCADOLIBRE,
-                ml_commission_total__gt=0,
-                created_at__gte=inscripcion_dt)
-        .order_by("created_at", "id")
     )
     g_ml_items = (
         SaleItem.objects
@@ -187,34 +235,51 @@ def taxes_view(request):
         .order_by("sale__created_at", "sale__id")
     )
 
-    _, credito_global, _ = _calc_credito(g_purchases, g_expenses, g_ml_sales_credito)
+    if use_afip:
+        g_afip_qs = AFIPInvoice.objects.filter(
+            tipo_codigo__in=(AFIPInvoice.FACTURA_A, AFIPInvoice.NOTA_CREDITO_A),
+            date__gte=INSCRIPCION_DATE,
+        ).order_by("date")
+        _, credito_global, _ = _calc_credito_afip(g_afip_qs, g_expenses)
+    else:
+        g_purchases = (
+            PurchaseItem.objects.filter(vat_percent__gt=0, purchase__created_at__gte=inscripcion_dt)
+            .select_related("purchase", "product")
+            .order_by("purchase__created_at", "purchase__id")
+        )
+        g_ml_sales_credito = (
+            Sale.objects
+            .filter(warehouse__type=Warehouse.WarehouseType.MERCADOLIBRE,
+                    ml_commission_total__gt=0,
+                    created_at__gte=inscripcion_dt)
+            .order_by("created_at", "id")
+        )
+        _, credito_global, _ = _calc_credito(g_purchases, g_expenses, g_ml_sales_credito)
+
     _, debito_global = _calc_debito(g_ml_items, g_common_items)
     pagos_total = IVAPayment.objects.aggregate(
         total=models.Sum("amount")
     )["total"] or Decimal("0.00")
-    # Posición neta: débito − crédito − pagos ya realizados a AFIP
     posicion_global = debito_global - credito_global - pagos_total
 
     # ── Posición IVA filtrada (para el detalle) ───────────────────────────────
     iva_start = (request.GET.get("iva_start") or "").strip()
     iva_end = (request.GET.get("iva_end") or "").strip()
     start_dt = end_dt = None
+    start_d = end_d = None
     if iva_start:
         try:
-            start_dt = timezone.make_aware(datetime.combine(datetime.strptime(iva_start, "%Y-%m-%d"), time.min))
+            start_d = datetime.strptime(iva_start, "%Y-%m-%d").date()
+            start_dt = timezone.make_aware(datetime.combine(start_d, time.min))
         except ValueError:
             pass
     if iva_end:
         try:
-            end_dt = timezone.make_aware(datetime.combine(datetime.strptime(iva_end, "%Y-%m-%d"), time.max))
+            end_d = datetime.strptime(iva_end, "%Y-%m-%d").date()
+            end_dt = timezone.make_aware(datetime.combine(end_d, time.max))
         except ValueError:
             pass
 
-    purchase_items_qs = (
-        PurchaseItem.objects.filter(vat_percent__gt=0)
-        .select_related("purchase", "product")
-        .order_by("purchase__created_at", "purchase__id")
-    )
     ml_items_qs = (
         SaleItem.objects
         .filter(sale__warehouse__type=Warehouse.WarehouseType.MERCADOLIBRE)
@@ -228,31 +293,46 @@ def taxes_view(request):
         .order_by("sale__created_at", "sale__id")
     )
     if start_dt:
-        purchase_items_qs = purchase_items_qs.filter(purchase__created_at__gte=start_dt)
         ml_items_qs = ml_items_qs.filter(sale__created_at__gte=start_dt)
         common_items_qs = common_items_qs.filter(sale__created_at__gte=start_dt)
     if end_dt:
-        purchase_items_qs = purchase_items_qs.filter(purchase__created_at__lte=end_dt)
         ml_items_qs = ml_items_qs.filter(sale__created_at__lte=end_dt)
         common_items_qs = common_items_qs.filter(sale__created_at__lte=end_dt)
 
     expenses_qs = TaxExpense.objects.filter(vat_amount__gt=0).order_by("paid_at", "id")
-    if start_dt:
-        expenses_qs = expenses_qs.filter(paid_at__gte=start_dt.date())
-    if end_dt:
-        expenses_qs = expenses_qs.filter(paid_at__lte=end_dt.date())
+    if start_d:
+        expenses_qs = expenses_qs.filter(paid_at__gte=start_d)
+    if end_d:
+        expenses_qs = expenses_qs.filter(paid_at__lte=end_d)
 
-    ml_sales_qs = (
-        Sale.objects
-        .filter(warehouse__type=Warehouse.WarehouseType.MERCADOLIBRE, ml_commission_total__gt=0)
-        .order_by("created_at", "id")
-    )
-    if start_dt:
-        ml_sales_qs = ml_sales_qs.filter(created_at__gte=start_dt)
-    if end_dt:
-        ml_sales_qs = ml_sales_qs.filter(created_at__lte=end_dt)
+    if use_afip:
+        f_afip_qs = AFIPInvoice.objects.filter(
+            tipo_codigo__in=(AFIPInvoice.FACTURA_A, AFIPInvoice.NOTA_CREDITO_A)
+        ).order_by("date")
+        if start_d:
+            f_afip_qs = f_afip_qs.filter(date__gte=start_d)
+        if end_d:
+            f_afip_qs = f_afip_qs.filter(date__lte=end_d)
+        credito_rows, credito_total, credito_subtotals = _calc_credito_afip(f_afip_qs, expenses_qs)
+    else:
+        purchase_items_qs = (
+            PurchaseItem.objects.filter(vat_percent__gt=0)
+            .select_related("purchase", "product")
+            .order_by("purchase__created_at", "purchase__id")
+        )
+        ml_sales_qs = (
+            Sale.objects
+            .filter(warehouse__type=Warehouse.WarehouseType.MERCADOLIBRE, ml_commission_total__gt=0)
+            .order_by("created_at", "id")
+        )
+        if start_dt:
+            purchase_items_qs = purchase_items_qs.filter(purchase__created_at__gte=start_dt)
+            ml_sales_qs = ml_sales_qs.filter(created_at__gte=start_dt)
+        if end_dt:
+            purchase_items_qs = purchase_items_qs.filter(purchase__created_at__lte=end_dt)
+            ml_sales_qs = ml_sales_qs.filter(created_at__lte=end_dt)
+        credito_rows, credito_total, credito_subtotals = _calc_credito(purchase_items_qs, expenses_qs, ml_sales_qs)
 
-    credito_rows, credito_total, credito_subtotals = _calc_credito(purchase_items_qs, expenses_qs, ml_sales_qs)
     debito_rows, debito_total = _calc_debito(ml_items_qs, common_items_qs)
     posicion_iva = debito_total - credito_total
 
@@ -264,6 +344,12 @@ def taxes_view(request):
             "taxes": taxes,
             "iva_payment_form": iva_payment_form,
             "iva_payments": iva_payments,
+            # AFIP
+            "use_afip": use_afip,
+            "afip_invoices": afip_invoices[:100],
+            "afip_count": afip_count,
+            "afip_total_iva21": afip_total_iva21,
+            "afip_import_msg": afip_import_msg,
             # Posición global (desde inscripción RI)
             "credito_global": credito_global,
             "debito_global": debito_global,
@@ -275,9 +361,10 @@ def taxes_view(request):
             "credito_rows": credito_rows,
             "debito_rows": debito_rows,
             "credito_total": credito_total,
-            "credito_compras": credito_subtotals["compras"],
+            "credito_compras": credito_subtotals.get("compras", Decimal("0.00")),
             "credito_gastos": credito_subtotals["gastos"],
             "credito_comisiones_ml": credito_subtotals["comisiones_ml"],
+            "credito_afip": credito_subtotals.get("afip", Decimal("0.00")),
             "debito_total": debito_total,
             "posicion_iva": posicion_iva,
             "iva_start": iva_start,
