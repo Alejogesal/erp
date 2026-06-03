@@ -3,7 +3,7 @@
 {% block title %}Impuestos / Gastos{% endblock %}
 {% block content %}
 <h1>Impuestos / Gastos</h1>
-<p class="subtitle">Registrá impuestos, honorarios y otros gastos para descontarlos del margen.</p>
+<p class="subtitle">Registrá impuestos, honorarios, gastos y pagos de IVA a AFIP.</p>
 
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 <style>
@@ -13,49 +13,124 @@
         color: var(--text);
         box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
     }
-    .flatpickr-day {
-        color: #fff;
+    .flatpickr-day { color: #fff; }
+    .flatpickr-day:hover { background: rgba(47, 129, 247, 0.15); }
+    .flatpickr-day.today { border-color: var(--accent); }
+    .flatpickr-day.selected, .flatpickr-day.startRange, .flatpickr-day.endRange {
+        background: var(--accent); border-color: var(--accent); color: #fff;
     }
-    .flatpickr-day:hover {
-        background: rgba(47, 129, 247, 0.15);
-    }
-    .flatpickr-day.today {
-        border-color: var(--accent);
-    }
-    .flatpickr-day.selected,
-    .flatpickr-day.startRange,
-    .flatpickr-day.endRange {
-        background: var(--accent);
-        border-color: var(--accent);
-        color: #fff;
-    }
-    .flatpickr-months,
-    .flatpickr-weekdays,
-    .flatpickr-weekday,
-    .flatpickr-current-month,
-    .flatpickr-current-month .cur-month,
-    .flatpickr-current-month .numInputWrapper,
-    .flatpickr-monthDropdown-months,
+    .flatpickr-months, .flatpickr-weekdays, .flatpickr-weekday,
+    .flatpickr-current-month, .flatpickr-current-month .cur-month,
+    .flatpickr-current-month .numInputWrapper, .flatpickr-monthDropdown-months,
     .flatpickr-monthDropdown-months .flatpickr-monthDropdown-month,
-    .flatpickr-prev-month,
-    .flatpickr-next-month {
-        color: #fff !important;
-    }
-    .flatpickr-day.prevMonthDay,
-    .flatpickr-day.nextMonthDay,
-    .flatpickr-day.flatpickr-disabled {
+    .flatpickr-prev-month, .flatpickr-next-month { color: #fff !important; }
+    .flatpickr-day.prevMonthDay, .flatpickr-day.nextMonthDay, .flatpickr-day.flatpickr-disabled {
         color: rgba(255, 255, 255, 0.35);
     }
-    .danger {
-        background: #c0392b;
-        border: none;
-        color: #fff;
-    }
-    .danger:hover {
-        filter: brightness(1.05);
-    }
+    .danger { background: #c0392b; border: none; color: #fff; }
+    .danger:hover { filter: brightness(1.05); }
+    .badge { display:inline-block; padding:2px 8px; border-radius:4px; font-size:12px; font-weight:600; }
+    .badge-debito  { background:rgba(192,57,43,0.15); color:#e74c3c; }
+    .badge-credito { background:rgba(39,174,96,0.15); color:#27ae60; }
+    .badge-saldo   { background:rgba(47,129,247,0.15); color:#2f81f7; }
 </style>
 
+{# ── Posición IVA global ──────────────────────────────────────────────────── #}
+<div class="card" style="margin-bottom:16px;" id="posicion-global">
+    <div class="card-title">Posición IVA — desde inscripción como RI ({{ inscripcion_date|date:"d/m/Y" }})</div>
+    <div class="cards" style="margin-bottom:0;">
+        <div class="card">
+            <div class="card-title" style="font-size:13px;">Crédito fiscal acumulado</div>
+            <p class="value" style="color:var(--positive);">${{ credito_global|latam_number:2 }}</p>
+            <div style="font-size:12px; color:var(--muted);">desde {{ inscripcion_date|date:"d/m/Y" }}</div>
+        </div>
+        <div class="card">
+            <div class="card-title" style="font-size:13px;">Débito fiscal acumulado</div>
+            <p class="value" style="color:var(--negative);">${{ debito_global|latam_number:2 }}</p>
+            <div style="font-size:12px; color:var(--muted);">desde {{ debito_start_date|date:"d/m/Y" }}</div>
+        </div>
+        <div class="card">
+            {% if posicion_global <= 0 %}
+            <div class="card-title" style="font-size:13px;">Saldo a favor remanente</div>
+            <p class="value" style="color:var(--positive);">${{ posicion_global|latam_number:2|slice:"1:" }}</p>
+            <div style="font-size:12px; color:var(--muted);">crédito supera al débito</div>
+            {% else %}
+            <div class="card-title" style="font-size:13px;">IVA a pagar</div>
+            <p class="value" style="color:var(--negative);">${{ posicion_global|latam_number:2 }}</p>
+            <div style="font-size:12px; color:var(--muted);">débito supera al crédito</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+{# ── Pagos de IVA a AFIP ──────────────────────────────────────────────────── #}
+<div class="card" style="margin-bottom:16px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+        <div class="card-title" style="margin-bottom:0;">Pagos de IVA a AFIP</div>
+        <button type="button" onclick="toggleSection('iva-form', this)" data-open="Cancelar" data-closed="+ Registrar pago">+ Registrar pago</button>
+    </div>
+
+    <div id="iva-form" style="display:none; margin-bottom:16px;">
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="add_iva_payment">
+            <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
+                {% for field in iva_payment_form %}
+                <div>
+                    <label for="{{ field.id_for_label }}" style="display:block; font-size:12px; color:var(--muted); margin-bottom:4px;">
+                        {{ field.label }}{% if field.field.required %} *{% endif %}
+                    </label>
+                    {{ field }}
+                    {% if field.errors %}<div style="color:#e74c3c; font-size:12px;">{{ field.errors|join:", " }}</div>{% endif %}
+                </div>
+                {% endfor %}
+                <div><button type="submit">Guardar</button></div>
+            </div>
+        </form>
+    </div>
+
+    {% if iva_payments %}
+    <table>
+        <thead>
+            <tr>
+                <th>Período</th>
+                <th>Fecha de pago</th>
+                <th>Tipo</th>
+                <th>Monto</th>
+                <th>Descripción</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in iva_payments %}
+            <tr>
+                <td>{{ p.period|date:"m/Y" }}</td>
+                <td>{{ p.paid_at|date:"d/m/Y" }}</td>
+                <td>
+                    {% if p.tipo == "DEBITO" %}<span class="badge badge-debito">Débito fiscal</span>
+                    {% elif p.tipo == "CREDITO" %}<span class="badge badge-credito">Crédito fiscal</span>
+                    {% else %}<span class="badge badge-saldo">Saldo a pagar</span>{% endif %}
+                </td>
+                <td>${{ p.amount|latam_number:2 }}</td>
+                <td>{{ p.notes|default:"-" }}</td>
+                <td>
+                    <form method="post" style="display:inline;">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="delete_iva_payment">
+                        <input type="hidden" name="payment_id" value="{{ p.pk }}">
+                        <button type="submit" class="danger" onclick="return confirm('¿Eliminar?');">Eliminar</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="subtitle" style="margin:0;">Aún no hay pagos de IVA registrados.</p>
+    {% endif %}
+</div>
+
+{# ── Gastos e impuestos ───────────────────────────────────────────────────── #}
 <div class="card" style="margin-bottom:16px;">
     <div class="card-title">Agregar gasto / insumo / impuesto</div>
     <form method="post">
@@ -104,8 +179,10 @@
     </table>
     </div>
 </div>
+
+{# ── Posición IVA por período (filtrable) ─────────────────────────────────── #}
 <div class="card" style="margin-top:16px;" id="iva-section">
-    <div class="card-title">Posición IVA</div>
+    <div class="card-title">Posición IVA por período</div>
     <form method="get" action="#iva-section" autocomplete="off" style="margin-bottom:16px;">
         <div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
             <div>
@@ -238,6 +315,13 @@
         flatpickr("#id_paid_at", { dateFormat: "Y-m-d", allowInput: true });
     })();
 
+    function toggleSection(id, btn) {
+        var el = document.getElementById(id);
+        var visible = el.style.display !== "none";
+        el.style.display = visible ? "none" : "block";
+        btn.textContent = visible ? btn.dataset.closed : btn.dataset.open;
+    }
+
     function toggleGastos() {
         var detail = document.getElementById("gastos-detail");
         var btn = document.getElementById("gastos-toggle-btn");
@@ -254,7 +338,6 @@
         btn.textContent = visible ? "Ver detalle" : "Ocultar detalle";
     }
 
-    // Auto-abrir detalle IVA si hay filtro activo
     (function() {
         var params = new URLSearchParams(window.location.search);
         if (params.get("iva_start") || params.get("iva_end")) {

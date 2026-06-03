@@ -1,5 +1,5 @@
 """Taxes view."""
-from datetime import datetime, time
+from datetime import date, datetime, time
 from decimal import Decimal
 
 from django.contrib import messages
@@ -7,34 +7,190 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import redirect, render
 from django.utils import timezone
 
-from ..models import PurchaseItem, Sale, SaleItem, TaxExpense, Warehouse
-from .forms import TaxExpenseForm
+from ..models import IVAPayment, PurchaseItem, Sale, SaleItem, TaxExpense, Warehouse
+from .forms import IVAPaymentForm, TaxExpenseForm
+
+# Fecha de inscripción como Responsable Inscripto — inicio de acumulación de crédito fiscal
+INSCRIPCION_DATE = date(2025, 5, 26)
+# A partir de esta fecha aplica débito fiscal (IVA en ventas)
+DEBITO_START_DATE = date(2026, 6, 1)
+IVA_FACTOR = Decimal("21") / Decimal("121")
+
+
+def _calc_credito(purchase_qs, expenses_qs, ml_sales_qs):
+    """Calcula crédito fiscal total y devuelve (rows, total, subtotals)."""
+    rows = []
+    total = Decimal("0.00")
+
+    for item in purchase_qs:
+        net = (item.quantity * item.unit_cost * (1 - item.discount_percent / 100)).quantize(Decimal("0.01"))
+        vat = (net * item.vat_percent / 100).quantize(Decimal("0.01"))
+        rows.append({
+            "date": item.purchase.created_at,
+            "comprobante": item.purchase.invoice_number,
+            "product": item.product.name,
+            "net": net,
+            "vat_percent": item.vat_percent,
+            "vat_amount": vat,
+            "source": "compra",
+        })
+        total += vat
+
+    for expense in expenses_qs:
+        rows.append({
+            "date": expense.paid_at,
+            "comprobante": "-",
+            "product": expense.description,
+            "net": expense.amount,
+            "vat_percent": None,
+            "vat_amount": expense.vat_amount,
+            "source": "gasto",
+        })
+        total += expense.vat_amount
+
+    for sale in ml_sales_qs:
+        vat = (sale.ml_commission_total * IVA_FACTOR).quantize(Decimal("0.01"))
+        net = (sale.ml_commission_total - vat).quantize(Decimal("0.01"))
+        rows.append({
+            "date": sale.created_at,
+            "comprobante": sale.ml_order_id or sale.invoice_number,
+            "product": "Comisión ML",
+            "net": net,
+            "vat_percent": Decimal("21"),
+            "vat_amount": vat,
+            "source": "comision_ml",
+        })
+        total += vat
+
+    rows.sort(key=lambda x: x["date"] if hasattr(x["date"], "date") else x["date"])
+    subtotals = {
+        "compras": sum(r["vat_amount"] for r in rows if r["source"] == "compra"),
+        "gastos": sum(r["vat_amount"] for r in rows if r["source"] == "gasto"),
+        "comisiones_ml": sum(r["vat_amount"] for r in rows if r["source"] == "comision_ml"),
+    }
+    return rows, total, subtotals
+
+
+def _calc_debito(ml_items_qs, common_items_qs):
+    """Calcula débito fiscal total y devuelve (rows, total)."""
+    rows = []
+    total = Decimal("0.00")
+
+    for item in ml_items_qs:
+        vat = (item.line_total * Decimal("21") / 100).quantize(Decimal("0.01"))
+        rows.append({
+            "date": item.sale.created_at,
+            "comprobante": item.sale.ml_order_id or item.sale.invoice_number,
+            "deposito": item.sale.warehouse.name,
+            "product": item.product.name,
+            "net": item.line_total,
+            "vat_percent": Decimal("21"),
+            "vat_amount": vat,
+        })
+        total += vat
+
+    for item in common_items_qs:
+        vat = (item.line_total * item.vat_percent / 100).quantize(Decimal("0.01"))
+        rows.append({
+            "date": item.sale.created_at,
+            "comprobante": item.sale.invoice_number,
+            "deposito": item.sale.warehouse.name,
+            "product": item.product.name,
+            "net": item.line_total,
+            "vat_percent": item.vat_percent,
+            "vat_amount": vat,
+        })
+        total += vat
+
+    rows.sort(key=lambda x: x["date"])
+    return rows, total
 
 
 @login_required
 def taxes_view(request):
     tax_form = TaxExpenseForm()
+    iva_payment_form = IVAPaymentForm()
     if request.method == "POST":
         action = request.POST.get("action") or ""
+
         if action == "delete_tax":
             tax_id = request.POST.get("tax_id")
             deleted, _ = TaxExpense.objects.filter(id=tax_id).delete()
             if deleted:
-                messages.success(request, "Impuesto eliminado.")
+                messages.success(request, "Gasto eliminado.")
             else:
-                messages.error(request, "No se encontró el impuesto.")
+                messages.error(request, "No se encontró el gasto.")
             return redirect("inventory_taxes")
 
-        tax_form = TaxExpenseForm(request.POST)
-        if tax_form.is_valid():
-            tax_form.save()
-            messages.success(request, "Impuesto registrado.")
+        if action == "delete_iva_payment":
+            pk = request.POST.get("payment_id")
+            deleted, _ = IVAPayment.objects.filter(id=pk).delete()
+            if deleted:
+                messages.success(request, "Pago de IVA eliminado.")
+            else:
+                messages.error(request, "No se encontró el pago.")
             return redirect("inventory_taxes")
-        messages.error(request, "Revisá los datos del impuesto.")
+
+        if action == "add_iva_payment":
+            iva_payment_form = IVAPaymentForm(request.POST)
+            if iva_payment_form.is_valid():
+                iva_payment_form.save()
+                messages.success(request, "Pago de IVA registrado.")
+                return redirect("inventory_taxes")
+            messages.error(request, "Revisá los datos del pago de IVA.")
+        else:
+            tax_form = TaxExpenseForm(request.POST)
+            if tax_form.is_valid():
+                tax_form.save()
+                messages.success(request, "Gasto registrado.")
+                return redirect("inventory_taxes")
+            messages.error(request, "Revisá los datos del gasto.")
 
     taxes = TaxExpense.objects.order_by("-paid_at", "-id")
+    iva_payments = IVAPayment.objects.all()
 
-    # ── Posición IVA ──────────────────────────────────────────────────────────
+    # ── Posición IVA global (desde inscripción como RI) ───────────────────────
+    # Crédito: desde INSCRIPCION_DATE sin límite superior
+    inscripcion_dt = timezone.make_aware(datetime.combine(INSCRIPCION_DATE, time.min))
+    debito_start_dt = timezone.make_aware(datetime.combine(DEBITO_START_DATE, time.min))
+
+    g_purchases = (
+        PurchaseItem.objects.filter(vat_percent__gt=0, purchase__created_at__gte=inscripcion_dt)
+        .select_related("purchase", "product")
+        .order_by("purchase__created_at", "purchase__id")
+    )
+    g_expenses = (
+        TaxExpense.objects.filter(vat_amount__gt=0, paid_at__gte=INSCRIPCION_DATE)
+        .order_by("paid_at", "id")
+    )
+    g_ml_sales_credito = (
+        Sale.objects
+        .filter(warehouse__type=Warehouse.WarehouseType.MERCADOLIBRE,
+                ml_commission_total__gt=0,
+                created_at__gte=inscripcion_dt)
+        .order_by("created_at", "id")
+    )
+    g_ml_items = (
+        SaleItem.objects
+        .filter(sale__warehouse__type=Warehouse.WarehouseType.MERCADOLIBRE,
+                sale__created_at__gte=debito_start_dt)
+        .select_related("sale", "sale__warehouse", "product")
+        .order_by("sale__created_at", "sale__id")
+    )
+    g_common_items = (
+        SaleItem.objects
+        .filter(sale__warehouse__type=Warehouse.WarehouseType.COMUN,
+                vat_percent__gt=0,
+                sale__created_at__gte=debito_start_dt)
+        .select_related("sale", "sale__warehouse", "product")
+        .order_by("sale__created_at", "sale__id")
+    )
+
+    _, credito_global, _ = _calc_credito(g_purchases, g_expenses, g_ml_sales_credito)
+    _, debito_global = _calc_debito(g_ml_items, g_common_items)
+    posicion_global = debito_global - credito_global  # negativo = saldo a favor
+
+    # ── Posición IVA filtrada (para el detalle) ───────────────────────────────
     iva_start = (request.GET.get("iva_start") or "").strip()
     iva_end = (request.GET.get("iva_end") or "").strip()
     start_dt = end_dt = None
@@ -54,7 +210,6 @@ def taxes_view(request):
         .select_related("purchase", "product")
         .order_by("purchase__created_at", "purchase__id")
     )
-    # ML: always 21% | Common: use stored vat_percent (only > 0)
     ml_items_qs = (
         SaleItem.objects
         .filter(sale__warehouse__type=Warehouse.WarehouseType.MERCADOLIBRE)
@@ -76,42 +231,12 @@ def taxes_view(request):
         ml_items_qs = ml_items_qs.filter(sale__created_at__lte=end_dt)
         common_items_qs = common_items_qs.filter(sale__created_at__lte=end_dt)
 
-    credito_rows = []
-    credito_total = Decimal("0.00")
-    for item in purchase_items_qs:
-        net = (item.quantity * item.unit_cost * (1 - item.discount_percent / 100)).quantize(Decimal("0.01"))
-        vat_amount = (net * item.vat_percent / 100).quantize(Decimal("0.01"))
-        credito_rows.append({
-            "date": item.purchase.created_at,
-            "comprobante": item.purchase.invoice_number,
-            "product": item.product.name,
-            "net": net,
-            "vat_percent": item.vat_percent,
-            "vat_amount": vat_amount,
-            "source": "compra",
-        })
-        credito_total += vat_amount
-
-    # IVA de gastos/impuestos
-    expenses_with_vat = TaxExpense.objects.filter(vat_amount__gt=0).order_by("paid_at", "id")
+    expenses_qs = TaxExpense.objects.filter(vat_amount__gt=0).order_by("paid_at", "id")
     if start_dt:
-        from django.utils.timezone import make_aware
-        expenses_with_vat = expenses_with_vat.filter(paid_at__gte=start_dt.date())
+        expenses_qs = expenses_qs.filter(paid_at__gte=start_dt.date())
     if end_dt:
-        expenses_with_vat = expenses_with_vat.filter(paid_at__lte=end_dt.date())
-    for expense in expenses_with_vat:
-        credito_rows.append({
-            "date": expense.paid_at,
-            "comprobante": "-",
-            "product": expense.description,
-            "net": expense.amount,
-            "vat_percent": None,
-            "vat_amount": expense.vat_amount,
-            "source": "gasto",
-        })
-        credito_total += expense.vat_amount
-    # IVA crédito fiscal de comisiones ML (ML emite Factura A — comisión incluye IVA 21%)
-    # IVA = comisión_total × 21/121
+        expenses_qs = expenses_qs.filter(paid_at__lte=end_dt.date())
+
     ml_sales_qs = (
         Sale.objects
         .filter(warehouse__type=Warehouse.WarehouseType.MERCADOLIBRE, ml_commission_total__gt=0)
@@ -121,56 +246,10 @@ def taxes_view(request):
         ml_sales_qs = ml_sales_qs.filter(created_at__gte=start_dt)
     if end_dt:
         ml_sales_qs = ml_sales_qs.filter(created_at__lte=end_dt)
-    IVA_FACTOR = Decimal("21") / Decimal("121")
-    for sale in ml_sales_qs:
-        vat_amount = (sale.ml_commission_total * IVA_FACTOR).quantize(Decimal("0.01"))
-        net_commission = (sale.ml_commission_total - vat_amount).quantize(Decimal("0.01"))
-        credito_rows.append({
-            "date": sale.created_at,
-            "comprobante": sale.ml_order_id or sale.invoice_number,
-            "product": "Comisión ML",
-            "net": net_commission,
-            "vat_percent": Decimal("21"),
-            "vat_amount": vat_amount,
-            "source": "comision_ml",
-        })
-        credito_total += vat_amount
-    credito_rows.sort(key=lambda x: x["date"] if hasattr(x["date"], "date") else x["date"])
 
-    debito_rows = []
-    debito_total = Decimal("0.00")
-    for item in ml_items_qs:
-        vat_amount = (item.line_total * Decimal("21") / 100).quantize(Decimal("0.01"))
-        debito_rows.append({
-            "date": item.sale.created_at,
-            "comprobante": item.sale.ml_order_id or item.sale.invoice_number,
-            "deposito": item.sale.warehouse.name,
-            "product": item.product.name,
-            "net": item.line_total,
-            "vat_percent": Decimal("21"),
-            "vat_amount": vat_amount,
-        })
-        debito_total += vat_amount
-    for item in common_items_qs:
-        vat_amount = (item.line_total * item.vat_percent / 100).quantize(Decimal("0.01"))
-        debito_rows.append({
-            "date": item.sale.created_at,
-            "comprobante": item.sale.invoice_number,
-            "deposito": item.sale.warehouse.name,
-            "product": item.product.name,
-            "net": item.line_total,
-            "vat_percent": item.vat_percent,
-            "vat_amount": vat_amount,
-        })
-        debito_total += vat_amount
-    debito_rows.sort(key=lambda x: x["date"])
-
+    credito_rows, credito_total, credito_subtotals = _calc_credito(purchase_items_qs, expenses_qs, ml_sales_qs)
+    debito_rows, debito_total = _calc_debito(ml_items_qs, common_items_qs)
     posicion_iva = debito_total - credito_total
-
-    # Subtotals for display
-    credito_compras = sum(r["vat_amount"] for r in credito_rows if r["source"] == "compra")
-    credito_gastos = sum(r["vat_amount"] for r in credito_rows if r["source"] == "gasto")
-    credito_comisiones_ml = sum(r["vat_amount"] for r in credito_rows if r["source"] == "comision_ml")
 
     return render(
         request,
@@ -178,12 +257,21 @@ def taxes_view(request):
         {
             "tax_form": tax_form,
             "taxes": taxes,
+            "iva_payment_form": iva_payment_form,
+            "iva_payments": iva_payments,
+            # Posición global (desde inscripción RI)
+            "credito_global": credito_global,
+            "debito_global": debito_global,
+            "posicion_global": posicion_global,
+            "inscripcion_date": INSCRIPCION_DATE,
+            "debito_start_date": DEBITO_START_DATE,
+            # Detalle filtrado
             "credito_rows": credito_rows,
             "debito_rows": debito_rows,
             "credito_total": credito_total,
-            "credito_compras": credito_compras,
-            "credito_gastos": credito_gastos,
-            "credito_comisiones_ml": credito_comisiones_ml,
+            "credito_compras": credito_subtotals["compras"],
+            "credito_gastos": credito_subtotals["gastos"],
+            "credito_comisiones_ml": credito_subtotals["comisiones_ml"],
             "debito_total": debito_total,
             "posicion_iva": posicion_iva,
             "iva_start": iva_start,
