@@ -348,6 +348,13 @@
     const SAVE_URL = "{% url 'inventory_stock_set_comun_ajax' %}";
     const CSRF = document.cookie.match(/csrftoken=([^;]+)/)?.[1] || "";
 
+    // Formatea "1234.56" → "1.234,56" igual que el filtro latam_number
+    function toLatam(qtyStr) {
+        const n = parseFloat(qtyStr);
+        if (isNaN(n)) return qtyStr;
+        return n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
     function getStatus(wrap) {
         return wrap.querySelector(".stock-save-status");
     }
@@ -372,13 +379,19 @@
         .then(r => r.json())
         .then(data => {
             if (data.ok) {
-                input.dataset.saved = data.quantity;
-                input.value = data.quantity;
+                const displayed = toLatam(data.quantity);
+                input.dataset.saved = displayed;
+                input.value = displayed;
                 status.textContent = "✓ Guardado";
                 status.style.color = "var(--positive)";
-                // actualizar data-total para los filtros de la tabla
                 const row = wrap.closest("tr");
-                if (row) row.dataset.total = data.quantity;
+                if (row) {
+                    row.dataset.total = data.quantity;
+                    // actualizar la columna Total (última td)
+                    const cells = row.querySelectorAll("td");
+                    const totalCell = cells[cells.length - 1];
+                    if (totalCell) totalCell.textContent = displayed;
+                }
                 setTimeout(() => { status.textContent = ""; }, 2000);
             } else {
                 status.textContent = data.error || "Error al guardar";
