@@ -238,7 +238,6 @@ def taxes_view(request):
     if use_afip:
         g_afip_qs = AFIPInvoice.objects.filter(
             tipo_codigo__in=(AFIPInvoice.FACTURA_A, AFIPInvoice.NOTA_CREDITO_A),
-            date__gte=INSCRIPCION_DATE,
         ).order_by("date")
         _, credito_global, _ = _calc_credito_afip(g_afip_qs, g_expenses)
     else:
