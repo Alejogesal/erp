@@ -1,0 +1,101 @@
+{% extends "inventory/base.html" %}
+{% load latam_numbers %}
+{% block title %}Pagos de IVA{% endblock %}
+{% block content %}
+<h1>Pagos de IVA</h1>
+<p class="subtitle">Registrá los pagos de IVA realizados a AFIP.</p>
+
+<style>
+    .danger {
+        background: #c0392b;
+        border: none;
+        color: #fff;
+    }
+    .danger:hover {
+        filter: brightness(1.05);
+    }
+    .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 600;
+    }
+    .badge-debito  { background: rgba(192,57,43,0.15); color: #e74c3c; }
+    .badge-credito { background: rgba(39,174,96,0.15); color: #27ae60; }
+    .badge-saldo   { background: rgba(47,129,247,0.15); color: #2f81f7; }
+</style>
+
+<div class="card" style="margin-bottom:16px;">
+    <div class="card-title">Registrar pago de IVA</div>
+    <form method="post">
+        {% csrf_token %}
+        {% for field in form %}
+        <p>
+            <label for="{{ field.id_for_label }}" style="display:block; font-size:13px; margin-bottom:4px;">
+                {{ field.label }}{% if field.field.required %} *{% endif %}
+            </label>
+            {{ field }}
+            {% if field.errors %}
+            <span style="color:#e74c3c; font-size:12px;">{{ field.errors|join:", " }}</span>
+            {% endif %}
+        </p>
+        {% endfor %}
+        <button type="submit">Guardar</button>
+    </form>
+</div>
+
+<div class="card table-card">
+    <div class="card-title">Historial de pagos</div>
+    <table>
+        <thead>
+            <tr>
+                <th>Fecha de pago</th>
+                <th>Período</th>
+                <th>Tipo</th>
+                <th>Monto</th>
+                <th>Descripción</th>
+                <th>Acciones</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in payments %}
+            <tr>
+                <td>{{ p.paid_at|date:"d/m/Y" }}</td>
+                <td>{{ p.period|date:"m/Y" }}</td>
+                <td>
+                    {% if p.tipo == "DEBITO" %}
+                        <span class="badge badge-debito">Débito fiscal</span>
+                    {% elif p.tipo == "CREDITO" %}
+                        <span class="badge badge-credito">Crédito fiscal</span>
+                    {% else %}
+                        <span class="badge badge-saldo">Saldo a pagar</span>
+                    {% endif %}
+                </td>
+                <td>${{ p.amount|latam_number:2 }}</td>
+                <td>{{ p.notes|default:"-" }}</td>
+                <td style="display:flex; gap:6px;">
+                    <a href="{% url 'inventory_iva_payment_edit' p.pk %}" class="btn-secondary" style="padding:4px 10px; font-size:13px; text-decoration:none; border-radius:4px; background:rgba(47,129,247,0.1); color:#2f81f7; border:1px solid rgba(47,129,247,0.3);">Editar</a>
+                    <form method="post" style="display:inline;">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="delete">
+                        <input type="hidden" name="payment_id" value="{{ p.pk }}">
+                        <button type="submit" class="danger" style="padding:4px 10px; font-size:13px;" onclick="return confirm('¿Eliminar este pago?');">Eliminar</button>
+                    </form>
+                </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="6">Aún no hay pagos registrados.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script>
+    (function() {
+        if (!window.flatpickr) return;
+        flatpickr("#id_paid_at", { dateFormat: "Y-m-d", allowInput: true });
+    })();
+</script>
+{% endblock %}

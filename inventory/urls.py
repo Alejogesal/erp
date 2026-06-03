@@ -48,5 +48,7 @@ urlpatterns = [
     path("stock/", views.stock_list, name="inventory_stock_list"),
     path("impuestos/", views.taxes_view, name="inventory_taxes"),
     path("iva/", views.iva_position, name="inventory_iva_position"),
+    path("iva/pagos/", views.iva_payments_view, name="inventory_iva_payments"),
+    path("iva/pagos/<int:pk>/editar/", views.iva_payment_edit, name="inventory_iva_payment_edit"),
     path("agente/", views.agent_view, name="inventory_agent"),
 ]

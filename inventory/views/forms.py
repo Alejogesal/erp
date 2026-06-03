@@ -10,6 +10,7 @@ from ..models import (
     CustomerProductDiscount,
     CustomerProductPrice,
     CustomerPayment,
+    IVAPayment,
     Product,
     Purchase,
     Sale,
@@ -444,3 +445,36 @@ class TaxExpenseForm(forms.ModelForm):
             "paid_at": "Fecha",
         }
         widgets = {"paid_at": forms.DateInput(attrs={"type": "date"})}
+
+
+class IVAPaymentForm(forms.ModelForm):
+    period = forms.CharField(
+        label="Período (mes/año)",
+        widget=forms.TextInput(attrs={"type": "month"}),
+        help_text="Seleccioná el mes y año del período.",
+    )
+
+    class Meta:
+        model = IVAPayment
+        fields = ["tipo", "amount", "period", "paid_at", "notes"]
+        labels = {
+            "tipo": "Tipo",
+            "amount": "Monto",
+            "paid_at": "Fecha de pago",
+            "notes": "Descripción (opcional)",
+        }
+        widgets = {"paid_at": forms.DateInput(attrs={"type": "date"})}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance and self.instance.pk and self.instance.period:
+            self.initial["period"] = self.instance.period.strftime("%Y-%m")
+
+    def clean_period(self):
+        value = self.cleaned_data.get("period", "").strip()
+        try:
+            from datetime import date
+            year, month = value.split("-")
+            return date(int(year), int(month), 1)
+        except (ValueError, AttributeError):
+            raise forms.ValidationError("Ingresá un período válido (ej: 2025-03).")

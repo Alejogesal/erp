@@ -1,0 +1,35 @@
+{% extends "inventory/base.html" %}
+{% block title %}Editar pago de IVA{% endblock %}
+{% block content %}
+<h1>Editar pago de IVA</h1>
+<p class="subtitle">{{ payment }}</p>
+
+<div class="card" style="max-width:480px;">
+    <form method="post">
+        {% csrf_token %}
+        {% for field in form %}
+        <p>
+            <label for="{{ field.id_for_label }}" style="display:block; font-size:13px; margin-bottom:4px;">
+                {{ field.label }}{% if field.field.required %} *{% endif %}
+            </label>
+            {{ field }}
+            {% if field.errors %}
+            <span style="color:#e74c3c; font-size:12px;">{{ field.errors|join:", " }}</span>
+            {% endif %}
+        </p>
+        {% endfor %}
+        <div style="display:flex; gap:8px; margin-top:8px;">
+            <button type="submit">Guardar cambios</button>
+            <a href="{% url 'inventory_iva_payments' %}" style="padding:6px 14px; border-radius:4px; background:rgba(255,255,255,0.05); color:var(--text); text-decoration:none; font-size:14px;">Cancelar</a>
+        </div>
+    </form>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script>
+    (function() {
+        if (!window.flatpickr) return;
+        flatpickr("#id_paid_at", { dateFormat: "Y-m-d", allowInput: true });
+    })();
+</script>
+{% endblock %}

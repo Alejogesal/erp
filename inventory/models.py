@@ -591,6 +591,28 @@ class SupplierPayment(models.Model):
         return f"{self.supplier} - {self.amount} ({self.method})"
 
 
+class IVAPayment(models.Model):
+    """Registro de pagos de IVA realizados a AFIP."""
+
+    class Tipo(models.TextChoices):
+        DEBITO = "DEBITO", "Débito fiscal"
+        CREDITO = "CREDITO", "Crédito fiscal"
+        SALDO = "SALDO", "Saldo a pagar"
+
+    tipo = models.CharField(max_length=10, choices=Tipo.choices, default=Tipo.SALDO)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    period = models.DateField(help_text="Período que cubre el pago (primer día del mes)")
+    paid_at = models.DateField(default=timezone.localdate)
+    notes = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-paid_at", "-id"]
+
+    def __str__(self) -> str:
+        return f"IVA {self.get_tipo_display()} {self.period.strftime('%m/%Y')} — ${self.amount}"
+
+
 class TaxExpense(models.Model):
     description = models.CharField(max_length=255)
     amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))

@@ -45,6 +45,7 @@ from .mercadolibre import (
 )
 from .taxes import taxes_view
 from .iva import iva_position
+from .iva_payments import iva_payments_view, iva_payment_edit
 from .agent import agent_view
 __all__ = [
     "dashboard",
@@ -88,5 +89,7 @@ __all__ = [
     "mercadolibre_webhook",
     "taxes_view",
     "iva_position",
+    "iva_payments_view",
+    "iva_payment_edit",
     "agent_view",
 ]
