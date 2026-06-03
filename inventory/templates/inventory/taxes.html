@@ -126,8 +126,13 @@
             <p class="value">${{ debito_total|latam_number:2 }}</p>
         </div>
         <div class="card">
-            <div class="card-title">Crédito fiscal (compras)</div>
+            <div class="card-title">Crédito fiscal total</div>
             <p class="value">${{ credito_total|latam_number:2 }}</p>
+            <div style="margin-top:10px; font-size:12px; color:var(--muted); display:flex; flex-direction:column; gap:3px;">
+                <div>Compras: <strong style="color:var(--text);">${{ credito_compras|latam_number:2 }}</strong></div>
+                <div>Gastos: <strong style="color:var(--text);">${{ credito_gastos|latam_number:2 }}</strong></div>
+                <div style="color:#2f81f7;">Comisiones ML: <strong>${{ credito_comisiones_ml|latam_number:2 }}</strong></div>
+            </div>
         </div>
         <div class="card">
             <div class="card-title">Posición neta {% if posicion_iva > 0 %}(a pagar){% else %}(a favor){% endif %}</div>
@@ -199,7 +204,11 @@
                         {% for row in credito_rows %}
                         <tr>
                             <td>{{ row.date|date:"d/m/Y" }}</td>
-                            <td style="color:var(--muted); font-size:12px;">{% if row.source == "gasto" %}Gasto{% else %}Compra{% endif %}</td>
+                            <td style="color:var(--muted); font-size:12px;">
+                                {% if row.source == "gasto" %}Gasto
+                                {% elif row.source == "comision_ml" %}<span style="color:#2f81f7;">Comisión ML</span>
+                                {% else %}Compra{% endif %}
+                            </td>
                             <td>{{ row.product }}</td>
                             <td>${{ row.net|latam_number:2 }}</td>
                             <td>{% if row.vat_percent %}{{ row.vat_percent|latam_number:0 }}%{% else %}-{% endif %}</td>

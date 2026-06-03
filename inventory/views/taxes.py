@@ -7,7 +7,7 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import redirect, render
 from django.utils import timezone
 
-from ..models import PurchaseItem, SaleItem, TaxExpense, Warehouse
+from ..models import PurchaseItem, Sale, SaleItem, TaxExpense, Warehouse
 from .forms import TaxExpenseForm
 
 
@@ -110,6 +110,31 @@ def taxes_view(request):
             "source": "gasto",
         })
         credito_total += expense.vat_amount
+    # IVA crédito fiscal de comisiones ML (ML emite Factura A — comisión incluye IVA 21%)
+    # IVA = comisión_total × 21/121
+    ml_sales_qs = (
+        Sale.objects
+        .filter(warehouse__type=Warehouse.WarehouseType.MERCADOLIBRE, ml_commission_total__gt=0)
+        .order_by("created_at", "id")
+    )
+    if start_dt:
+        ml_sales_qs = ml_sales_qs.filter(created_at__gte=start_dt)
+    if end_dt:
+        ml_sales_qs = ml_sales_qs.filter(created_at__lte=end_dt)
+    IVA_FACTOR = Decimal("21") / Decimal("121")
+    for sale in ml_sales_qs:
+        vat_amount = (sale.ml_commission_total * IVA_FACTOR).quantize(Decimal("0.01"))
+        net_commission = (sale.ml_commission_total - vat_amount).quantize(Decimal("0.01"))
+        credito_rows.append({
+            "date": sale.created_at,
+            "comprobante": sale.ml_order_id or sale.invoice_number,
+            "product": "Comisión ML",
+            "net": net_commission,
+            "vat_percent": Decimal("21"),
+            "vat_amount": vat_amount,
+            "source": "comision_ml",
+        })
+        credito_total += vat_amount
     credito_rows.sort(key=lambda x: x["date"] if hasattr(x["date"], "date") else x["date"])
 
     debito_rows = []
@@ -142,6 +167,11 @@ def taxes_view(request):
 
     posicion_iva = debito_total - credito_total
 
+    # Subtotals for display
+    credito_compras = sum(r["vat_amount"] for r in credito_rows if r["source"] == "compra")
+    credito_gastos = sum(r["vat_amount"] for r in credito_rows if r["source"] == "gasto")
+    credito_comisiones_ml = sum(r["vat_amount"] for r in credito_rows if r["source"] == "comision_ml")
+
     return render(
         request,
         "inventory/taxes.html",
@@ -151,6 +181,9 @@ def taxes_view(request):
             "credito_rows": credito_rows,
             "debito_rows": debito_rows,
             "credito_total": credito_total,
+            "credito_compras": credito_compras,
+            "credito_gastos": credito_gastos,
+            "credito_comisiones_ml": credito_comisiones_ml,
             "debito_total": debito_total,
             "posicion_iva": posicion_iva,
             "iva_start": iva_start,
