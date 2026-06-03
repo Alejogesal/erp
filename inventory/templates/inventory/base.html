@@ -151,52 +151,209 @@
             font-size: 12px;
             border-radius: 9px;
         }
-        .messages { margin-bottom: 12px; padding: 0; }
-        .messages li {
-            list-style: none;
-            padding: 10px 12px;
-            border-radius: 10px;
-            margin-bottom: 8px;
-            background: rgba(46, 160, 67, 0.1);
-            border: 1px solid rgba(46, 160, 67, 0.3);
-        }
         .main {
             display: flex;
             flex-direction: column;
             gap: 16px;
         }
+
+        /* ── Nav active & icons ─────────────────────────────── */
+        .pill.nav-active {
+            background: linear-gradient(135deg, rgba(47,129,247,0.18), rgba(47,129,247,0.08));
+            border-color: rgba(47,129,247,0.45);
+            color: #5aa9ff;
+        }
+        .pill.nav-active:hover { color: #5aa9ff; }
+        .nav-icon {
+            display: inline-flex;
+            align-items: center;
+            flex-shrink: 0;
+            opacity: 0.75;
+        }
+        .pill.nav-active .nav-icon { opacity: 1; }
+        .pill { display: flex; align-items: center; gap: 8px; }
+
+        /* ── Toast ──────────────────────────────────────────── */
+        #toast-container {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 9999;
+            display: flex;
+            flex-direction: column-reverse;
+            gap: 8px;
+            pointer-events: none;
+            align-items: center;
+        }
+        .toast {
+            pointer-events: all;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 500;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.45);
+            border: 1px solid transparent;
+            max-width: 480px;
+            animation: toastIn 280ms cubic-bezier(.22,1,.36,1) forwards;
+            cursor: pointer;
+        }
+        .toast.hide { animation: toastOut 220ms ease forwards; }
+        .toast-success { background:#0d2318; border-color:#2ea043; color:#4caf71; }
+        .toast-error   { background:#200d0d; border-color:#f85149; color:#ff7070; }
+        .toast-warning { background:#1f1706; border-color:#d29922; color:#e3b341; }
+        .toast-info    { background:#0c1728; border-color:#2f81f7; color:#79b8ff; }
+        @keyframes toastIn  { from { opacity:0; transform:translateY(12px) scale(.96); } to { opacity:1; transform:none; } }
+        @keyframes toastOut { from { opacity:1; transform:none; } to { opacity:0; transform:translateY(8px) scale(.96); } }
+
+        /* ── Spinner on submit ──────────────────────────────── */
+        .btn-loading { position:relative; pointer-events:none; opacity:.75; }
+        .btn-loading::after {
+            content:'';
+            position:absolute;
+            inset:0;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
     <div class="page">
-        <div class="actions">
-            <a class="pill" href="{% url 'inventory_dashboard' %}">Dashboard</a>
-            <a class="pill" href="{% url 'inventory_product_costs' %}">Productos</a>
-            <a class="pill" href="{% url 'inventory_product_prices' %}">Lista de precios</a>
-            <a class="pill" href="{% url 'inventory_product_margins' %}">Márgenes</a>
-            <a class="pill" href="{% url 'inventory_purchases_list' %}">Compras</a>
-            <a class="pill" href="{% url 'inventory_sales_list' %}">Ventas</a>
-            <a class="pill" href="{% url 'inventory_taxes' %}">Impuestos/Gastos</a>
-            <a class="pill" href="{% url 'inventory_stock_list' %}">Stock</a>
-            <a class="pill" href="{% url 'inventory_mercadolibre_dashboard' %}">MercadoLibre</a>
-            <a class="pill" href="{% url 'inventory_mercadolibre_order_sheet' %}">ML Pedido</a>
-            <a class="pill" href="{% url 'inventory_customers' %}">Clientes</a>
-            <a class="pill" href="{% url 'inventory_suppliers' %}">Proveedores</a>
+        <div class="actions" id="main-nav">
+            <a class="pill" href="{% url 'inventory_dashboard' %}">
+                <span class="nav-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span>
+                Dashboard
+            </a>
+            <a class="pill" href="{% url 'inventory_product_costs' %}">
+                <span class="nav-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/><path d="M16 3H8a2 2 0 0 0-2 2v2h12V5a2 2 0 0 0-2-2z"/></svg></span>
+                Productos
+            </a>
+            <a class="pill" href="{% url 'inventory_product_prices' %}">
+                <span class="nav-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg></span>
+                Lista de precios
+            </a>
+            <a class="pill" href="{% url 'inventory_product_margins' %}">
+                <span class="nav-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></span>
+                Márgenes
+            </a>
+            <a class="pill" href="{% url 'inventory_purchases_list' %}">
+                <span class="nav-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg></span>
+                Compras
+            </a>
+            <a class="pill" href="{% url 'inventory_sales_list' %}">
+                <span class="nav-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg></span>
+                Ventas
+            </a>
+            <a class="pill" href="{% url 'inventory_taxes' %}">
+                <span class="nav-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></span>
+                Impuestos/Gastos
+            </a>
+            <a class="pill" href="{% url 'inventory_stock_list' %}">
+                <span class="nav-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="17"/><line x1="9.5" y1="14.5" x2="14.5" y2="14.5"/></svg></span>
+                Stock
+            </a>
+            <a class="pill" href="{% url 'inventory_mercadolibre_dashboard' %}">
+                <span class="nav-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m4.93 4.93 4.24 4.24"/><path d="m14.83 9.17 4.24-4.24"/><path d="m14.83 14.83 4.24 4.24"/><path d="m9.17 14.83-4.24 4.24"/><circle cx="12" cy="12" r="4"/></svg></span>
+                MercadoLibre
+            </a>
+            <a class="pill" href="{% url 'inventory_mercadolibre_order_sheet' %}">
+                <span class="nav-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="m9 12 2 2 4-4"/></svg></span>
+                ML Pedido
+            </a>
+            <a class="pill" href="{% url 'inventory_customers' %}">
+                <span class="nav-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+                Clientes
+            </a>
+            <a class="pill" href="{% url 'inventory_suppliers' %}">
+                <span class="nav-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13" rx="1"/><path d="M16 8h4l3 5v3h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></span>
+                Proveedores
+            </a>
             {% if user.is_authenticated %}
-            <a class="pill" href="{% url 'password_change' %}">Cambiar contraseña</a>
+            <a class="pill" href="{% url 'password_change' %}">
+                <span class="nav-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
+                Contraseña
+            </a>
             {% endif %}
         </div>
         <div class="main">
-            {% if messages %}
-            <ul class="messages">
-                {% for message in messages %}
-                <li>{{ message }}</li>
-                {% endfor %}
-            </ul>
-            {% endif %}
             {% block content %}{% endblock %}
         </div>
     </div>
+
+    <!-- Toast container -->
+    <div id="toast-container"></div>
+
+    {% if messages %}
+    <script>
+    window.__djangoMessages = [{% for message in messages %}{"text":"{{ message|escapejs }}","level":"{{ message.tags }}"}{% if not forloop.last %},{% endif %}{% endfor %}];
+    </script>
+    {% endif %}
+<script>
+(function () {
+    /* ── Toast system ─────────────────────────────────────── */
+    const container = document.getElementById("toast-container");
+    function showToast(text, level) {
+        const cls = level && level.includes("error") ? "toast-error"
+                  : level && level.includes("warning") ? "toast-warning"
+                  : level && level.includes("info") ? "toast-info"
+                  : "toast-success";
+        const icon = cls === "toast-error" ? "✕"
+                   : cls === "toast-warning" ? "⚠"
+                   : cls === "toast-info" ? "ℹ"
+                   : "✓";
+        const el = document.createElement("div");
+        el.className = `toast ${cls}`;
+        el.innerHTML = `<span style="font-size:15px;flex-shrink:0;">${icon}</span><span style="flex:1;">${text}</span>`;
+        el.addEventListener("click", () => dismiss(el));
+        container.appendChild(el);
+        const timer = setTimeout(() => dismiss(el), 4500);
+        el._timer = timer;
+    }
+    function dismiss(el) {
+        clearTimeout(el._timer);
+        el.classList.add("hide");
+        el.addEventListener("animationend", () => el.remove(), { once: true });
+    }
+    // Show Django messages as toasts
+    (window.__djangoMessages || []).forEach(m => showToast(m.text, m.level));
+    window.showToast = showToast;
+
+    /* ── Active nav link ──────────────────────────────────── */
+    const path = window.location.pathname;
+    document.querySelectorAll("#main-nav .pill").forEach(link => {
+        const href = link.getAttribute("href");
+        if (href && href !== "/" && path.startsWith(href)) {
+            link.classList.add("nav-active");
+        }
+    });
+
+    /* ── Spinner on form submit ───────────────────────────── */
+    document.addEventListener("submit", function (e) {
+        const form = e.target;
+        // Skip forms that opt-out or are async
+        if (form.dataset.noSpinner) return;
+        const btn = form.querySelector("button[type=submit], button:not([type])");
+        if (!btn || btn.dataset.noSpinner) return;
+        const originalHtml = btn.innerHTML;
+        const originalWidth = btn.offsetWidth;
+        btn.style.minWidth = originalWidth + "px";
+        btn.innerHTML = `<svg style="animation:spin .7s linear infinite;vertical-align:middle;" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6-8.49"/></svg>`;
+        btn.disabled = true;
+        // Restore if navigation doesn't happen (e.g. validation error)
+        setTimeout(() => {
+            btn.innerHTML = originalHtml;
+            btn.style.minWidth = "";
+            btn.disabled = false;
+        }, 8000);
+    });
+})();
+</script>
+
 {% if user.is_authenticated %}
 <style>
     .koda-btn {
