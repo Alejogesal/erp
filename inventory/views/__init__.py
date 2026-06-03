@@ -32,7 +32,7 @@ from .purchases import (
     purchases_list,
     register_purchase,
 )
-from .stock import stock_list
+from .stock import stock_list, stock_set_comun_ajax
 from .customers import customers_view, customer_history_view, create_credit_note
 from .suppliers import suppliers, supplier_history_view
 from .mercadolibre import (
@@ -76,6 +76,7 @@ __all__ = [
     "purchases_list",
     "register_purchase",
     "stock_list",
+    "stock_set_comun_ajax",
     "customers_view",
     "customer_history_view",
     "create_credit_note",

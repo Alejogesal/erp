@@ -7,7 +7,9 @@ from django.db import transaction
 from django.db.models import Case, DecimalField, Sum, Value, When, Q
 from django.db.models.fields import DecimalField as ModelDecimalField
 from django.db.models.functions import Coalesce
+from django.http import JsonResponse
 from django.shortcuts import redirect, render
+from django.views.decorators.http import require_POST
 
 from .. import services
 from ..models import (
@@ -445,3 +447,47 @@ def stock_list(request):
             "show_history": show_history,
         },
     )
+
+
+@login_required
+@require_POST
+def stock_set_comun_ajax(request):
+    """Endpoint JSON para actualizar stock del depósito común sin recargar la página."""
+    comun_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
+    if not comun_wh:
+        return JsonResponse({"ok": False, "error": "Falta el depósito común."}, status=400)
+
+    product_id = request.POST.get("product_id")
+    desired_raw = request.POST.get("quantity", "")
+    raw = desired_raw.strip().replace(" ", "")
+    if "," in raw and "." in raw:
+        raw = raw.replace(".", "").replace(",", ".")
+    elif "," in raw:
+        raw = raw.replace(",", ".")
+    try:
+        desired = Decimal(raw) if raw else Decimal("0.00")
+    except Exception:
+        return JsonResponse({"ok": False, "error": "Cantidad inválida."}, status=400)
+
+    product = Product.objects.filter(pk=product_id).first()
+    if not product:
+        return JsonResponse({"ok": False, "error": "Producto no encontrado."}, status=404)
+
+    stock = Stock.objects.filter(product=product, warehouse=comun_wh).first()
+    current = stock.quantity if stock else Decimal("0.00")
+    diff = (desired - current).quantize(Decimal("0.01"))
+    if diff != 0:
+        try:
+            services.register_adjustment(
+                product=product,
+                warehouse=comun_wh,
+                quantity=diff,
+                user=request.user,
+                reference="Ajuste manual depósito común",
+                allow_negative=True,
+            )
+        except services.InvalidMovementError as exc:
+            return JsonResponse({"ok": False, "error": str(exc)}, status=400)
+
+    new_qty = str(desired.quantize(Decimal("0.01")))
+    return JsonResponse({"ok": True, "quantity": new_qty})

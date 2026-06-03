@@ -280,18 +280,13 @@
                             Variedades: {{ product.comun_qty|latam_number:2 }}
                         </div>
                     {% else %}
-                        <form method="post">
-                            {% csrf_token %}
-                            <input type="hidden" name="action" value="set_comun_stock">
-                            <input type="hidden" name="product_id" value="{{ product.id }}">
-                            <div class="stock-adjust">
-                                <div style="color: var(--muted); font-size: 12px;">
-                                    Actual: {% if product.is_low_stock %}<strong style="color:var(--negative);">{{ product.comun_qty|latam_number:0 }}</strong>{% else %}{{ product.comun_qty|latam_number:2 }}{% endif %}
-                                </div>
-                                <input name="quantity" type="text" value="{{ product.comun_qty|latam_number:2 }}">
-                                <button type="submit">Actualizar</button>
-                            </div>
-                        </form>
+                        <div class="stock-adjust" data-product-id="{{ product.id }}">
+                            <input class="stock-comun-input" type="text"
+                                value="{{ product.comun_qty|latam_number:2 }}"
+                                data-saved="{{ product.comun_qty|latam_number:2 }}"
+                                {% if product.is_low_stock %}style="border-color:var(--negative);"{% endif %}>
+                            <div class="stock-save-status" style="font-size:11px; color:var(--muted); min-height:14px;"></div>
+                        </div>
                     {% endif %}
                 </td>
                 <td>
@@ -347,6 +342,66 @@
         stockOnly?.addEventListener("change", applyFilter);
         lowStockOnly?.addEventListener("change", applyFilter);
     })();
+</script>
+<script>
+(function() {
+    const SAVE_URL = "{% url 'inventory_stock_set_comun_ajax' %}";
+    const CSRF = document.cookie.match(/csrftoken=([^;]+)/)?.[1] || "";
+
+    function getStatus(wrap) {
+        return wrap.querySelector(".stock-save-status");
+    }
+
+    function saveStock(wrap, input) {
+        const productId = wrap.dataset.productId;
+        const value = input.value.trim();
+        if (value === input.dataset.saved) return;
+
+        const status = getStatus(wrap);
+        status.textContent = "Guardando…";
+        status.style.color = "var(--muted)";
+
+        fetch(SAVE_URL, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "X-CSRFToken": CSRF,
+            },
+            body: new URLSearchParams({ product_id: productId, quantity: value }),
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok) {
+                input.dataset.saved = data.quantity;
+                input.value = data.quantity;
+                status.textContent = "✓ Guardado";
+                status.style.color = "var(--positive)";
+                // actualizar data-total para los filtros de la tabla
+                const row = wrap.closest("tr");
+                if (row) row.dataset.total = data.quantity;
+                setTimeout(() => { status.textContent = ""; }, 2000);
+            } else {
+                status.textContent = data.error || "Error al guardar";
+                status.style.color = "var(--negative)";
+                input.value = input.dataset.saved;
+            }
+        })
+        .catch(() => {
+            status.textContent = "Error de conexión";
+            status.style.color = "var(--negative)";
+            input.value = input.dataset.saved;
+        });
+    }
+
+    document.querySelectorAll(".stock-adjust[data-product-id]").forEach(wrap => {
+        const input = wrap.querySelector(".stock-comun-input");
+        if (!input) return;
+        input.addEventListener("blur", () => saveStock(wrap, input));
+        input.addEventListener("keydown", e => {
+            if (e.key === "Enter") { e.preventDefault(); input.blur(); }
+        });
+    });
+})();
 </script>
 {{ variant_data|json_script:"ml-variant-data" }}
 <script>
