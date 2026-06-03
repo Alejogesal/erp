@@ -280,12 +280,12 @@
                             Variedades: {{ product.comun_qty|latam_number:2 }}
                         </div>
                     {% else %}
-                        <div class="stock-adjust" data-product-id="{{ product.id }}">
+                        <div data-product-id="{{ product.id }}" style="display:flex; flex-direction:column; gap:3px; width:80px;">
                             <input class="stock-comun-input" type="text"
                                 value="{{ product.comun_qty|latam_number:2 }}"
                                 data-saved="{{ product.comun_qty|latam_number:2 }}"
-                                {% if product.is_low_stock %}style="border-color:var(--negative);"{% endif %}>
-                            <div class="stock-save-status" style="font-size:11px; color:var(--muted); min-height:14px;"></div>
+                                style="width:100%;{% if product.is_low_stock %}border-color:var(--negative);{% endif %}">
+                            <div class="stock-save-status" style="font-size:11px; color:var(--muted);"></div>
                         </div>
                     {% endif %}
                 </td>
