@@ -55,25 +55,30 @@ def _col(row, idx, default=None):
 def _parse_afip_xlsx(file_obj):
     """
     Parsea un xlsx de 'Mis Comprobantes Recibidos' de AFIP.
-    Devuelve (created, skipped, errors, error_msg) donde error_msg es None si el archivo es válido.
+    Devuelve (created, duplicates, filtered, errors, error_msg) donde:
+      - created:    comprobantes nuevos guardados en la BD
+      - duplicates: comprobantes que ya existían en la BD (no se tocan)
+      - filtered:   filas de tipo B/C/otro que no se importan
+      - errors:     filas con datos inválidos
+      - error_msg:  None si el archivo es válido, str si hubo un error fatal
     """
     try:
         import openpyxl
         wb = openpyxl.load_workbook(file_obj, data_only=True)
         ws = wb.active
     except Exception as e:
-        return 0, 0, 0, f"No se pudo leer el archivo: {e}"
+        return 0, 0, 0, 0, f"No se pudo leer el archivo: {e}"
 
     header_row = _find_header_row(ws)
     if header_row is None:
-        return 0, 0, 0, "No se encontró la fila de encabezados (se espera 'Fecha' en columna A)."
+        return 0, 0, 0, 0, "No se encontró la fila de encabezados (se espera 'Fecha' en columna A)."
 
     # Columnas (0-indexed) del formato AFIP "Mis Comprobantes Recibidos":
     # 0=Fecha, 1=Tipo, 2=Punto de Venta, 3=Número Desde, 5=CAE,
     # 7=CUIT Emisor, 8=Razón Social, 18=IVA 10.5%, 19=Neto 10.5%,
     # 20=IVA 21%, 21=Neto 21%, 22=IVA 27%, 23=Neto 27%, 28=Total IVA, 29=Imp Total
 
-    created = skipped = errors = 0
+    created = duplicates = filtered = errors = 0
     for row in ws.iter_rows(min_row=header_row + 1, values_only=True):
         if not row or all(v is None or v == "" for v in row[:5]):
             continue
@@ -84,7 +89,7 @@ def _parse_afip_xlsx(file_obj):
 
         tipo_codigo = _parse_tipo_codigo(str(_col(row, 1, "")))
         if tipo_codigo not in (AFIPInvoice.FACTURA_A, AFIPInvoice.NOTA_CREDITO_A):
-            skipped += 1
+            filtered += 1
             continue
 
         try:
@@ -118,8 +123,8 @@ def _parse_afip_xlsx(file_obj):
             if was_created:
                 created += 1
             else:
-                skipped += 1
+                duplicates += 1
         except IntegrityError:
-            skipped += 1
+            duplicates += 1
 
-    return created, skipped, errors, None
+    return created, duplicates, filtered, errors, None

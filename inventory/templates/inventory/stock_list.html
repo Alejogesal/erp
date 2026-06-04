@@ -161,6 +161,16 @@
             <button type="submit">Transferir</button>
         </div>
     </form>
+    <form method="post" enctype="multipart/form-data" action="{% url 'inventory_import_transfer_pdf' %}" style="margin-top:12px;" id="pdf-import-form">
+        {% csrf_token %}
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <label for="pdf-file-input" style="cursor:pointer;">
+                <span class="btn" style="display:inline-block;">Importar desde PDF de envío FULL</span>
+            </label>
+            <input id="pdf-file-input" type="file" name="pdf_file" accept=".pdf" style="display:none;">
+            <span id="pdf-file-name" style="font-size:13px; color:var(--muted);">Ningún archivo seleccionado</span>
+        </div>
+    </form>
     <form method="post" style="margin-top:12px;" onsubmit="return confirm('¿Crear compras a partir del stock actual de MercadoLibre?');">
         {% csrf_token %}
         <input type="hidden" name="action" value="create_ml_purchase">
@@ -612,5 +622,19 @@
             updateBulkRequired();
         }
     })();
+</script>
+<script>
+(function() {
+    const fileInput = document.getElementById('pdf-file-input');
+    const fileNameSpan = document.getElementById('pdf-file-name');
+    const form = document.getElementById('pdf-import-form');
+    if (!fileInput || !form) return;
+    fileInput.addEventListener('change', function() {
+        if (fileInput.files.length) {
+            fileNameSpan.textContent = fileInput.files[0].name;
+            form.submit();
+        }
+    });
+})();
 </script>
 {% endblock %}

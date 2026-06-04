@@ -47,6 +47,7 @@ urlpatterns = [
     path("ventas/exportar/", views.sales_export_xlsx, name="inventory_sales_export_xlsx"),
     path("stock/", views.stock_list, name="inventory_stock_list"),
     path("stock/set-comun/", views.stock_set_comun_ajax, name="inventory_stock_set_comun_ajax"),
+    path("stock/importar-pdf/", views.import_transfer_pdf, name="inventory_import_transfer_pdf"),
     path("impuestos/", views.taxes_view, name="inventory_taxes"),
     path("iva/", views.iva_position, name="inventory_iva_position"),
     path("iva/pagos/", views.iva_payments_view, name="inventory_iva_payments"),

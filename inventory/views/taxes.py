@@ -155,6 +155,20 @@ def taxes_view(request):
     if request.method == "POST":
         action = request.POST.get("action") or ""
 
+        if action == "delete_afip_invoice":
+            inv_id = request.POST.get("invoice_id")
+            deleted, _ = AFIPInvoice.objects.filter(id=inv_id).delete()
+            if deleted:
+                messages.success(request, "Comprobante eliminado.")
+            else:
+                messages.error(request, "No se encontró el comprobante.")
+            return redirect("inventory_taxes")
+
+        if action == "delete_all_afip":
+            count, _ = AFIPInvoice.objects.all().delete()
+            messages.success(request, f"Se eliminaron {count} comprobantes AFIP.")
+            return redirect("inventory_taxes")
+
         if action == "delete_tax":
             tax_id = request.POST.get("tax_id")
             deleted, _ = TaxExpense.objects.filter(id=tax_id).delete()
@@ -186,11 +200,18 @@ def taxes_view(request):
             if not upload:
                 afip_import_msg = ("error", "Seleccioná un archivo .xlsx.")
             else:
-                created, skipped, errors, file_err = _parse_afip_xlsx(upload)
+                created, duplicates, filtered, errors, file_err = _parse_afip_xlsx(upload)
                 if file_err:
                     afip_import_msg = ("error", file_err)
                 else:
-                    afip_import_msg = ("ok", f"{created} comprobantes nuevos, {skipped} omitidos, {errors} con error.")
+                    parts = [f"{created} comprobante{'s' if created != 1 else ''} nuevo{'s' if created != 1 else ''} importado{'s' if created != 1 else ''}"]
+                    if duplicates:
+                        parts.append(f"{duplicates} ya estaban guardados")
+                    if filtered:
+                        parts.append(f"{filtered} de tipo B/C omitidos")
+                    if errors:
+                        parts.append(f"{errors} con error")
+                    afip_import_msg = ("ok" if not errors else "error", " — ".join(parts) + ".")
 
         else:
             tax_form = TaxExpenseForm(request.POST)

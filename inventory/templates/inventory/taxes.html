@@ -180,6 +180,15 @@
         </form>
 
         {% if use_afip %}
+        <div style="margin-bottom:10px;">
+            <form method="post" onsubmit="return confirm('¿Eliminar TODOS los comprobantes AFIP? Esta acción no se puede deshacer.');">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="delete_all_afip">
+                <button type="submit" style="background:rgba(239,68,68,0.15); color:#ef4444; border-color:rgba(239,68,68,0.3); font-size:12px; padding:5px 10px;">
+                    Eliminar todos los comprobantes
+                </button>
+            </form>
+        </div>
         <table>
             <thead>
                 <tr>
@@ -190,6 +199,7 @@
                     <th>CUIT Emisor</th>
                     <th>Neto 21%</th>
                     <th>IVA 21%</th>
+                    <th></th>
                 </tr>
             </thead>
             <tbody>
@@ -202,6 +212,14 @@
                     <td style="color:var(--muted); font-size:12px;">{{ inv.cuit_emisor }}</td>
                     <td>{% if inv.is_nota_credito %}−{% endif %}${{ inv.neto_21|latam_number:2 }}</td>
                     <td><strong>{% if inv.is_nota_credito %}−{% endif %}${{ inv.iva_21|latam_number:2 }}</strong></td>
+                    <td>
+                        <form method="post" onsubmit="return confirm('¿Eliminar este comprobante?');">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="delete_afip_invoice">
+                            <input type="hidden" name="invoice_id" value="{{ inv.id }}">
+                            <button type="submit" style="background:transparent; color:var(--negative); border:none; font-size:12px; padding:2px 6px; cursor:pointer;">✕</button>
+                        </form>
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>
