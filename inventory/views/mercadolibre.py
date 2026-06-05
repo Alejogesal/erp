@@ -22,6 +22,7 @@ from ..models import (
     MercadoLibreItem,
     MercadoLibreNotification,
     Product,
+    ProductVariant,
     Sale,
     Stock,
     Warehouse,
@@ -532,16 +533,28 @@ def mercadolibre_dashboard(request):
     ml_low_stock_lowprio = [x for x in ml_low_stock if x["color"] == "red" and (x["min"] + x["buffer"]) < 5]
 
     # Annotate ML items with ERP stock and calculated price
+    # For products with variants, sum variant quantities; otherwise use Stock COMUN directly.
     from decimal import Decimal as _Dec
+    from django.db.models import Sum as _Sum
+    product_ids = [item.product_id for item in items if item.product_id]
+    variant_stock = {
+        row["product_id"]: row["total"]
+        for row in ProductVariant.objects.filter(product_id__in=product_ids)
+        .values("product_id")
+        .annotate(total=_Sum("quantity"))
+    }
     comun_wh_for_items = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
     if comun_wh_for_items:
-        product_ids = [item.product_id for item in items if item.product_id]
-        erp_stocks = {
+        direct_stock = {
             s.product_id: s.quantity
             for s in Stock.objects.filter(product_id__in=product_ids, warehouse=comun_wh_for_items)
         }
     else:
-        erp_stocks = {}
+        direct_stock = {}
+    erp_stocks = {
+        pid: variant_stock[pid] if pid in variant_stock else direct_stock.get(pid, _Dec("0"))
+        for pid in product_ids
+    }
     for item in items:
         if item.product:
             item.erp_stock = erp_stocks.get(item.product_id, _Dec("0"))

@@ -411,7 +411,7 @@
         });
     }
 
-    document.querySelectorAll(".stock-adjust[data-product-id]").forEach(wrap => {
+    document.querySelectorAll("div[data-product-id]").forEach(wrap => {
         const input = wrap.querySelector(".stock-comun-input");
         if (!input) return;
         input.addEventListener("blur", () => saveStock(wrap, input));
