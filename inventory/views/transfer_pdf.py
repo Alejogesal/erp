@@ -1,4 +1,4 @@
-"""Import stock transfers from a FULL/MercadoLibre shipment preparation PDF."""
+"""Import stock deductions from a FULL/MercadoLibre shipment preparation PDF."""
 import re
 from decimal import Decimal
 from difflib import SequenceMatcher
@@ -6,6 +6,7 @@ from difflib import SequenceMatcher
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
+from django.db.models import Sum
 from django.shortcuts import redirect, render
 
 from .. import services
@@ -128,13 +129,26 @@ def _match_product(ml_code: str, name: str, all_products):
     return None, best_ratio
 
 
+def _get_comun_stock(product, comun_wh) -> Decimal:
+    """Stock COMUN: suma de variantes si tiene, sino Stock directo."""
+    has_variants = ProductVariant.objects.filter(product=product).exists()
+    if has_variants:
+        total = (
+            ProductVariant.objects.filter(product=product)
+            .aggregate(t=Sum("quantity"))
+            .get("t")
+        )
+        return Decimal(str(total or "0"))
+    stock_obj = Stock.objects.filter(product=product, warehouse=comun_wh).first()
+    return stock_obj.quantity if stock_obj else Decimal("0.00")
+
+
 @login_required
 def import_transfer_pdf(request):
     comun_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
-    ml_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.MERCADOLIBRE).first()
 
-    if not comun_wh or not ml_wh:
-        messages.error(request, "Faltan depósitos configurados.")
+    if not comun_wh:
+        messages.error(request, "Falta el depósito Común configurado.")
         return redirect("inventory_stock_list")
 
     if request.method == "POST" and "pdf_file" in request.FILES:
@@ -157,10 +171,8 @@ def import_transfer_pdf(request):
         matched = []
         for item in parsed_items:
             product, confidence = _match_product(item["ml_code"], item["name"], all_products)
-            comun_stock = Decimal("0.00")
-            if product:
-                stock_obj = Stock.objects.filter(product=product, warehouse=comun_wh).first()
-                comun_stock = stock_obj.quantity if stock_obj else Decimal("0.00")
+            comun_stock = _get_comun_stock(product, comun_wh) if product else Decimal("0.00")
+            has_variants = ProductVariant.objects.filter(product=product).exists() if product else False
             matched.append(
                 {
                     "pdf_name": item["name"],
@@ -171,6 +183,7 @@ def import_transfer_pdf(request):
                     "product_id": product.id if product else "",
                     "confidence": round(confidence * 100),
                     "comun_stock": comun_stock,
+                    "has_variants": has_variants,
                 }
             )
 
@@ -186,17 +199,16 @@ def import_transfer_pdf(request):
                 "matched": matched,
                 "all_products_json": all_products_json,
                 "comun_wh": comun_wh,
-                "ml_wh": ml_wh,
             },
         )
 
     elif request.method == "POST":
-        # Step 2: process confirmed transfers
+        # Step 2: descontar del stock COMUN
         product_ids = request.POST.getlist("product_id")
         quantities = request.POST.getlist("quantity")
 
         if not product_ids:
-            messages.error(request, "No hay productos para transferir.")
+            messages.error(request, "No hay productos para descontar.")
             return redirect("inventory_stock_list")
 
         bulk_items = []
@@ -215,11 +227,6 @@ def import_transfer_pdf(request):
             if not product:
                 errors.append(f"Línea {i}: producto no encontrado.")
                 continue
-            if ProductVariant.objects.filter(product=product).exists():
-                errors.append(
-                    f"'{product.name}' tiene variedades — transferí por el formulario principal."
-                )
-                continue
             bulk_items.append({"product": product, "quantity": quantity})
 
         if errors:
@@ -227,25 +234,42 @@ def import_transfer_pdf(request):
             return redirect("inventory_stock_list")
 
         if not bulk_items:
-            messages.warning(request, "No se seleccionó ningún producto para transferir.")
+            messages.warning(request, "No se seleccionó ningún producto.")
             return redirect("inventory_stock_list")
 
         try:
             with transaction.atomic():
                 for item in bulk_items:
-                    services.register_transfer(
-                        product=item["product"],
-                        from_warehouse=comun_wh,
-                        to_warehouse=ml_wh,
-                        quantity=item["quantity"],
-                        user=request.user,
-                        reference="Transferencia FULL envío",
-                    )
-            messages.success(request, f"Transferencias registradas: {len(bulk_items)}.")
-        except services.NegativeStockError:
-            messages.error(request, "No hay stock suficiente en depósito común.")
-        except services.InvalidMovementError as exc:
-            messages.error(request, str(exc))
+                    product = item["product"]
+                    qty = item["quantity"]
+                    has_variants = ProductVariant.objects.filter(product=product).exists()
+                    if has_variants:
+                        # Descontar de variantes proporcionalmente (mayor stock primero)
+                        variants = list(
+                            ProductVariant.objects.filter(product=product).order_by("-quantity")
+                        )
+                        remaining = qty
+                        for v in variants:
+                            if remaining <= 0:
+                                break
+                            deduct = min(v.quantity, remaining)
+                            if deduct > 0:
+                                v.quantity = (v.quantity - deduct).quantize(Decimal("0.01"))
+                                v.save(update_fields=["quantity"])
+                                remaining -= deduct
+                        services.sync_comun_from_variants(product)
+                    else:
+                        services.register_adjustment(
+                            product=product,
+                            warehouse=comun_wh,
+                            quantity=-qty,
+                            user=request.user,
+                            reference="Descuento envío FULL",
+                            allow_negative=True,
+                        )
+            messages.success(request, f"Stock descontado: {len(bulk_items)} productos.")
+        except Exception as exc:
+            messages.error(request, f"Error al descontar stock: {exc}")
 
         return redirect("inventory_stock_list")
 

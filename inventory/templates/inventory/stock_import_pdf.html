@@ -1,8 +1,8 @@
 {% extends "inventory/base.html" %}
-{% block title %}Importar transferencia desde PDF{% endblock %}
+{% block title %}Importar envío FULL — descontar stock{% endblock %}
 {% block content %}
-<h1>Importar transferencia desde PDF de envío FULL</h1>
-<p class="subtitle">Revisá los productos detectados y confirmá la transferencia a MercadoLibre.</p>
+<h1>Importar envío FULL — descontar de stock común</h1>
+<p class="subtitle">Revisá los productos detectados y confirmá. Las unidades se van a descontar del depósito Común.</p>
 
 <style>
     .pdf-table { width: 100%; border-collapse: collapse; }
@@ -85,6 +85,7 @@
                     <td>
                         {% if item.product %}
                             {{ item.comun_stock }}
+                            {% if item.has_variants %}<div style="font-size:11px;color:var(--muted);">variedades</div>{% endif %}
                         {% else %}
                             —
                         {% endif %}
@@ -114,7 +115,7 @@
         </table>
 
         <div class="actions-bar">
-            <button type="submit" id="submit-btn">Confirmar transferencia</button>
+            <button type="submit" id="submit-btn">Confirmar descuento de stock</button>
             <a href="{% url 'inventory_stock_list' %}" class="btn btn-secondary">Cancelar</a>
             <span id="selected-count" style="color:var(--muted); font-size:13px;"></span>
         </div>
