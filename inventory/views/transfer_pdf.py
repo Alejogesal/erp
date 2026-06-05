@@ -91,31 +91,32 @@ def _match_product(ml_code: str, name: str, all_products):
     """
     Try to find a matching Product.
     Returns (product, confidence_0_to_1) or (None, 0.0).
+    Priority: ML item title match > product name fuzzy match.
     """
-    # 1. MercadoLibreItem by item_id (exact or partial)
-    if ml_code:
-        for candidate_id in [ml_code, f"MLA{ml_code}"]:
-            ml_item = (
-                MercadoLibreItem.objects.filter(item_id=candidate_id)
-                .select_related("product")
-                .first()
-            )
-            if ml_item and ml_item.product:
-                return ml_item.product, 1.0
-        # Partial match as fallback
-        ml_item = (
-            MercadoLibreItem.objects.filter(item_id__icontains=ml_code)
-            .select_related("product")
-            .first()
-        )
-        if ml_item and ml_item.product:
-            return ml_item.product, 0.9
-
-    # 2. Fuzzy name match
     if not name:
         return None, 0.0
 
     name_lower = name.lower()
+
+    # 1. Match against MercadoLibre item titles (already linked to products)
+    linked_items = list(
+        MercadoLibreItem.objects.filter(product__isnull=False).select_related("product")
+    )
+    best_item = None
+    best_item_ratio = 0.0
+    for ml_item in linked_items:
+        for candidate in [ml_item.title, ml_item.matched_name]:
+            if not candidate:
+                continue
+            ratio = SequenceMatcher(None, name_lower, candidate.lower()).ratio()
+            if ratio > best_item_ratio:
+                best_item_ratio = ratio
+                best_item = ml_item
+
+    if best_item_ratio >= 0.60 and best_item:
+        return best_item.product, best_item_ratio
+
+    # 2. Fallback: fuzzy match against product names
     best_product = None
     best_ratio = 0.0
     for product in all_products:

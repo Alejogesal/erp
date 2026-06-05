@@ -161,16 +161,54 @@
             <button type="submit">Transferir</button>
         </div>
     </form>
-    <form method="post" enctype="multipart/form-data" action="{% url 'inventory_import_transfer_pdf' %}" style="margin-top:12px;" id="pdf-import-form">
+    <form method="post" enctype="multipart/form-data" action="{% url 'inventory_import_transfer_pdf' %}" id="pdf-import-form" style="margin-top:16px; padding-top:14px; border-top:1px solid rgba(255,255,255,0.06);">
         {% csrf_token %}
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:var(--muted); margin-bottom:8px;">Descontar stock desde PDF de envío FULL</div>
         <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-            <label for="pdf-file-input" style="cursor:pointer;">
-                <span class="btn" style="display:inline-block;">Importar desde PDF de envío FULL</span>
+            <label for="pdf-file-input" id="pdf-drop-zone" style="
+                display:flex; align-items:center; gap:8px;
+                padding:10px 16px; border-radius:8px; cursor:pointer;
+                border:1.5px dashed rgba(47,129,247,0.4);
+                background:rgba(47,129,247,0.06);
+                color:var(--accent); font-size:13px; font-weight:500;
+                transition:background 0.15s, border-color 0.15s;
+            ">
+                <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                Subir PDF de envío FULL
             </label>
             <input id="pdf-file-input" type="file" name="pdf_file" accept=".pdf" style="display:none;">
             <span id="pdf-file-name" style="font-size:13px; color:var(--muted);">Ningún archivo seleccionado</span>
         </div>
     </form>
+    <script>
+    (function(){
+        const input = document.getElementById('pdf-file-input');
+        const label = document.getElementById('pdf-drop-zone');
+        const nameSpan = document.getElementById('pdf-file-name');
+        const form = document.getElementById('pdf-import-form');
+        input.addEventListener('change', function(){
+            if(input.files.length){
+                nameSpan.textContent = input.files[0].name;
+                nameSpan.style.color = 'var(--text)';
+                form.submit();
+            }
+        });
+        label.addEventListener('dragover', e=>{ e.preventDefault(); label.style.background='rgba(47,129,247,0.14)'; });
+        label.addEventListener('dragleave', ()=>{ label.style.background='rgba(47,129,247,0.06)'; });
+        label.addEventListener('drop', e=>{
+            e.preventDefault();
+            label.style.background='rgba(47,129,247,0.06)';
+            const file = e.dataTransfer.files[0];
+            if(file && file.name.endsWith('.pdf')){
+                const dt = new DataTransfer();
+                dt.items.add(file);
+                input.files = dt.files;
+                nameSpan.textContent = file.name;
+                form.submit();
+            }
+        });
+    })();
+    </script>
     {% else %}
     <div>Configurá los depósitos Común y MercadoLibre para habilitar transferencias.</div>
     {% endif %}
