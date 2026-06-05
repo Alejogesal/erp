@@ -78,6 +78,31 @@ inventory_taxexpense
 
 inventory_productvariant
   id, product_id, name, quantity
+  → Para productos con variantes, el stock COMUN real = SUM(quantity) de sus variantes
+  → Para mostrar stock por variedad: JOIN con inventory_product ON product_id
+
+inventory_mercadolibreitem
+  id, item_id (ej: 'MLA2875181098'), title, status ('active'/'paused'/'closed'),
+  logistic_type ('fulfillment'=FULL / 'not_specified'=normal),
+  available_quantity  ← stock actual en ML según la API de MercadoLibre (se sincroniza cada 5 min)
+  product_id (nullable, FK a inventory_product)
+  units_sold_30d, last_sold_at, last_synced
+
+  REGLAS IMPORTANTES para stock ML:
+  - SIEMPRE usá available_quantity de esta tabla para stock en ML (NO uses inventory_stock con warehouse MERCADOLIBRE)
+  - "stock bajo en ML" = available_quantity < min_stock del producto (o < 5 si no tiene min_stock)
+  - Para saber qué variedad tiene stock bajo: JOIN inventory_productvariant ON product_id,
+    mostrá cada variedad con su quantity (stock COMUN) aunque la publicación no distinga variedades
+
+  EJEMPLO — publicaciones con stock bajo + variantes del producto:
+  SELECT mi.item_id, mi.title, mi.available_quantity AS stock_ml,
+         p.min_stock, pv.name AS variedad, pv.quantity AS stock_comun
+  FROM inventory_mercadolibreitem mi
+  JOIN inventory_product p ON p.id = mi.product_id
+  LEFT JOIN inventory_productvariant pv ON pv.product_id = p.id
+  WHERE mi.status IN ('active','paused')
+    AND mi.available_quantity < COALESCE(p.min_stock, 5)
+  ORDER BY mi.available_quantity, mi.title, pv.name;
 
 inventory_stockmovement
   id, product_id, sale_id, purchase_id,
