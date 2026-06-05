@@ -20,6 +20,7 @@ from ..models import (
     SupplierProduct,
     Warehouse,
 )
+from .. import services
 from .common import (
     _products_with_last_cost_queryset,
     _product_label_with_last_cost,
@@ -103,6 +104,7 @@ def product_variants(request, product_id: int):
                     name=add_form.cleaned_data["name"].strip(),
                     quantity=add_form.cleaned_data["quantity"],
                 )
+                services.sync_comun_from_variants(product)
                 messages.success(request, "Variedad agregada.")
                 return redirect("inventory_product_variants", product_id=product.id)
             messages.error(request, "Revisá los datos de la variedad.")
@@ -120,6 +122,7 @@ def product_variants(request, product_id: int):
                     variant.name = form.cleaned_data["name"].strip()
                     variant.quantity = form.cleaned_data["quantity"]
                     variant.save(update_fields=["name", "quantity"])
+                services.sync_comun_from_variants(product)
                 messages.success(request, "Variedades actualizadas.")
                 return redirect("inventory_product_variants", product_id=product.id)
             messages.error(request, "Revisá los datos de las variedades.")

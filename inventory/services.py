@@ -5,7 +5,7 @@ from django.db.models import Sum
 
 from django.utils import timezone
 
-from .models import Product, Stock, StockMovement, SupplierProduct, Warehouse
+from .models import Product, ProductVariant, Stock, StockMovement, SupplierProduct, Warehouse
 
 
 class StockError(Exception):
@@ -252,3 +252,23 @@ def register_adjustment(
         reference=reference or "",
         **movement_kwargs,
     )
+
+
+@transaction.atomic
+def sync_comun_from_variants(product: Product) -> None:
+    """Recalcula el Stock COMUN del producto como suma de sus variantes."""
+    comun_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
+    if not comun_wh:
+        return
+    total = (
+        ProductVariant.objects.filter(product=product)
+        .aggregate(total=Sum("quantity"))
+        .get("total")
+    ) or Decimal("0.00")
+    stock, _ = Stock.objects.select_for_update().get_or_create(
+        product=product,
+        warehouse=comun_wh,
+        defaults={"quantity": total},
+    )
+    stock.quantity = Decimal(str(total)).quantize(Decimal("0.01"))
+    stock.save(update_fields=["quantity"])

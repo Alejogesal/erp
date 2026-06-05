@@ -373,8 +373,8 @@ def stock_list(request):
             product.has_variants = False
         product.total_qty = product.comun_qty
         product.is_low_stock = (
-            product.min_stock is not None and
-            product.comun_qty < Decimal(str(product.min_stock))
+            product.comun_qty < Decimal("0") or
+            (product.min_stock is not None and product.comun_qty < Decimal(str(product.min_stock)))
         )
     if ml_wh and show_history:
         transfer_movements = (
