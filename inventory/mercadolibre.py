@@ -206,7 +206,10 @@ def get_valid_access_token(connection: MercadoLibreConnection) -> str:
         return ""
     if connection.expires_at and timezone.now() >= connection.expires_at - timedelta(minutes=2):
         refreshed = refresh_access_token(connection.refresh_token)
-        connection.access_token = refreshed.get("access_token", connection.access_token)
+        new_token = (refreshed.get("access_token") or "").strip()
+        if not new_token:
+            return ""
+        connection.access_token = new_token
         connection.refresh_token = refreshed.get("refresh_token", connection.refresh_token)
         expires_in = int(refreshed.get("expires_in", 0) or 0)
         if expires_in:

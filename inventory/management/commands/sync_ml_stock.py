@@ -1,5 +1,6 @@
 from django.core.management.base import BaseCommand
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 
 from inventory import mercadolibre as ml
 from inventory.models import MercadoLibreConnection
@@ -20,10 +21,14 @@ class Command(BaseCommand):
             self.stdout.write(self.style.ERROR("No hay usuarios para ejecutar la sincronización."))
             return
 
+        ts = timezone.now().strftime("%Y-%m-%d %H:%M:%S")
         result = ml.sync_items_and_stock(connection, sync_user)
-        self.stdout.write(
-            self.style.SUCCESS(
-                f"Sync OK. Items: {result.total_items}, Matcheados: {result.matched}, "
-                f"Sin match: {result.unmatched}, Stock actualizado: {result.updated_stock}."
+        if result.metrics.get("error") == "unauthorized" or (result.total_items == 0 and result.matched == 0 and not result.metrics):
+            self.stderr.write(
+                f"[{ts}] sync_ml_stock FALLÓ: token inválido o expirado — se requiere reautorizar con MercadoLibre."
             )
+            return
+        self.stdout.write(
+            f"[{ts}] Sync OK. Items: {result.total_items}, Matcheados: {result.matched}, "
+            f"Sin match: {result.unmatched}, Stock actualizado: {result.updated_stock}."
         )
