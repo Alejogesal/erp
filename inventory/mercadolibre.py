@@ -219,12 +219,75 @@ def get_valid_access_token(connection: MercadoLibreConnection) -> str:
 
 
 def get_fulfillment_stock(inventory_id: str, access_token: str) -> int:
-    """Get real available quantity for a Full item from the fulfillment inventory endpoint."""
-    try:
-        data = _request("GET", f"/inventories/{inventory_id}/stock/fulfillment", access_token=access_token)
-        return int(data.get("available_quantity", 0) or 0)
-    except Exception:
-        return -1
+    """Get real available quantity for a Full item from the fulfillment inventory endpoint.
+
+    Returns -1 only when the inventory has no fulfillment data. HTTP errors
+    (e.g. 401) propagate so the caller can refresh the token and retry.
+    """
+    data = _request("GET", f"/inventories/{inventory_id}/stock/fulfillment", access_token=access_token)
+    return int(data.get("available_quantity", 0) or 0)
+
+
+def _extract_inventory_ids(item: dict) -> list[str]:
+    """Collect Full inventory_ids from an item (top-level + per-variation)."""
+    ids: list[str] = []
+    top = item.get("inventory_id")
+    if top:
+        ids.append(str(top))
+    for variation in item.get("variations") or []:
+        vid = variation.get("inventory_id")
+        if vid:
+            ids.append(str(vid))
+    # dedupe preserving order
+    seen: set[str] = set()
+    result: list[str] = []
+    for i in ids:
+        if i not in seen:
+            seen.add(i)
+            result.append(i)
+    return result
+
+
+def resolve_authoritative_stock(
+    connection: "MercadoLibreConnection",
+    item: dict,
+    access_token: str,
+    cache: dict | None = None,
+) -> tuple[int, str]:
+    """Return (available, inventory_id) using the real source of truth.
+
+    For Full (fulfillment) items the /items available_quantity is unreliable
+    (it can stay stale after ML deducts physical stock), so the fulfillment
+    inventory endpoint is authoritative. Several publications (catalog +
+    traditional) can share the same inventory_id; results are cached per
+    inventory_id to avoid duplicate API calls within a sync run. Falls back to
+    available_quantity when fulfillment data can't be fetched.
+    """
+    shipping = item.get("shipping") or {}
+    logistic_type = item.get("logistic_type", "") or shipping.get("logistic_type", "") or ""
+    fallback = int(item.get("available_quantity", 0) or 0)
+    if logistic_type != "fulfillment":
+        return fallback, ""
+    inv_ids = _extract_inventory_ids(item)
+    if not inv_ids:
+        return fallback, ""
+    total = 0
+    got_valid = False
+    for inv_id in inv_ids:
+        if cache is not None and inv_id in cache:
+            fs = cache[inv_id]
+        else:
+            try:
+                fs = _call_with_refresh(connection, get_fulfillment_stock, inv_id, access_token=access_token)
+            except Exception:
+                fs = -1
+            if cache is not None:
+                cache[inv_id] = fs
+        if fs is not None and fs >= 0:
+            total += fs
+            got_valid = True
+    available = total if got_valid else fallback
+    return available, inv_ids[0]
 
 
 def get_item_ids(user_id: str, access_token: str, max_items: int | None = None) -> tuple[list[str], bool]:
@@ -589,6 +652,9 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
         raise
     ml_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.MERCADOLIBRE).first()
     total = matched = unmatched = updated_stock = 0
+    # Cache fulfillment stock per inventory_id so publications sharing the same
+    # Full inventory (catalog + traditional) don't trigger duplicate API calls.
+    fulfillment_cache: dict[str, int] = {}
 
     for item_id in item_ids:
         try:
@@ -602,10 +668,12 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
         shipping = item.get("shipping") or {}
         logistic_type = item.get("logistic_type", "") or shipping.get("logistic_type", "") or ""
         permalink = item.get("permalink", "") or ""
-        # available_quantity from /items is "available for sale" — the authoritative source.
-        # The fulfillment inventory endpoint returns physical stock including blocked units,
-        # which can differ from what's actually sellable (e.g. items with noFiscalCoverage).
-        available = int(item.get("available_quantity", 0) or 0)
+        # For Full items the /items available_quantity is unreliable; the
+        # fulfillment inventory endpoint is the source of truth. Non-Full items
+        # keep using available_quantity directly.
+        available, inventory_id = resolve_authoritative_stock(
+            connection, item, access_token, cache=fulfillment_cache
+        )
         existing = MercadoLibreItem.objects.filter(item_id=item_id).first()
         product = existing.product if existing else None
         matched_name = existing.matched_name if existing else ""
@@ -616,6 +684,7 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
                 "available_quantity": available,
                 "status": status,
                 "logistic_type": logistic_type,
+                "inventory_id": inventory_id,
                 "permalink": permalink,
                 "product": product,
                 "matched_name": matched_name,
@@ -737,7 +806,7 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
             shipping = item_detail.get("shipping") or {}
             logistic_type = item_detail.get("logistic_type", "") or shipping.get("logistic_type", "") or ""
             permalink = item_detail.get("permalink", "") or ""
-            available = int(item_detail.get("available_quantity", 0) or 0)
+            available, inventory_id = resolve_authoritative_stock(connection, item_detail, access_token)
             MercadoLibreItem.objects.update_or_create(
                 item_id=item_id,
                 defaults={
@@ -745,6 +814,7 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
                     "available_quantity": available,
                     "status": status,
                     "logistic_type": logistic_type,
+                    "inventory_id": inventory_id,
                     "permalink": permalink,
                 },
             )

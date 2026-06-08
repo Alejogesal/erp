@@ -198,6 +198,7 @@
                     {% if item.permalink %}
                     <a href="{{ item.permalink }}" target="_blank" rel="noreferrer" style="color:var(--text);">{{ item.title|truncatechars:45 }}</a>
                     {% else %}{{ item.title|truncatechars:45 }}{% endif %}
+                    {% if item.pub_count > 1 %}<span style="font-size:10px; color:var(--muted); background:#2a313c; border-radius:4px; padding:1px 5px; margin-left:4px;">{{ item.pub_count }} publicaciones · stock Full compartido</span>{% endif %}
                     <div style="font-size:10px; color:var(--muted); font-family:monospace;">{{ item.item_id }}</div>
                 </td>
                 <td style="padding:5px; text-align:center; color:var(--muted); font-size:11px;">

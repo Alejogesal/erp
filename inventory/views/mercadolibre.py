@@ -504,27 +504,64 @@ def mercadolibre_dashboard(request):
         else:
             return "green", effective_min, buffer
 
-    # ML low stock alerts: red or yellow publications
-    ml_low_stock = []
+    # ML low stock alerts: red or yellow publications.
+    # Publications that share the same Full inventory_id (a catalog listing and a
+    # traditional listing of the same product) are grouped so we alert ONCE per
+    # physical stock. The shared stock is the same on both; sales velocity is
+    # summed because units come from either listing.
+    stock_groups: dict = {}
     for ml_item in MercadoLibreItem.objects.select_related("product").filter(
         status__in=["active", "paused"],
     ):
-        sold = ml_item.units_sold_30d or 0
-        manual_min = ml_item.product.min_stock if ml_item.product else None
-        color, eff_min, buf = _semaphore(ml_item.available_quantity, sold, ml_item.status, manual_min)
-        if color in ("red", "yellow") and eff_min is not None:
-            ml_low_stock.append({
+        inv = (ml_item.inventory_id or "").strip()
+        key = f"inv:{inv}" if inv else f"item:{ml_item.item_id}"
+        group = stock_groups.get(key)
+        if group is None:
+            group = {
                 "item_id": ml_item.item_id,
                 "title": ml_item.title,
                 "permalink": ml_item.permalink,
                 "status": ml_item.status,
                 "logistic_type": ml_item.logistic_type,
                 "available": ml_item.available_quantity,
+                "product": ml_item.product,
+                "sold_30d": 0,
+                "pub_count": 0,
+            }
+            stock_groups[key] = group
+        group["pub_count"] += 1
+        group["sold_30d"] += ml_item.units_sold_30d or 0
+        # Shared Full stock is identical on both listings; max() guards against a
+        # lagging listing. Velocity (sold_30d) is summed above.
+        group["available"] = max(group["available"], ml_item.available_quantity)
+        # Prefer the active listing for the displayed title/link and matched product.
+        if ml_item.status == "active":
+            group["status"] = "active"
+            group["item_id"] = ml_item.item_id
+            group["title"] = ml_item.title
+            group["permalink"] = ml_item.permalink or group["permalink"]
+        if group["product"] is None and ml_item.product is not None:
+            group["product"] = ml_item.product
+
+    ml_low_stock = []
+    for group in stock_groups.values():
+        sold = group["sold_30d"]
+        manual_min = group["product"].min_stock if group["product"] else None
+        color, eff_min, buf = _semaphore(group["available"], sold, group["status"], manual_min)
+        if color in ("red", "yellow") and eff_min is not None:
+            ml_low_stock.append({
+                "item_id": group["item_id"],
+                "title": group["title"],
+                "permalink": group["permalink"],
+                "status": group["status"],
+                "logistic_type": group["logistic_type"],
+                "available": group["available"],
                 "min": eff_min,
                 "buffer": buf,
-                "diff": max(0, eff_min + buf - ml_item.available_quantity),
+                "diff": max(0, eff_min + buf - group["available"]),
                 "color": color,
                 "sold_30d": sold,
+                "pub_count": group["pub_count"],
             })
     ml_low_stock.sort(key=lambda x: (0 if x["color"] == "red" else 1, x["available"]))
 
