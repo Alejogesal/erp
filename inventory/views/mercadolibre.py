@@ -360,19 +360,33 @@ def mercadolibre_dashboard(request):
                 messages.error(request, "Ingresá el ID del item.")
             else:
                 try:
-                    import json as _json
                     access_token_dbg = ml.get_valid_access_token(connection)
                     item_data = ml._call_with_refresh(connection, ml.get_item, item_id, access_token=access_token_dbg)
-                    inv_id = item_data.get("inventory_id", "") or ""
                     logistic = item_data.get("logistic_type", "") or (item_data.get("shipping") or {}).get("logistic_type", "")
                     avail = item_data.get("available_quantity", "?")
+                    up_ids = ml._extract_user_product_ids(item_data)
+                    up_id = up_ids[0] if up_ids else ""
                     full_stock = None
-                    if inv_id:
-                        full_stock = ml.get_fulfillment_stock(inv_id, access_token_dbg)
+                    locations_str = ""
+                    if up_id:
+                        try:
+                            stock_data = ml._call_with_refresh(
+                                connection, ml.get_user_product_stock, up_id, access_token=access_token_dbg,
+                            )
+                            qty, found = ml._full_stock_from_locations(stock_data)
+                            full_stock = qty if found else None
+                            locations_str = ", ".join(
+                                f"{loc.get('type')}={loc.get('quantity')}"
+                                for loc in (stock_data or {}).get("locations") or []
+                            )
+                        except Exception as exc2:
+                            locations_str = f"error stock: {exc2}"
+                    resolved, _ = ml.resolve_authoritative_stock(connection, item_data, access_token_dbg)
                     messages.info(request,
                         f"Item {item_id} | logistic_type: {logistic!r} | "
-                        f"inventory_id: {inv_id!r} | available_quantity: {avail} | "
-                        f"fulfillment_stock: {full_stock}"
+                        f"user_product_id: {up_id!r} | available_quantity (/items): {avail} | "
+                        f"locations: [{locations_str}] | stock Full (meli_facility): {full_stock} | "
+                        f"→ ERP usará: {resolved}"
                     )
                 except Exception as exc:
                     messages.error(request, f"Error debug item: {exc}")
@@ -505,7 +519,7 @@ def mercadolibre_dashboard(request):
             return "green", effective_min, buffer
 
     # ML low stock alerts: red or yellow publications.
-    # Publications that share the same Full inventory_id (a catalog listing and a
+    # Publications that share the same user_product_id (a catalog listing and a
     # traditional listing of the same product) are grouped so we alert ONCE per
     # physical stock. The shared stock is the same on both; sales velocity is
     # summed because units come from either listing.
@@ -513,8 +527,8 @@ def mercadolibre_dashboard(request):
     for ml_item in MercadoLibreItem.objects.select_related("product").filter(
         status__in=["active", "paused"],
     ):
-        inv = (ml_item.inventory_id or "").strip()
-        key = f"inv:{inv}" if inv else f"item:{ml_item.item_id}"
+        up = (ml_item.user_product_id or "").strip()
+        key = f"up:{up}" if up else f"item:{ml_item.item_id}"
         group = stock_groups.get(key)
         if group is None:
             group = {

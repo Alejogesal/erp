@@ -84,15 +84,15 @@ inventory_productvariant
 inventory_mercadolibreitem
   id, item_id (ej: 'MLA2875181098'), title, status ('active'/'paused'/'closed'),
   logistic_type ('fulfillment'=FULL / 'not_specified'=normal),
-  inventory_id  ← ID de inventario Full; publicaciones con el MISMO inventory_id comparten stock
-                  físico (típicamente una publicación tradicional + una de catálogo del mismo producto)
-  available_quantity  ← stock REAL en ML (para Full = stock de fulfillment, fuente de verdad; se sincroniza cada 5 min)
+  user_product_id  ← user_product_id de ML; publicaciones con el MISMO user_product_id comparten stock
+                  físico Full (típicamente una publicación tradicional + una de catálogo del mismo producto)
+  available_quantity  ← stock REAL en ML (para Full = meli_facility de user-products/stock, fuente de verdad; se sincroniza cada 5 min)
   product_id (nullable, FK a inventory_product)
   units_sold_30d, last_sold_at, last_synced
 
   REGLAS IMPORTANTES para stock ML:
   - SIEMPRE usá available_quantity de esta tabla para stock en ML (NO uses inventory_stock con warehouse MERCADOLIBRE)
-  - Para Full, varias publicaciones comparten stock: agrupá por inventory_id y NO sumes available_quantity
+  - Para Full, varias publicaciones comparten stock: agrupá por user_product_id y NO sumes available_quantity
     (es el mismo stock físico en cada fila); sí sumá units_sold_30d entre las publicaciones del grupo
   - "stock bajo en ML" = available_quantity < min_stock del producto (o < 5 si no tiene min_stock)
   - Para saber qué variedad tiene stock bajo: JOIN inventory_productvariant ON product_id,

@@ -218,27 +218,29 @@ def get_valid_access_token(connection: MercadoLibreConnection) -> str:
     return connection.access_token
 
 
-def get_fulfillment_stock(inventory_id: str, access_token: str) -> int:
-    """Get real available quantity for a Full item from the fulfillment inventory endpoint.
+def get_user_product_stock(user_product_id: str, access_token: str) -> dict:
+    """Stock per location for a user_product.
 
-    Returns -1 only when the inventory has no fulfillment data. HTTP errors
-    (e.g. 401) propagate so the caller can refresh the token and retry.
+    Response shape (Full/Flex coexistence):
+      {"locations": [{"type": "meli_facility", "quantity": 12},
+                     {"type": "selling_address", "quantity": 9}], ...}
+      - meli_facility  → stock managed by Fulfillment (Full)
+      - selling_address → seller's own stock (Flex)
+    HTTP errors propagate so the caller can refresh the token / fall back.
     """
-    data = _request("GET", f"/inventories/{inventory_id}/stock/fulfillment", access_token=access_token)
-    return int(data.get("available_quantity", 0) or 0)
+    return _request("GET", f"/user-products/{user_product_id}/stock", access_token=access_token)
 
 
-def _extract_inventory_ids(item: dict) -> list[str]:
-    """Collect Full inventory_ids from an item (top-level + per-variation)."""
+def _extract_user_product_ids(item: dict) -> list[str]:
+    """Collect user_product_ids from an item (top-level + per-variation)."""
     ids: list[str] = []
-    top = item.get("inventory_id")
+    top = item.get("user_product_id")
     if top:
         ids.append(str(top))
     for variation in item.get("variations") or []:
-        vid = variation.get("inventory_id")
+        vid = variation.get("user_product_id")
         if vid:
             ids.append(str(vid))
-    # dedupe preserving order
     seen: set[str] = set()
     result: list[str] = []
     for i in ids:
@@ -248,46 +250,65 @@ def _extract_inventory_ids(item: dict) -> list[str]:
     return result
 
 
+def _full_stock_from_locations(data: dict) -> tuple[int, bool]:
+    """Sum the Full (meli_facility) quantity from a user-products/stock payload.
+
+    Returns (full_qty, found) where found indicates a meli_facility location
+    was present (so the value is trustworthy vs. an empty/failed response).
+    """
+    total = 0
+    found = False
+    for loc in (data or {}).get("locations") or []:
+        if loc.get("type") == "meli_facility":
+            total += int(loc.get("quantity", 0) or 0)
+            found = True
+    return total, found
+
+
 def resolve_authoritative_stock(
     connection: "MercadoLibreConnection",
     item: dict,
     access_token: str,
     cache: dict | None = None,
 ) -> tuple[int, str]:
-    """Return (available, inventory_id) using the real source of truth.
+    """Return (available, user_product_id) using the real source of truth.
 
-    For Full (fulfillment) items the /items available_quantity is unreliable
-    (it can stay stale after ML deducts physical stock), so the fulfillment
-    inventory endpoint is authoritative. Several publications (catalog +
-    traditional) can share the same inventory_id; results are cached per
-    inventory_id to avoid duplicate API calls within a sync run. Falls back to
-    available_quantity when fulfillment data can't be fetched.
+    For Full (fulfillment) items the /items available_quantity is unreliable —
+    under Full/Flex coexistence it does NOT reflect the actual Full stock. The
+    authoritative value is the meli_facility quantity from
+    GET /user-products/{user_product_id}/stock. Several publications (catalog +
+    traditional) share the same user_product_id, so results are cached per
+    user_product_id to avoid duplicate API calls within a sync run. Falls back
+    to available_quantity when the stock payload can't be fetched.
     """
     shipping = item.get("shipping") or {}
     logistic_type = item.get("logistic_type", "") or shipping.get("logistic_type", "") or ""
     fallback = int(item.get("available_quantity", 0) or 0)
+    up_ids = _extract_user_product_ids(item)
+    if not up_ids:
+        return fallback, ""
+    primary_up = up_ids[0]
+    # Only Full items need the override; for non-Full available_quantity is fine.
     if logistic_type != "fulfillment":
-        return fallback, ""
-    inv_ids = _extract_inventory_ids(item)
-    if not inv_ids:
-        return fallback, ""
-    total = 0
+        return fallback, primary_up
+    total_full = 0
     got_valid = False
-    for inv_id in inv_ids:
-        if cache is not None and inv_id in cache:
-            fs = cache[inv_id]
+    for up in up_ids:
+        if cache is not None and up in cache:
+            data = cache[up]
         else:
             try:
-                fs = _call_with_refresh(connection, get_fulfillment_stock, inv_id, access_token=access_token)
+                data = _call_with_refresh(connection, get_user_product_stock, up, access_token=access_token)
             except Exception:
-                fs = -1
+                data = {}
             if cache is not None:
-                cache[inv_id] = fs
-        if fs is not None and fs >= 0:
-            total += fs
+                cache[up] = data
+        qty, found = _full_stock_from_locations(data)
+        if found:
+            total_full += qty
             got_valid = True
-    available = total if got_valid else fallback
-    return available, inv_ids[0]
+    available = total_full if got_valid else fallback
+    return available, primary_up
 
 
 def get_item_ids(user_id: str, access_token: str, max_items: int | None = None) -> tuple[list[str], bool]:
@@ -652,9 +673,9 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
         raise
     ml_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.MERCADOLIBRE).first()
     total = matched = unmatched = updated_stock = 0
-    # Cache fulfillment stock per inventory_id so publications sharing the same
-    # Full inventory (catalog + traditional) don't trigger duplicate API calls.
-    fulfillment_cache: dict[str, int] = {}
+    # Cache user-product stock per user_product_id so publications sharing the
+    # same Full stock (catalog + traditional) don't trigger duplicate API calls.
+    fulfillment_cache: dict[str, dict] = {}
 
     for item_id in item_ids:
         try:
@@ -668,10 +689,10 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
         shipping = item.get("shipping") or {}
         logistic_type = item.get("logistic_type", "") or shipping.get("logistic_type", "") or ""
         permalink = item.get("permalink", "") or ""
-        # For Full items the /items available_quantity is unreliable; the
-        # fulfillment inventory endpoint is the source of truth. Non-Full items
-        # keep using available_quantity directly.
-        available, inventory_id = resolve_authoritative_stock(
+        # For Full items the /items available_quantity is unreliable (Full/Flex
+        # coexistence); the user-products stock endpoint (meli_facility) is the
+        # source of truth. Non-Full items keep using available_quantity directly.
+        available, user_product_id = resolve_authoritative_stock(
             connection, item, access_token, cache=fulfillment_cache
         )
         existing = MercadoLibreItem.objects.filter(item_id=item_id).first()
@@ -684,7 +705,7 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
                 "available_quantity": available,
                 "status": status,
                 "logistic_type": logistic_type,
-                "inventory_id": inventory_id,
+                "user_product_id": user_product_id,
                 "permalink": permalink,
                 "product": product,
                 "matched_name": matched_name,
@@ -806,7 +827,7 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
             shipping = item_detail.get("shipping") or {}
             logistic_type = item_detail.get("logistic_type", "") or shipping.get("logistic_type", "") or ""
             permalink = item_detail.get("permalink", "") or ""
-            available, inventory_id = resolve_authoritative_stock(connection, item_detail, access_token)
+            available, user_product_id = resolve_authoritative_stock(connection, item_detail, access_token)
             MercadoLibreItem.objects.update_or_create(
                 item_id=item_id,
                 defaults={
@@ -814,7 +835,7 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
                     "available_quantity": available,
                     "status": status,
                     "logistic_type": logistic_type,
-                    "inventory_id": inventory_id,
+                    "user_product_id": user_product_id,
                     "permalink": permalink,
                 },
             )

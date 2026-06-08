@@ -383,11 +383,11 @@ class MercadoLibreItem(models.Model):
     status = models.CharField(max_length=50, blank=True, default="")
     permalink = models.URLField(max_length=500, blank=True, default="")
     logistic_type = models.CharField(max_length=50, blank=True, default="")
-    inventory_id = models.CharField(
+    user_product_id = models.CharField(
         max_length=50,
         blank=True,
         default="",
-        help_text="ID de inventario Full (compartido entre publicación tradicional y de catálogo)",
+        help_text="user_product_id de ML; compartido entre publicación tradicional y de catálogo del mismo producto (agrupa el stock Full)",
     )
     available_quantity = models.IntegerField(default=0)
     product = models.ForeignKey(Product, null=True, blank=True, on_delete=models.SET_NULL, related_name="ml_items")
