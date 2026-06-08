@@ -392,7 +392,7 @@ def sale_edit(request, sale_id: int):
                                 variant.save(update_fields=["quantity"])
                                 if comun_wh:
                                     _sync_common_with_variants(data["product"], comun_wh)
-                        default_cost = data["product"].last_purchase_cost() or data["product"].cost_with_vat()
+                        default_cost = data["product"].cost_with_vat() or data["product"].last_purchase_cost()
                         manual_cost = data.get("cost_unit_override")
                         cost_unit = (
                             manual_cost
@@ -684,7 +684,7 @@ def sales_list(request):
                     product=product,
                     quantity=qty,
                     unit_price=unit_price,
-                    cost_unit=product.last_purchase_cost(),
+                    cost_unit=product.cost_with_vat() or product.last_purchase_cost(),
                     discount_percent=Decimal("0.00"),
                     final_unit_price=unit_price,
                     line_total=line_total,
@@ -912,7 +912,7 @@ def sales_list(request):
                         product=item["product"],
                         quantity=qty,
                         unit_price=unit_price,
-                        cost_unit=item["product"].last_purchase_cost(),
+                        cost_unit=item["product"].cost_with_vat() or item["product"].last_purchase_cost(),
                         discount_percent=Decimal("0.00"),
                         final_unit_price=unit_price,
                         line_total=line_total,
@@ -1149,7 +1149,7 @@ def sales_list(request):
                                     variant.save(update_fields=["quantity"])
                                     if comun_wh:
                                         _sync_common_with_variants(data["product"], comun_wh)
-                            default_cost = data["product"].last_purchase_cost() or data["product"].cost_with_vat()
+                            default_cost = data["product"].cost_with_vat() or data["product"].last_purchase_cost()
                             manual_cost = data.get("cost_unit_override")
                             cost_unit = (
                                 manual_cost
@@ -1289,11 +1289,11 @@ def sales_list(request):
         for sale in sales_list_qs:
             cost_total = Decimal("0.00")
             for item in sale.items.all():
-                cost_unit = item.cost_unit
+                cost_unit = item.product.cost_with_vat()
                 if not cost_unit or cost_unit <= 0:
                     cost_unit = item.product.last_purchase_cost()
                 if not cost_unit or cost_unit <= 0:
-                    cost_unit = item.product.cost_with_vat()
+                    cost_unit = item.cost_unit
                 cost_total += item.quantity * cost_unit
             commission_total = sale.ml_commission_total or Decimal("0.00")
             tax_total = sale.ml_tax_total or Decimal("0.00")

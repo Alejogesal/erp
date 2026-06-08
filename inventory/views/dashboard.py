@@ -65,11 +65,11 @@ def dashboard(request):
     tax_total = tax_qs.aggregate(total=Sum("amount")).get("total") or Decimal("0.00")
 
     def _resolve_cost(item) -> Decimal:
-        c = item.cost_unit
+        c = item.product.cost_with_vat()
         if not c or c <= 0:
             c = item.product.last_purchase_cost()
         if not c or c <= 0:
-            c = item.product.cost_with_vat()
+            c = item.cost_unit
         return c or Decimal("0.00")
 
     margin_ml = Decimal("0.00")
