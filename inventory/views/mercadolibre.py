@@ -90,6 +90,16 @@ def mercadolibre_callback(request):
     connection.nickname = profile.get("nickname", "") or ""
     connection.save(update_fields=["access_token", "refresh_token", "expires_at", "last_sync_at", "ml_user_id", "nickname"])
 
+    # DEBUG TEMPORAL: mostrar qué devolvió ML en el intercambio de token (sin exponer
+    # los valores de los tokens) para diagnosticar por qué no llega refresh_token.
+    _dbg_scope = token_data.get("scope")
+    _dbg_keys = ",".join(sorted(token_data.keys()))
+    messages.info(
+        request,
+        f"[DEBUG ML] refresh_token={'SÍ' if refresh_token else 'NO'} | scope={_dbg_scope!r} | "
+        f"expires_in={expires_in} | keys=[{_dbg_keys}]",
+    )
+
     messages.success(request, "MercadoLibre conectado correctamente. Podés recuperar órdenes históricas desde Herramientas avanzadas.")
     return redirect("inventory_mercadolibre_dashboard")
 
