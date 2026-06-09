@@ -13,6 +13,21 @@
         {% endif %}
         {% if connection and connection.access_token %}
             <p style="font-size:15px;"><strong>{{ connection.nickname|default:"Cuenta ML" }}</strong></p>
+            {% if token_health and not token_health.can_refresh %}
+                <div style="margin-top:8px; padding:10px 12px; border:1px solid var(--negative); border-radius:6px; background:rgba(192,57,43,0.10);">
+                    <p style="color:var(--negative); font-weight:700; margin:0;">&#9888; Reautorización requerida</p>
+                    <p style="color:var(--muted); font-size:12px; margin:4px 0 8px;">
+                        La cuenta no tiene <strong>refresh token</strong>{% if token_health.expired %} y el access token ya venció{% endif %}.
+                        Sin esto el stock y las ventas <strong>dejan de sincronizarse</strong> (los datos quedan congelados).
+                        Reautorizá para restablecer la conexión de forma permanente.
+                    </p>
+                    <a class="pill" href="{% url 'inventory_mercadolibre_connect' %}" style="display:inline-block; background:var(--negative); color:#fff;">Reautorizar ahora</a>
+                </div>
+            {% elif token_health and token_health.expired %}
+                <p style="color: #f0ad4e; font-weight:600; margin-top:8px;">
+                    &#9888; Access token vencido — se renovará en el próximo sync
+                </p>
+            {% endif %}
             {% if sync_age_minutes is not None %}
                 {% if sync_age_minutes < 30 %}
                     <p style="color: var(--positive); font-weight:600; margin-top:8px;">

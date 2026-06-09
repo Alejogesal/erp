@@ -632,6 +632,10 @@ def mercadolibre_dashboard(request):
         delta = timezone.now() - connection.last_sync_at
         sync_age_minutes = int(delta.total_seconds() / 60)
 
+    # Token health — surfaced so the dashboard warns about an expired/unrenewable
+    # token instead of showing "auto-sync activo" with frozen data.
+    token_health = ml.token_status(connection) if connection else None
+
     # Seller reputation + open claims from ML API
     reputation = {}
     open_claims = []
@@ -687,6 +691,7 @@ def mercadolibre_dashboard(request):
             "connection": connection,
             "items": items,
             "missing_credentials": missing_credentials,
+            "token_health": token_health,
             "page_obj": page_obj,
             "search_query": search_query,
             "recent_cutoff": recent_cutoff,

@@ -43,6 +43,9 @@ def get_authorize_url(state: str) -> str:
         "client_id": settings.ML_CLIENT_ID,
         "redirect_uri": settings.ML_REDIRECT_URI,
         "state": state,
+        # offline_access is REQUIRED for ML to return a refresh_token; without it
+        # the access token expires in ~6h and can't be renewed (sync freezes).
+        "scope": "offline_access read write",
     }
     return f"{ML_AUTH_URL}?{urlencode(params)}"
 
@@ -201,16 +204,46 @@ def get_seller_reputation(user_id: str, access_token: str) -> dict:
     return data.get("seller_reputation") or {}
 
 
+def token_status(connection: MercadoLibreConnection) -> dict:
+    """Quick health check of a connection's OAuth token (no network calls).
+
+    Returns flags the UI/sync can use to surface problems instead of failing
+    silently:
+      - has_token / has_refresh: whether each token string is present
+      - expired: access token past its expiry
+      - can_refresh: a refresh token exists to renew with
+      - healthy: usable now or renewable
+    """
+    has_token = bool(connection.access_token)
+    has_refresh = bool(connection.refresh_token)
+    expired = bool(connection.expires_at and timezone.now() >= connection.expires_at)
+    return {
+        "has_token": has_token,
+        "has_refresh": has_refresh,
+        "expired": expired,
+        "can_refresh": has_refresh,
+        # Healthy = we have a non-expired token, OR we can refresh to get one.
+        "healthy": (has_token and not expired) or has_refresh,
+    }
+
+
 def get_valid_access_token(connection: MercadoLibreConnection) -> str:
-    if not connection.access_token:
-        return ""
-    if connection.expires_at and timezone.now() >= connection.expires_at - timedelta(minutes=2):
+    # Refresh when the token is missing OR within 2 min of expiry, as long as we
+    # have a refresh_token to do it with. If there's no refresh_token we can't
+    # recover here — the caller must re-authorize.
+    needs_refresh = (not connection.access_token) or (
+        connection.expires_at and timezone.now() >= connection.expires_at - timedelta(minutes=2)
+    )
+    if needs_refresh:
+        if not connection.refresh_token:
+            return connection.access_token or ""
         refreshed = refresh_access_token(connection.refresh_token)
         new_token = (refreshed.get("access_token") or "").strip()
         if not new_token:
-            return ""
+            return connection.access_token or ""
         connection.access_token = new_token
-        connection.refresh_token = refreshed.get("refresh_token", connection.refresh_token)
+        # ML rotates refresh tokens (single-use); persist the new one if present.
+        connection.refresh_token = refreshed.get("refresh_token") or connection.refresh_token
         expires_in = int(refreshed.get("expires_in", 0) or 0)
         if expires_in:
             connection.expires_at = timezone.now() + timedelta(seconds=expires_in)
