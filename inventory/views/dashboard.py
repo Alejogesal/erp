@@ -65,20 +65,23 @@ def dashboard(request):
     tax_total = tax_qs.aggregate(total=Sum("amount")).get("total") or Decimal("0.00")
 
     def _resolve_cost(item) -> Decimal:
-        c = item.product.cost_with_vat()
-        if not c or c <= 0:
-            c = item.product.last_purchase_cost()
-        if not c or c <= 0:
-            c = item.cost_unit
-        return c or Decimal("0.00")
+        # A registered sale locks in its cost: use the recorded per-line cost_unit.
+        # A later product-cost change only affects future sales, never recalculates
+        # past ones. Product cost is a fallback for legacy lines with cost_unit = 0.
+        candidates = [item.cost_unit, item.product.last_purchase_cost(), item.product.cost_with_vat()]
+        for c in candidates:
+            if c and c > 0:
+                return c
+        return Decimal("0.00")
 
     margin_ml = Decimal("0.00")
     margin_comun = Decimal("0.00")
     for sale in sales_qs:
+        is_ml = sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE
         cost_total = Decimal("0.00")
         for item in sale.items.all():
             cost_total += item.quantity * _resolve_cost(item)
-        if sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE:
+        if is_ml:
             net_total = (sale.total or Decimal("0.00")) - (sale.ml_commission_total or Decimal("0.00")) - (
                 sale.ml_tax_total or Decimal("0.00")
             )
@@ -96,7 +99,8 @@ def dashboard(request):
         items_total = sum((item.line_total or Decimal("0.00")) for item in items)
         if items_total <= 0:
             continue
-        if sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE:
+        is_ml = sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE
+        if is_ml:
             revenue_total = (sale.total or Decimal("0.00")) - (sale.ml_commission_total or Decimal("0.00")) - (
                 sale.ml_tax_total or Decimal("0.00")
             )
@@ -105,10 +109,10 @@ def dashboard(request):
         for item in items:
             line_total = item.line_total or Decimal("0.00")
             revenue_share = (revenue_total * line_total / items_total) if items_total else Decimal("0.00")
-            cost_total = item.quantity * _resolve_cost(item)
+            unit_cost = _resolve_cost(item)
+            cost_total = item.quantity * unit_cost
             profit = (revenue_share - cost_total).quantize(Decimal("0.01"))
             key = (item.product_id, item.variant_id)
-            unit_cost = _resolve_cost(item)
             if key not in ranking_map:
                 ranking_map[key] = {
                     "product_id": item.product_id,
@@ -130,10 +134,11 @@ def dashboard(request):
     for sale in sales_qs:
         key = sale.customer_id
         name = sale.customer.name if sale.customer else "Consumidor final"
+        is_ml = sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE
         cost_total = Decimal("0.00")
         for item in sale.items.all():
             cost_total += item.quantity * _resolve_cost(item)
-        if sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE:
+        if is_ml:
             net = (sale.total or Decimal("0.00")) - (sale.ml_commission_total or Decimal("0.00")) - (sale.ml_tax_total or Decimal("0.00"))
             profit = net - cost_total
         else:

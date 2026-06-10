@@ -39,6 +39,21 @@ from .utils_xlsx import _read_ml_sales_xlsx_rows
 from ..models import MercadoLibreConnection
 
 
+def _resolve_sale_item_cost(item) -> Decimal:
+    """Unit cost for a sale line's margin.
+
+    A registered sale locks in its cost: use the per-line cost_unit recorded at
+    sale time. A later change to the product's cost only affects sales made AFTER
+    that change — never recalculates already-registered sales. Product cost is a
+    fallback only for legacy lines with no recorded cost (cost_unit = 0).
+    """
+    candidates = [item.cost_unit, item.product.last_purchase_cost(), item.product.cost_with_vat()]
+    for c in candidates:
+        if c and c > 0:
+            return c
+    return Decimal("0.00")
+
+
 def _push_products_stock_to_ml(products, user):
     """After a COMUN sale, push updated stock to linked ML publications."""
     from django.contrib.auth import get_user_model
@@ -392,7 +407,7 @@ def sale_edit(request, sale_id: int):
                                 variant.save(update_fields=["quantity"])
                                 if comun_wh:
                                     _sync_common_with_variants(data["product"], comun_wh)
-                        default_cost = data["product"].cost_with_vat() or data["product"].last_purchase_cost()
+                        default_cost = data["product"].last_purchase_cost() or data["product"].cost_with_vat()
                         manual_cost = data.get("cost_unit_override")
                         cost_unit = (
                             manual_cost
@@ -684,7 +699,7 @@ def sales_list(request):
                     product=product,
                     quantity=qty,
                     unit_price=unit_price,
-                    cost_unit=product.cost_with_vat() or product.last_purchase_cost(),
+                    cost_unit=product.last_purchase_cost(),
                     discount_percent=Decimal("0.00"),
                     final_unit_price=unit_price,
                     line_total=line_total,
@@ -912,7 +927,7 @@ def sales_list(request):
                         product=item["product"],
                         quantity=qty,
                         unit_price=unit_price,
-                        cost_unit=item["product"].cost_with_vat() or item["product"].last_purchase_cost(),
+                        cost_unit=item["product"].last_purchase_cost(),
                         discount_percent=Decimal("0.00"),
                         final_unit_price=unit_price,
                         line_total=line_total,
@@ -1149,7 +1164,7 @@ def sales_list(request):
                                     variant.save(update_fields=["quantity"])
                                     if comun_wh:
                                         _sync_common_with_variants(data["product"], comun_wh)
-                            default_cost = data["product"].cost_with_vat() or data["product"].last_purchase_cost()
+                            default_cost = data["product"].last_purchase_cost() or data["product"].cost_with_vat()
                             manual_cost = data.get("cost_unit_override")
                             cost_unit = (
                                 manual_cost
@@ -1287,23 +1302,18 @@ def sales_list(request):
         page_obj = paginator.get_page(page_number)
         sales_list_qs = list(page_obj.object_list)
         for sale in sales_list_qs:
-            cost_total = Decimal("0.00")
-            for item in sale.items.all():
-                cost_unit = item.product.cost_with_vat()
-                if not cost_unit or cost_unit <= 0:
-                    cost_unit = item.product.last_purchase_cost()
-                if not cost_unit or cost_unit <= 0:
-                    cost_unit = item.cost_unit
-                cost_total += item.quantity * cost_unit
-            commission_total = sale.ml_commission_total or Decimal("0.00")
-            tax_total = sale.ml_tax_total or Decimal("0.00")
-            shipping = sale.shipping_cost or Decimal("0.00")
             is_ml_sale = (
                 sale.ml_order_id
                 or sale.reference.startswith("ML ORDER")
                 or sale.reference.startswith("GS ORDER")
                 or sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE
             )
+            cost_total = Decimal("0.00")
+            for item in sale.items.all():
+                cost_total += item.quantity * _resolve_sale_item_cost(item)
+            commission_total = sale.ml_commission_total or Decimal("0.00")
+            tax_total = sale.ml_tax_total or Decimal("0.00")
+            shipping = sale.shipping_cost or Decimal("0.00")
             if is_ml_sale:
                 net_total = (sale.total or Decimal("0.00")) - commission_total - tax_total
                 sale.margin_total = net_total - cost_total - shipping
