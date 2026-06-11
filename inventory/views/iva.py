@@ -31,7 +31,7 @@ def iva_position(request):
 
     # ── Crédito fiscal — comprobantes AFIP (fuente principal) ────────────────
     afip_qs = AFIPInvoice.objects.filter(
-        tipo_codigo__in=(AFIPInvoice.FACTURA_A, AFIPInvoice.NOTA_CREDITO_A)
+        tipo_codigo__in=AFIPInvoice.CREDITO_TIPOS
     ).order_by("date", "id")
     if start_date:
         try:
@@ -47,17 +47,16 @@ def iva_position(request):
     afip_rows = []
     credito_afip_total = Decimal("0.00")
     for inv in afip_qs:
-        credito = inv.credito_fiscal_21
         afip_rows.append({
             "date": inv.date,
             "comprobante": inv.comprobante_str,
             "razon_social": inv.razon_social,
             "tipo": inv.tipo_descripcion,
-            "neto_21": inv.neto_21 if not inv.is_nota_credito else -inv.neto_21,
-            "iva_21": credito,
+            "neto": inv.neto_total,
+            "iva": inv.iva_total,
             "is_nc": inv.is_nota_credito,
         })
-        credito_afip_total += credito
+        credito_afip_total += inv.credito_fiscal
 
     # ── Crédito fiscal — compras ERP (referencia, puede solapar con AFIP) ────
     purchase_items_qs = (

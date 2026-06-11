@@ -6,7 +6,7 @@
 <p class="subtitle">
     Débito fiscal (ventas) vs crédito fiscal (compras).
     {% if use_afip %}
-    Crédito basado en <strong>comprobantes importados de AFIP</strong> (Facturas A — IVA 21%).
+    Crédito basado en <strong>comprobantes importados de AFIP</strong> (Facturas A, ND/NC A, M y FCE — todas las alícuotas de IVA).
     {% else %}
     Crédito basado en compras registradas en el ERP.
     <a href="{% url 'inventory_taxes' %}#afip-section" style="margin-left:8px;">Importar comprobantes AFIP →</a>
@@ -97,7 +97,7 @@
     </div>
 
     <div class="card table-card">
-        <div class="card-title">Crédito fiscal — Facturas A (AFIP)</div>
+        <div class="card-title">Crédito fiscal — Comprobantes AFIP</div>
         {% if afip_rows %}
         <table>
             <thead>
@@ -105,8 +105,8 @@
                     <th>Fecha</th>
                     <th>Comprobante</th>
                     <th>Razón Social</th>
-                    <th>Neto 21%</th>
-                    <th>IVA 21%</th>
+                    <th>Neto</th>
+                    <th>IVA</th>
                 </tr>
             </thead>
             <tbody>
@@ -115,8 +115,8 @@
                     <td>{{ row.date|date:"d/m/Y" }}</td>
                     <td>{{ row.comprobante }}</td>
                     <td>{{ row.razon_social }}</td>
-                    <td>{% if row.is_nc %}−{% endif %}${{ row.neto_21|latam_number:2 }}</td>
-                    <td><strong>{% if row.is_nc %}−{% endif %}${{ row.iva_21|latam_number:2 }}</strong></td>
+                    <td>{% if row.is_nc %}−{% endif %}${{ row.neto|latam_number:2 }}</td>
+                    <td><strong>{% if row.is_nc %}−{% endif %}${{ row.iva|latam_number:2 }}</strong></td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -128,7 +128,7 @@
             </tfoot>
         </table>
         {% else %}
-        <p class="subtitle">No hay comprobantes AFIP con IVA 21% en el período.</p>
+        <p class="subtitle">No hay comprobantes AFIP con IVA en el período.</p>
         {% endif %}
     </div>
 

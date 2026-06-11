@@ -637,9 +637,24 @@ class AFIPInvoice(models.Model):
     """Comprobante recibido importado desde 'Mis Comprobantes' de AFIP."""
 
     FACTURA_A = 1
+    NOTA_DEBITO_A = 2
     NOTA_CREDITO_A = 3
     FACTURA_B = 6
     NOTA_CREDITO_B = 8
+    FACTURA_M = 51
+    NOTA_DEBITO_M = 52
+    NOTA_CREDITO_M = 53
+    FCE_FACTURA_A = 201
+    FCE_NOTA_DEBITO_A = 202
+    FCE_NOTA_CREDITO_A = 203
+
+    # Tipos que computan crédito fiscal (clase A, M y FCE MiPyME A)
+    CREDITO_TIPOS = (
+        FACTURA_A, NOTA_DEBITO_A, NOTA_CREDITO_A,
+        FACTURA_M, NOTA_DEBITO_M, NOTA_CREDITO_M,
+        FCE_FACTURA_A, FCE_NOTA_DEBITO_A, FCE_NOTA_CREDITO_A,
+    )
+    NC_TIPOS = (NOTA_CREDITO_A, NOTA_CREDITO_B, NOTA_CREDITO_M, FCE_NOTA_CREDITO_A)
 
     date = models.DateField()
     tipo_codigo = models.IntegerField()
@@ -672,9 +687,20 @@ class AFIPInvoice(models.Model):
 
     @property
     def is_nota_credito(self) -> bool:
-        return self.tipo_codigo in (self.NOTA_CREDITO_A, self.NOTA_CREDITO_B)
+        return self.tipo_codigo in self.NC_TIPOS
 
     @property
-    def credito_fiscal_21(self) -> Decimal:
-        """IVA 21% computable como crédito (negativo para NC)."""
-        return -self.iva_21 if self.is_nota_credito else self.iva_21
+    def iva_total(self) -> Decimal:
+        """IVA total del comprobante, todas las alícuotas (siempre positivo)."""
+        # total_iva (columna "Total IVA" de AFIP) incluye alícuotas no desglosadas
+        # (2,5% / 5%); si viene en 0 se reconstruye desde las alícuotas conocidas.
+        return self.total_iva or (self.iva_105 + self.iva_21 + self.iva_27)
+
+    @property
+    def neto_total(self) -> Decimal:
+        return self.neto_105 + self.neto_21 + self.neto_27
+
+    @property
+    def credito_fiscal(self) -> Decimal:
+        """IVA computable como crédito, todas las alícuotas (negativo para NC)."""
+        return -self.iva_total if self.is_nota_credito else self.iva_total

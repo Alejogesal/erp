@@ -88,7 +88,7 @@ def _parse_afip_xlsx(file_obj):
             continue
 
         tipo_codigo = _parse_tipo_codigo(str(_col(row, 1, "")))
-        if tipo_codigo not in (AFIPInvoice.FACTURA_A, AFIPInvoice.NOTA_CREDITO_A):
+        if tipo_codigo not in AFIPInvoice.CREDITO_TIPOS:
             filtered += 1
             continue
 

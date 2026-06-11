@@ -81,13 +81,13 @@ def _calc_credito_afip(afip_qs, expenses_qs):
     total = Decimal("0.00")
 
     for inv in afip_qs:
-        credito = inv.credito_fiscal_21
+        credito = inv.credito_fiscal
         rows.append({
             "date": inv.date,
             "comprobante": inv.comprobante_str,
             "product": inv.razon_social,
-            "net": -inv.neto_21 if inv.is_nota_credito else inv.neto_21,
-            "vat_percent": Decimal("21"),
+            "net": -inv.neto_total if inv.is_nota_credito else inv.neto_total,
+            "vat_percent": None,
             "vat_amount": credito,
             "source": "afip",
         })
@@ -228,11 +228,11 @@ def taxes_view(request):
 
     # ── AFIP: resumen de comprobantes importados ──────────────────────────────
     afip_invoices = AFIPInvoice.objects.filter(
-        tipo_codigo__in=(AFIPInvoice.FACTURA_A, AFIPInvoice.NOTA_CREDITO_A)
+        tipo_codigo__in=AFIPInvoice.CREDITO_TIPOS
     ).order_by("-date")
     use_afip = afip_invoices.exists()
     afip_count = afip_invoices.count()
-    afip_total_iva21 = sum(inv.credito_fiscal_21 for inv in afip_invoices)
+    afip_total_iva = sum(inv.credito_fiscal for inv in afip_invoices)
 
     # ── Posición IVA global ───────────────────────────────────────────────────
     credito_start_dt = timezone.make_aware(datetime.combine(CREDITO_START_DATE, time.min))
@@ -260,7 +260,7 @@ def taxes_view(request):
 
     if use_afip:
         g_afip_qs = AFIPInvoice.objects.filter(
-            tipo_codigo__in=(AFIPInvoice.FACTURA_A, AFIPInvoice.NOTA_CREDITO_A),
+            tipo_codigo__in=AFIPInvoice.CREDITO_TIPOS,
             date__gte=CREDITO_START_DATE,
         ).order_by("date")
         _, credito_global, _ = _calc_credito_afip(g_afip_qs, g_expenses)
@@ -330,7 +330,7 @@ def taxes_view(request):
 
     if use_afip:
         f_afip_qs = AFIPInvoice.objects.filter(
-            tipo_codigo__in=(AFIPInvoice.FACTURA_A, AFIPInvoice.NOTA_CREDITO_A)
+            tipo_codigo__in=AFIPInvoice.CREDITO_TIPOS
         ).order_by("date")
         if start_d:
             f_afip_qs = f_afip_qs.filter(date__gte=start_d)
@@ -371,7 +371,7 @@ def taxes_view(request):
             "use_afip": use_afip,
             "afip_invoices": afip_invoices[:100],
             "afip_count": afip_count,
-            "afip_total_iva21": afip_total_iva21,
+            "afip_total_iva": afip_total_iva,
             "afip_import_msg": afip_import_msg,
             # Posición global
             "credito_global": credito_global,
