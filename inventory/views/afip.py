@@ -58,7 +58,7 @@ def _parse_afip_xlsx(file_obj):
     Devuelve (created, duplicates, filtered, errors, error_msg) donde:
       - created:    comprobantes nuevos guardados en la BD
       - duplicates: comprobantes que ya existían en la BD (no se tocan)
-      - filtered:   filas de tipo B/C/otro que no se importan
+      - filtered:   filas de tipo C/otro que no se importan
       - errors:     filas con datos inválidos
       - error_msg:  None si el archivo es válido, str si hubo un error fatal
     """

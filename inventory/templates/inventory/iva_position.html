@@ -6,7 +6,7 @@
 <p class="subtitle">
     Débito fiscal (ventas) vs crédito fiscal (compras).
     {% if use_afip %}
-    Crédito basado en <strong>comprobantes importados de AFIP</strong> (Facturas A, ND/NC A, M y FCE — todas las alícuotas de IVA).
+    Crédito basado en <strong>comprobantes importados de AFIP</strong> (A, M, FCE y Tiques con IVA discriminado; B con IVA implícito 21/121).
     {% else %}
     Crédito basado en compras registradas en el ERP.
     <a href="{% url 'inventory_taxes' %}#afip-section" style="margin-left:8px;">Importar comprobantes AFIP →</a>

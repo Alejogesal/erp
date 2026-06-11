@@ -210,7 +210,7 @@ def taxes_view(request):
                     if duplicates:
                         parts.append(f"{duplicates} ya estaban guardados")
                     if filtered:
-                        parts.append(f"{filtered} de tipo B/C omitidos")
+                        parts.append(f"{filtered} de tipo C/otros omitidos")
                     if errors:
                         parts.append(f"{errors} con error")
                     afip_import_msg = ("ok" if not errors else "error", " — ".join(parts) + ".")

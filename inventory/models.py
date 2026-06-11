@@ -640,21 +640,27 @@ class AFIPInvoice(models.Model):
     NOTA_DEBITO_A = 2
     NOTA_CREDITO_A = 3
     FACTURA_B = 6
+    NOTA_DEBITO_B = 7
     NOTA_CREDITO_B = 8
     FACTURA_M = 51
     NOTA_DEBITO_M = 52
     NOTA_CREDITO_M = 53
+    TIQUE_FACTURA_A = 81
     FCE_FACTURA_A = 201
     FCE_NOTA_DEBITO_A = 202
     FCE_NOTA_CREDITO_A = 203
 
-    # Tipos que computan crédito fiscal (clase A, M y FCE MiPyME A)
+    # Tipos que computan crédito fiscal. Los B no discriminan IVA en el xlsx:
+    # se computa el implícito (21/121 del total) — régimen de transición RI.
     CREDITO_TIPOS = (
         FACTURA_A, NOTA_DEBITO_A, NOTA_CREDITO_A,
+        FACTURA_B, NOTA_DEBITO_B, NOTA_CREDITO_B,
         FACTURA_M, NOTA_DEBITO_M, NOTA_CREDITO_M,
+        TIQUE_FACTURA_A,
         FCE_FACTURA_A, FCE_NOTA_DEBITO_A, FCE_NOTA_CREDITO_A,
     )
     NC_TIPOS = (NOTA_CREDITO_A, NOTA_CREDITO_B, NOTA_CREDITO_M, FCE_NOTA_CREDITO_A)
+    B_TIPOS = (FACTURA_B, NOTA_DEBITO_B, NOTA_CREDITO_B)
 
     date = models.DateField()
     tipo_codigo = models.IntegerField()
@@ -692,12 +698,18 @@ class AFIPInvoice(models.Model):
     @property
     def iva_total(self) -> Decimal:
         """IVA total del comprobante, todas las alícuotas (siempre positivo)."""
+        if self.tipo_codigo in self.B_TIPOS:
+            # Los B traen las columnas de IVA en 0 (IVA incluido en el total):
+            # se computa el implícito al 21% sobre el importe total.
+            return (self.imp_total * Decimal("21") / Decimal("121")).quantize(Decimal("0.01"))
         # total_iva (columna "Total IVA" de AFIP) incluye alícuotas no desglosadas
         # (2,5% / 5%); si viene en 0 se reconstruye desde las alícuotas conocidas.
         return self.total_iva or (self.iva_105 + self.iva_21 + self.iva_27)
 
     @property
     def neto_total(self) -> Decimal:
+        if self.tipo_codigo in self.B_TIPOS:
+            return self.imp_total - self.iva_total
         return self.neto_105 + self.neto_21 + self.neto_27
 
     @property
