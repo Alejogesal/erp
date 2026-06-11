@@ -37,12 +37,12 @@
 
 {# ── Posición IVA global ──────────────────────────────────────────────────── #}
 <div class="card" style="margin-bottom:16px;" id="posicion-global">
-    <div class="card-title">Posición IVA — desde inscripción como RI ({{ inscripcion_date|date:"d/m/Y" }})</div>
+    <div class="card-title">Posición IVA global</div>
     <div class="cards" style="margin-bottom:0;">
         <div class="card">
             <div class="card-title" style="font-size:13px;">Crédito fiscal acumulado</div>
             <p class="value" style="color:var(--positive);">${{ credito_global|latam_number:2 }}</p>
-            <div style="font-size:12px; color:var(--muted);">desde {{ inscripcion_date|date:"d/m/Y" }}</div>
+            <div style="font-size:12px; color:var(--muted);">desde {{ credito_start_date|date:"d/m/Y" }} (transición RI)</div>
         </div>
         <div class="card">
             <div class="card-title" style="font-size:13px;">Débito fiscal acumulado</div>
