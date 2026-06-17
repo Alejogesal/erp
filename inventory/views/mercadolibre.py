@@ -758,42 +758,6 @@ def mercadolibre_messages(request, order_id):
     })
 
 
-@login_required
-@require_http_methods(["GET"])
-def mercadolibre_order_sheet(request):
-    import math
-
-    items_qs = (
-        MercadoLibreItem.objects.select_related("product")
-        .filter(product__isnull=False)
-    )
-
-    product_map = {}  # product_id -> dict
-    for item in items_qs:
-        product = item.product
-        pid = product.id
-        if pid not in product_map:
-            product_map[pid] = {
-                "name": product.name,
-                "group": product.group or "",
-                "stock": 0,
-                "units_30d": 0,
-            }
-        # Only count stock from active publications
-        if item.status == "active":
-            product_map[pid]["stock"] += item.available_quantity
-        product_map[pid]["units_30d"] += item.units_sold_30d
-
-    rows = []
-    for data in product_map.values():
-        rec = math.ceil(data["units_30d"] / 2) if data["units_30d"] > 0 else 0
-        rows.append({"name": data["name"], "group": data["group"], "stock": data["stock"], "recommendation": rec})
-
-    rows.sort(key=lambda r: (r["group"].lower(), r["name"].lower()))
-
-    return render(request, "inventory/mercadolibre_order_sheet.html", {"rows": rows})
-
-
 @csrf_exempt
 @require_http_methods(["GET", "POST"])
 def mercadolibre_webhook(request):

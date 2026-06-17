@@ -41,7 +41,6 @@ from .mercadolibre import (
     mercadolibre_connect,
     mercadolibre_dashboard,
     mercadolibre_messages,
-    mercadolibre_order_sheet,
     mercadolibre_webhook,
 )
 from .taxes import taxes_view
@@ -88,7 +87,6 @@ __all__ = [
     "mercadolibre_connect",
     "mercadolibre_dashboard",
     "mercadolibre_messages",
-    "mercadolibre_order_sheet",
     "mercadolibre_webhook",
     "taxes_view",
     "iva_position",
