@@ -22,7 +22,10 @@ class Command(BaseCommand):
             return
 
         ts = timezone.now().strftime("%Y-%m-%d %H:%M:%S")
-        result = ml.sync_items_and_stock(connection, sync_user)
+        # El sync de stock debe recorrer TODAS las publicaciones: si se trunca
+        # (ML_SYNC_MAX_ITEMS), las publicaciones fuera de la ventana quedan con
+        # stock viejo para siempre. ignore_env_limit fuerza el scan completo.
+        result = ml.sync_items_and_stock(connection, sync_user, ignore_env_limit=True)
         if result.metrics.get("error") == "unauthorized" or (result.total_items == 0 and result.matched == 0 and not result.metrics):
             self.stderr.write(
                 f"[{ts}] sync_ml_stock FALLÓ: token inválido o expirado — se requiere reautorizar con MercadoLibre."

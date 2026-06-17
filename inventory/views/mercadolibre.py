@@ -288,11 +288,15 @@ def mercadolibre_dashboard(request):
                         return redirect("inventory_mercadolibre_dashboard")
                     item = ml._call_with_refresh(connection, ml.get_item, item_id, access_token=access_token)
                     title = item.get("title", "") or ""
-                    available = int(item.get("available_quantity", 0) or 0)
                     status = item.get("status", "") or ""
                     shipping = item.get("shipping") or {}
                     logistic_type = item.get("logistic_type", "") or shipping.get("logistic_type", "") or ""
                     permalink = item.get("permalink", "") or ""
+                    # Para Full, available_quantity de /items no es confiable: usar la
+                    # misma resolución autoritativa (meli_facility) que el sync masivo.
+                    available, user_product_id = ml.resolve_authoritative_stock(
+                        connection, item, access_token
+                    )
                     existing = MercadoLibreItem.objects.filter(item_id=item_id).first()
                     product = existing.product if existing else None
                     matched_name = existing.matched_name if existing else ""
@@ -303,6 +307,7 @@ def mercadolibre_dashboard(request):
                             "available_quantity": available,
                             "status": status,
                             "logistic_type": logistic_type,
+                            "user_product_id": user_product_id,
                             "permalink": permalink,
                             "product": product,
                             "matched_name": matched_name,
