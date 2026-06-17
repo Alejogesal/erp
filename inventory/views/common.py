@@ -49,6 +49,11 @@ def _product_label_with_last_cost(obj: Product) -> str:
     return f"{obj.name} [{obj.sku or 'Sin SKU'}] (costo: {last_cost:.2f})"
 
 
+def _product_label_with_cost_vat(obj: Product) -> str:
+    """Etiqueta para ventas: muestra el costo con IVA (el que se graba en la venta)."""
+    return f"{obj.name} [{obj.sku or 'Sin SKU'}] (costo: {obj.cost_with_vat():.2f})"
+
+
 def _resolve_sale_item_pricing(
     *,
     product: Product,

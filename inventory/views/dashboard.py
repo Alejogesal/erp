@@ -64,26 +64,19 @@ def dashboard(request):
     sale_total = sale_item_qs.aggregate(total=Sum("line_total")).get("total") or Decimal("0.00")
     tax_total = tax_qs.aggregate(total=Sum("amount")).get("total") or Decimal("0.00")
 
-    # Caché por request del costo de fallback por producto: sales_qs se recorre
-    # tres veces y el mismo producto se repite entre ventas. No cambia el valor,
-    # solo evita reconsultar StockMovement.
+    # Caché por request del costo con IVA por producto: sales_qs se recorre tres
+    # veces y el mismo producto se repite entre ventas.
     _fallback_cost_cache: dict = {}
 
     def _product_fallback_cost(product) -> Decimal:
         if product.id not in _fallback_cost_cache:
-            last_cost = product.last_purchase_cost()
-            if last_cost and last_cost > 0:
-                value = last_cost
-            else:
-                cost_vat = product.cost_with_vat()
-                value = cost_vat if cost_vat and cost_vat > 0 else Decimal("0.00")
-            _fallback_cost_cache[product.id] = value
+            cost_vat = product.cost_with_vat()
+            _fallback_cost_cache[product.id] = cost_vat if cost_vat and cost_vat > 0 else Decimal("0.00")
         return _fallback_cost_cache[product.id]
 
     def _resolve_cost(item) -> Decimal:
-        # A registered sale locks in its cost: use the recorded per-line cost_unit.
-        # A later product-cost change only affects future sales, never recalculates
-        # past ones. Product cost is a fallback for legacy lines with cost_unit = 0.
+        # Costo grabado en la venta; si no hay (líneas viejas), el costo con IVA
+        # del producto. No se usa last_purchase_cost (evita doble IVA).
         if item.cost_unit and item.cost_unit > 0:
             return item.cost_unit
         return _product_fallback_cost(item.product)

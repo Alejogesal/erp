@@ -47,13 +47,11 @@ def _resolve_sale_item_cost(item) -> Decimal:
     that change — never recalculates already-registered sales. Product cost is a
     fallback only for legacy lines with no recorded cost (cost_unit = 0).
     """
-    # Evaluación perezosa: cada fallback consulta la base (last_purchase_cost hace
-    # una query a StockMovement). Solo se calcula si el anterior no sirvió.
+    # Prioridad: costo grabado en la venta; si no hay (líneas viejas), el costo
+    # con IVA del producto (el que se maneja en Productos). No se usa
+    # last_purchase_cost para evitar el doble IVA de entradas mal cargadas.
     if item.cost_unit and item.cost_unit > 0:
         return item.cost_unit
-    last_cost = item.product.last_purchase_cost()
-    if last_cost and last_cost > 0:
-        return last_cost
     cost_vat = item.product.cost_with_vat()
     if cost_vat and cost_vat > 0:
         return cost_vat
@@ -413,7 +411,7 @@ def sale_edit(request, sale_id: int):
                                 variant.save(update_fields=["quantity"])
                                 if comun_wh:
                                     _sync_common_with_variants(data["product"], comun_wh)
-                        default_cost = data["product"].last_purchase_cost() or data["product"].cost_with_vat()
+                        default_cost = data["product"].cost_with_vat()
                         manual_cost = data.get("cost_unit_override")
                         cost_unit = (
                             manual_cost
@@ -705,7 +703,7 @@ def sales_list(request):
                     product=product,
                     quantity=qty,
                     unit_price=unit_price,
-                    cost_unit=product.last_purchase_cost(),
+                    cost_unit=product.cost_with_vat(),
                     discount_percent=Decimal("0.00"),
                     final_unit_price=unit_price,
                     line_total=line_total,
@@ -933,7 +931,7 @@ def sales_list(request):
                         product=item["product"],
                         quantity=qty,
                         unit_price=unit_price,
-                        cost_unit=item["product"].last_purchase_cost(),
+                        cost_unit=item["product"].cost_with_vat(),
                         discount_percent=Decimal("0.00"),
                         final_unit_price=unit_price,
                         line_total=line_total,
@@ -1170,7 +1168,7 @@ def sales_list(request):
                                     variant.save(update_fields=["quantity"])
                                     if comun_wh:
                                         _sync_common_with_variants(data["product"], comun_wh)
-                            default_cost = data["product"].last_purchase_cost() or data["product"].cost_with_vat()
+                            default_cost = data["product"].cost_with_vat()
                             manual_cost = data.get("cost_unit_override")
                             cost_unit = (
                                 manual_cost

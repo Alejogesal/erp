@@ -19,7 +19,11 @@ from ..models import (
     TaxExpense,
     Warehouse,
 )
-from .common import _products_with_last_cost_queryset, _product_label_with_last_cost
+from .common import (
+    _products_with_last_cost_queryset,
+    _product_label_with_last_cost,
+    _product_label_with_cost_vat,
+)
 
 
 class ProductForm(forms.ModelForm):
@@ -202,7 +206,7 @@ class SaleItemForm(forms.Form):
         super().__init__(*args, **kwargs)
         self.fields["product"].queryset = _products_with_last_cost_queryset()
         self.fields["product"].empty_label = ""
-        self.fields["product"].label_from_instance = _product_label_with_last_cost
+        self.fields["product"].label_from_instance = _product_label_with_cost_vat
 
 
 class StockTransferForm(forms.Form):
