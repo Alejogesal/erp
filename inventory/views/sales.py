@@ -47,10 +47,16 @@ def _resolve_sale_item_cost(item) -> Decimal:
     that change — never recalculates already-registered sales. Product cost is a
     fallback only for legacy lines with no recorded cost (cost_unit = 0).
     """
-    candidates = [item.cost_unit, item.product.last_purchase_cost(), item.product.cost_with_vat()]
-    for c in candidates:
-        if c and c > 0:
-            return c
+    # Evaluación perezosa: cada fallback consulta la base (last_purchase_cost hace
+    # una query a StockMovement). Solo se calcula si el anterior no sirvió.
+    if item.cost_unit and item.cost_unit > 0:
+        return item.cost_unit
+    last_cost = item.product.last_purchase_cost()
+    if last_cost and last_cost > 0:
+        return last_cost
+    cost_vat = item.product.cost_with_vat()
+    if cost_vat and cost_vat > 0:
+        return cost_vat
     return Decimal("0.00")
 
 

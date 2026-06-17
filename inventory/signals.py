@@ -1,3 +1,4 @@
+from django.db.backends.signals import connection_created
 from django.db.models.signals import post_save, pre_delete, pre_save
 from django.dispatch import receiver
 
@@ -75,7 +76,23 @@ def _on_pre_delete(sender, instance, **kwargs):
     )
 
 
+def _configure_sqlite(sender, connection, **kwargs):
+    """Ajustes de concurrencia para SQLite (no afecta a Postgres).
+
+    WAL permite lecturas concurrentes mientras se escribe y busy_timeout hace
+    que las escrituras esperen en vez de fallar con 'database is locked'.
+    """
+    if connection.vendor != "sqlite":
+        return
+    with connection.cursor() as cursor:
+        cursor.execute("PRAGMA journal_mode=WAL;")
+        cursor.execute("PRAGMA synchronous=NORMAL;")
+        cursor.execute("PRAGMA busy_timeout=20000;")
+
+
 def connect_audit_signals():
+    connection_created.connect(_configure_sqlite, weak=False)
+
     from .models import (
         Customer,
         CustomerPayment,

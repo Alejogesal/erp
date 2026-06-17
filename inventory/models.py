@@ -310,6 +310,12 @@ class StockMovement(models.Model):
 
     class Meta:
         ordering = ["-created_at", "-id"]
+        indexes = [
+            # Optimiza last_purchase_cost(): filtra por product + movement_type
+            # y ordena por created_at desc.
+            models.Index(fields=["product", "movement_type", "-created_at"],
+                         name="sm_prod_type_created_idx"),
+        ]
 
     def __str__(self) -> str:
         return f"{self.movement_type} - {self.product.sku} ({self.quantity})"
@@ -417,6 +423,7 @@ class Purchase(models.Model):
 
     class Meta:
         ordering = ["-created_at", "-id"]
+        indexes = [models.Index(fields=["created_at"], name="purchase_created_idx")]
 
     def __str__(self) -> str:
         return f"Purchase #{self.pk}"
@@ -476,6 +483,7 @@ class Sale(models.Model):
 
     class Meta:
         ordering = ["-created_at", "-id"]
+        indexes = [models.Index(fields=["created_at"], name="sale_created_idx")]
 
     def __str__(self) -> str:
         return f"Sale #{self.pk}"
@@ -628,6 +636,7 @@ class TaxExpense(models.Model):
 
     class Meta:
         ordering = ["-paid_at", "-id"]
+        indexes = [models.Index(fields=["paid_at"], name="taxexpense_paid_idx")]
 
     def __str__(self) -> str:
         return f"{self.description} - {self.amount}"
@@ -683,6 +692,7 @@ class AFIPInvoice(models.Model):
     class Meta:
         ordering = ["-date", "-id"]
         unique_together = [("cuit_emisor", "punto_venta", "numero", "tipo_codigo")]
+        indexes = [models.Index(fields=["tipo_codigo", "date"], name="afip_tipo_date_idx")]
 
     def __str__(self) -> str:
         return f"{self.tipo_descripcion} {self.punto_venta:04d}-{self.numero:08d} ({self.razon_social})"
