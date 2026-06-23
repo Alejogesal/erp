@@ -257,19 +257,62 @@ def supplier_history_view(request, supplier_id):
             messages.success(request, "Pago eliminado.")
             return redirect("inventory_supplier_history", supplier_id=supplier.id)
 
-    purchases = list(
+    # Filtro de fechas (opcional): acota compras y movimientos al plazo elegido.
+    period_start = (request.GET.get("start_date") or "").strip()
+    period_end = (request.GET.get("end_date") or "").strip()
+    start_d = end_d = None
+    if period_start:
+        try:
+            start_d = datetime.strptime(period_start, "%Y-%m-%d").date()
+        except ValueError:
+            start_d = None
+    if period_end:
+        try:
+            end_d = datetime.strptime(period_end, "%Y-%m-%d").date()
+        except ValueError:
+            end_d = None
+
+    all_purchases = list(
         Purchase.objects.filter(supplier=supplier)
         .select_related("warehouse")
         .order_by("-created_at", "-id")
     )
-    payments = list(
+    all_payments = list(
         SupplierPayment.objects.filter(supplier=supplier)
         .select_related("purchase")
         .order_by("-paid_at", "-id")
     )
 
+    def _purchase_date(purchase):
+        return timezone.localdate(purchase.created_at)
+
+    def _in_range(d):
+        if start_d and d < start_d:
+            return False
+        if end_d and d > end_d:
+            return False
+        return True
+
+    # Saldo arrastrado: movimientos anteriores al inicio del plazo.
+    opening_balance = Decimal("0.00")
+    if start_d:
+        for purchase in all_purchases:
+            if _purchase_date(purchase) < start_d:
+                opening_balance += purchase.total
+        for payment in all_payments:
+            if payment.paid_at < start_d:
+                if payment.kind == SupplierPayment.Kind.PAYMENT:
+                    opening_balance -= payment.amount
+                else:
+                    opening_balance += payment.amount
+
+    purchases = [p for p in all_purchases if _in_range(_purchase_date(p))]
+    payments = [p for p in all_payments if _in_range(p.paid_at)]
+
+    # El pagado por compra usa TODOS los pagos (un pago puede caer fuera del
+    # plazo elegido), para que el saldo por compra siga siendo real.
     payment_by_purchase = {}
-    for payment in payments:
+    for payment in all_payments:
         if not payment.purchase_id:
             continue
         purchase_id = payment.purchase_id
@@ -338,12 +381,13 @@ def supplier_history_view(request, supplier_id):
         )
 
     ledger_entries.sort(key=lambda item: item["date"])
-    balance = Decimal("0.00")
+    balance = opening_balance
     for entry in ledger_entries:
         balance += entry["debit"]
         balance -= entry["credit"]
         entry["balance"] = balance
 
+    # Totales del plazo (lo filtrado). Sin filtro, equivalen a todo el historial.
     total_purchases = sum((purchase.total for purchase in purchases), Decimal("0.00"))
     total_payments = sum(
         (payment.amount for payment in payments if payment.kind == SupplierPayment.Kind.PAYMENT),
@@ -353,7 +397,13 @@ def supplier_history_view(request, supplier_id):
         (payment.amount for payment in payments if payment.kind == SupplierPayment.Kind.ADJUSTMENT),
         Decimal("0.00"),
     )
-    current_balance = total_purchases - total_payments + total_adjustments
+    # Saldo actual: SIEMPRE acumulado (todo el historial), no depende del filtro.
+    current_balance = (
+        sum((p.total for p in all_purchases), Decimal("0.00"))
+        - sum((p.amount for p in all_payments if p.kind == SupplierPayment.Kind.PAYMENT), Decimal("0.00"))
+        + sum((p.amount for p in all_payments if p.kind == SupplierPayment.Kind.ADJUSTMENT), Decimal("0.00"))
+    )
+    has_filter = bool(start_d or end_d)
 
     return render(
         request,
@@ -368,5 +418,9 @@ def supplier_history_view(request, supplier_id):
             "total_payments": total_payments,
             "total_adjustments": total_adjustments,
             "current_balance": current_balance,
+            "opening_balance": opening_balance,
+            "period_start": period_start,
+            "period_end": period_end,
+            "has_filter": has_filter,
         },
     )

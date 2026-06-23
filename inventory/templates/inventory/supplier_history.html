@@ -7,11 +7,28 @@
 
 <div class="cards">
     <div class="card">
-        <div class="card-title">Resumen</div>
+        <div class="card-title">Resumen{% if has_filter %} — período filtrado{% endif %}</div>
+        <form method="get" style="display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap; margin-bottom:12px;">
+            <div>
+                <label style="font-size:12px; color:var(--muted); display:block;">Desde</label>
+                <input type="date" name="start_date" value="{{ period_start }}">
+            </div>
+            <div>
+                <label style="font-size:12px; color:var(--muted); display:block;">Hasta</label>
+                <input type="date" name="end_date" value="{{ period_end }}">
+            </div>
+            <button type="submit">Filtrar</button>
+            {% if has_filter %}
+            <a class="pill" href="{% url 'inventory_supplier_history' supplier.id %}" style="font-size:12px; padding:6px 10px;">Limpiar</a>
+            {% endif %}
+        </form>
         <div style="display:flex; flex-direction:column; gap:8px; font-size:14px;">
-            <div><strong>Total compras:</strong> ${{ total_purchases|latam_number:2 }}</div>
-            <div><strong>Pagos:</strong> ${{ total_payments|latam_number:2 }}</div>
-            <div><strong>Ajustes/Devoluciones:</strong> ${{ total_adjustments|latam_number:2 }}</div>
+            <div><strong>Total compras{% if has_filter %} (plazo){% endif %}:</strong> ${{ total_purchases|latam_number:2 }}</div>
+            <div><strong>Pagos{% if has_filter %} (plazo){% endif %}:</strong> ${{ total_payments|latam_number:2 }}</div>
+            <div><strong>Ajustes/Devoluciones{% if has_filter %} (plazo){% endif %}:</strong> ${{ total_adjustments|latam_number:2 }}</div>
+            {% if has_filter %}
+            <div style="color:var(--muted);"><strong>Saldo anterior al plazo:</strong> ${{ opening_balance|latam_number:2 }}</div>
+            {% endif %}
             <div><strong>Saldo actual:</strong> ${{ current_balance|latam_number:2 }}</div>
         </div>
     </div>
@@ -73,6 +90,17 @@
             </tr>
         </thead>
         <tbody>
+            {% if has_filter %}
+            <tr style="color:var(--muted);">
+                <td>{{ period_start }}</td>
+                <td>Saldo anterior</td>
+                <td>Saldo acumulado hasta el inicio del plazo</td>
+                <td>—</td>
+                <td>—</td>
+                <td>${{ opening_balance|latam_number:2 }}</td>
+                <td></td>
+            </tr>
+            {% endif %}
             {% for entry in ledger_entries %}
             <tr>
                 <td>{{ entry.date_display|date:"d/m/Y" }}</td>
