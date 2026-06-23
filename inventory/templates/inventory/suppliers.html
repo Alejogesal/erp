@@ -44,7 +44,7 @@
     </div>
     <div class="card">
         <div class="card-title">Importar lista de precios (Excel)</div>
-        <p class="subtitle" style="margin-top:0;">Carga todos los productos de un proveedor desde un .xlsx o .pdf (match por nombre; crea los que no existan, usando el Grupo como marca). El precio es neto (sin IVA). El IVA se puede editar luego por producto o para toda la lista. El IVA real de cada compra igual se define al registrarla.</p>
+        <p class="subtitle" style="margin-top:0;">Carga los productos de un proveedor desde .xlsx o .pdf (match por nombre; crea los que no existan, usando el Grupo como marca). El costo se carga <strong>sin IVA</strong>. El IVA es por producto: sale de la columna IVA del archivo si la tiene (ej. The Hunter), o lo agregás vos por producto. El IVA real de cada compra igual se define al registrarla.</p>
         <form method="post" enctype="multipart/form-data">
             {% csrf_token %}
             <input type="hidden" name="action" value="import_price_list">
@@ -58,8 +58,8 @@
                 </select>
             </p>
             <p>
-                <label for="id_price_vat">IVA % por defecto (si el archivo no trae columna IVA; 0 = sin IVA). Lo podés cambiar después por producto o para toda la lista.</label>
-                <input id="id_price_vat" type="number" step="0.01" name="price_vat" value="21">
+                <label for="id_price_vat">IVA % por defecto (solo si el archivo NO trae columna IVA; 0 = sin IVA). El IVA se maneja por producto.</label>
+                <input id="id_price_vat" type="number" step="0.01" name="price_vat" value="0">
             </p>
             <p>
                 <label for="id_price_file">Archivo .xlsx o .pdf (columnas: grupo opcional, nombre/descripción, precio neto e IVA opcional)</label>
