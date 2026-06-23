@@ -354,6 +354,14 @@ class SupplierProduct(models.Model):
     def __str__(self) -> str:
         return f"{self.supplier} - {self.product.sku}"
 
+    @property
+    def cost_net(self) -> Decimal:
+        """Costo SIN IVA derivado de last_cost (que se guarda con IVA) y vat_percent."""
+        factor = Decimal("1.00") + (self.vat_percent or Decimal("0.00")) / Decimal("100.00")
+        if factor <= 0:
+            return self.last_cost
+        return (self.last_cost / factor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
 
 class MercadoLibreNotification(models.Model):
     topic = models.CharField(max_length=100, blank=True, default="")

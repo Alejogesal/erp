@@ -155,7 +155,8 @@
             <thead>
                 <tr>
                     <th>Producto</th>
-                    <th>Costo (con IVA)</th>
+                    <th>Costo sin IVA</th>
+                    <th>Costo con IVA</th>
                     <th>IVA %</th>
                     <th>Principal</th>
                     <th></th>
@@ -165,6 +166,7 @@
                 {% for sp in supplier.supplier_products.all %}
                 <tr>
                     <td>{{ sp.product.name }} <span style="color:var(--muted); font-size:11px;">[{{ sp.product.sku|default:"s/SKU" }}]</span></td>
+                    <td style="color:var(--muted);">${{ sp.cost_net|latam_number:2 }}</td>
                     <td>${{ sp.last_cost|latam_number:2 }}</td>
                     <td>
                         <form method="post" style="display:flex; gap:4px; align-items:center;">
