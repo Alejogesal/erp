@@ -711,15 +711,23 @@ def product_info(request):
     product = _products_with_last_cost_queryset().select_related("default_supplier").filter(id=product_id).first()
     if not product:
         return JsonResponse({"ok": False, "error": "product_not_found"}, status=404)
-    return JsonResponse(
-        {
-            "ok": True,
-            "default_supplier_id": product.default_supplier_id,
-            "avg_cost": f"{(product.avg_cost or Decimal('0.00')):.2f}",
-            "vat_percent": f"{(product.vat_percent or Decimal('0.00')):.2f}",
-            "cost_with_vat": f"{product.cost_with_vat():.2f}",
-        }
-    )
+    data = {
+        "ok": True,
+        "default_supplier_id": product.default_supplier_id,
+        "avg_cost": f"{(product.avg_cost or Decimal('0.00')):.2f}",
+        "vat_percent": f"{(product.vat_percent or Decimal('0.00')):.2f}",
+        "cost_with_vat": f"{product.cost_with_vat():.2f}",
+    }
+    # Precio de un proveedor puntual para ese producto (compra: el costo lo pone
+    # el proveedor elegido). Devuelve el costo SIN IVA del proveedor.
+    supplier_id = (request.GET.get("supplier_id") or "").strip()
+    if supplier_id:
+        from ..models import SupplierProduct
+        link = SupplierProduct.objects.filter(supplier_id=supplier_id, product=product).first()
+        if link:
+            data["supplier_cost_net"] = f"{link.cost_net:.2f}"
+            data["supplier_vat"] = f"{(link.vat_percent or Decimal('0.00')):.2f}"
+    return JsonResponse(data)
 
 
 @login_required

@@ -245,45 +245,62 @@
             }
         };
 
-        const fetchProductInfo = async (productId) => {
+        const headerSupplierId = () => {
+            const el = document.querySelector("select[name='supplier']");
+            return el ? (el.value || "") : "";
+        };
+        const fetchProductInfo = async (productId, supplierId) => {
             if (!productId) return null;
-            if (productInfoCache.has(productId)) return productInfoCache.get(productId);
+            const key = `${productId}|${supplierId || ""}`;
+            if (productInfoCache.has(key)) return productInfoCache.get(key);
             try {
-                const resp = await fetch(`${productInfoUrl}?product_id=${encodeURIComponent(productId)}`, {
-                    credentials: "same-origin",
-                });
+                let url = `${productInfoUrl}?product_id=${encodeURIComponent(productId)}`;
+                if (supplierId) url += `&supplier_id=${encodeURIComponent(supplierId)}`;
+                const resp = await fetch(url, { credentials: "same-origin" });
                 if (!resp.ok) return null;
                 const data = await resp.json();
-                productInfoCache.set(productId, data);
+                productInfoCache.set(key, data);
                 return data;
             } catch (err) {
                 return null;
             }
         };
-        const applyProductDefaults = async (productSelect) => {
+        const applyProductDefaults = async (productSelect, forceCost = false) => {
             if (!productSelect) return;
             const row = productSelect.closest("tr");
             if (!row) return;
-            const supplierSelect = row.querySelector("select[name$='-supplier']");
             const costInput = row.querySelector("input[name$='-unit_cost']");
             const productId = productSelect.value;
             const previousProductId = row.dataset.productId || "";
-            const info = await fetchProductInfo(productId);
+            const info = await fetchProductInfo(productId, headerSupplierId());
             if (!info) return;
             if (productId) {
                 row.dataset.productId = String(productId);
             }
             const productChanged = previousProductId && String(previousProductId) !== String(productId);
             const manualCost = row.dataset.manualCost === "1";
-            if (supplierSelect && info.default_supplier_id) {
-                supplierSelect.value = String(info.default_supplier_id);
-            }
-            const defaultCost = info.avg_cost || info.cost_with_vat;
-            if (costInput && defaultCost && (!manualCost || productChanged) && (!costInput.value || productChanged)) {
-                setRowCost(row, costInput, formatNumber(parseNumber(defaultCost)));
+            // El costo lo pone el proveedor de la compra (sin IVA); si ese proveedor
+            // no tiene precio para el producto, cae al costo del producto.
+            const supplierCost = info.supplier_cost_net;
+            const cost = supplierCost || info.avg_cost || info.cost_with_vat;
+            const allowOverwrite = forceCost || !manualCost || productChanged;
+            const emptyOrChanged = forceCost || productChanged || !costInput || !costInput.value;
+            if (costInput && cost && allowOverwrite && emptyOrChanged) {
+                setRowCost(row, costInput, formatNumber(parseNumber(cost)));
             }
             updateVariantSelect(row, productId);
         };
+        // Si cambia el proveedor de la compra, recalcular el costo de cada fila.
+        const headerSupplierEl = document.querySelector("select[name='supplier']");
+        if (headerSupplierEl) {
+            headerSupplierEl.addEventListener("change", () => {
+                productInfoCache.clear();
+                body.querySelectorAll("tr").forEach((row) => {
+                    const ps = row.querySelector("select[name$='-product']");
+                    if (ps && ps.value) applyProductDefaults(ps, true);
+                });
+            });
+        }
 
         const ensureSelectOption = (selectEl, productId, label) => {
             if (!selectEl || !productId) return;
@@ -466,7 +483,7 @@
         };
 
         document.querySelectorAll("select[name$='-product']").forEach(setupProductSearch);
-        document.querySelectorAll("select[name$='-product']").forEach(applyProductDefaults);
+        document.querySelectorAll("select[name$='-product']").forEach((el) => applyProductDefaults(el));
         document.querySelectorAll("#items-body tr").forEach((row) => {
             setupRow(row);
             const productSelect = row.querySelector("select[name$='-product']");

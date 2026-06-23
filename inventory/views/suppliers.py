@@ -485,22 +485,6 @@ def suppliers(request):
             link.save(update_fields=["last_cost", "vat_percent"])
             messages.success(request, "IVA actualizado.")
             return redirect("inventory_suppliers")
-        elif action == "set_supplier_vat_all":
-            supplier = Supplier.objects.filter(id=request.POST.get("supplier_id")).first()
-            new_vat = _parse_price_decimal(request.POST.get("vat_percent"))
-            if not supplier or new_vat is None or new_vat < 0 or new_vat > 100:
-                messages.error(request, "IVA inválido.")
-                return redirect("inventory_suppliers")
-            factor_new = Decimal("1.00") + new_vat / Decimal("100.00")
-            count = 0
-            for link in SupplierProduct.objects.filter(supplier=supplier):
-                net = link.last_cost / (Decimal("1.00") + (link.vat_percent or Decimal("0.00")) / Decimal("100.00"))
-                link.last_cost = (net * factor_new).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-                link.vat_percent = new_vat
-                link.save(update_fields=["last_cost", "vat_percent"])
-                count += 1
-            messages.success(request, f"IVA {new_vat}% aplicado a {count} producto(s) de {supplier.name}.")
-            return redirect("inventory_suppliers")
         elif action == "clear_supplier_pricelist":
             supplier = Supplier.objects.filter(id=request.POST.get("supplier_id")).first()
             if not supplier:
@@ -529,40 +513,13 @@ def suppliers(request):
                 msg += f" {skipped} se conservaron por tener ventas/compras asociadas."
             messages.success(request, msg)
             return redirect("inventory_suppliers")
-        elif action == "set_supplier_vat_group":
-            supplier = Supplier.objects.filter(id=request.POST.get("supplier_id")).first()
-            group = (request.POST.get("group") or "").strip()
-            new_vat = _parse_price_decimal(request.POST.get("vat_percent"))
-            if not supplier or not group or new_vat is None or new_vat < 0 or new_vat > 100:
-                messages.error(request, "Elegí marca e IVA válidos.")
-                return redirect("inventory_suppliers")
-            factor_new = Decimal("1.00") + new_vat / Decimal("100.00")
-            count = 0
-            for link in SupplierProduct.objects.filter(
-                supplier=supplier, product__group__iexact=group
-            ).select_related("product"):
-                net = link.last_cost / (Decimal("1.00") + (link.vat_percent or Decimal("0.00")) / Decimal("100.00"))
-                link.last_cost = (net * factor_new).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-                link.vat_percent = new_vat
-                link.save(update_fields=["last_cost", "vat_percent"])
-                count += 1
-            messages.success(request, f"IVA {new_vat}% aplicado a {count} producto(s) de la marca '{group}' ({supplier.name}).")
-            return redirect("inventory_suppliers")
 
-    # Lista de proveedores con sus marcas (para aplicar IVA por marca).
-    suppliers_list = list(suppliers_qs.order_by("name"))
-    for s in suppliers_list:
-        s.group_list = sorted({
-            (sp.product.group or "").strip()
-            for sp in s.supplier_products.all()
-            if (sp.product.group or "").strip()
-        })
     context = {
         "supplier_form": supplier_form,
         "link_form": link_form,
         "link_group_form": link_group_form,
         "unlink_group_form": unlink_group_form,
-        "suppliers": suppliers_list,
+        "suppliers": suppliers_qs,
         "price_import_created": request.session.pop("price_import_created", None),
     }
     purchases_totals = {
