@@ -31,7 +31,7 @@ from decimal import ROUND_HALF_UP, InvalidOperation
 def _parse_price_decimal(value) -> Decimal | None:
     if value is None or value == "":
         return None
-    raw = str(value).strip().replace("$", "").replace(" ", "")
+    raw = str(value).strip().replace("$", "").replace(" ", "").replace("%", "")
     if not raw:
         return None
     if "," in raw and "." in raw:
@@ -102,12 +102,73 @@ def _parse_price_list_xlsx(file_obj):
     return rows, None
 
 
-def _parse_price_list_pdf(pdf_bytes):
-    """Parsea un PDF de lista de precios con columnas Grupo · Descripción · Precio.
+def _pdf_lines(page):
+    """Devuelve las líneas de una página como listas de palabras ordenadas por x."""
+    words = page.extract_words(use_text_flow=False, keep_blank_chars=False)
+    if not words:
+        return []
+    words.sort(key=lambda w: (round(float(w["top"])), float(w["x0"])))
+    lines = []
+    current = []
+    current_top = None
+    for w in words:
+        top = float(w["top"])
+        if current_top is None or abs(top - current_top) <= 3:
+            current.append(w)
+            if current_top is None:
+                current_top = top
+        else:
+            lines.append(sorted(current, key=lambda x: float(x["x0"])))
+            current = [w]
+            current_top = top
+    if current:
+        lines.append(sorted(current, key=lambda x: float(x["x0"])))
+    return lines
 
-    Separa las columnas por posición: el precio es el último token numérico de la
-    fila y el corte Grupo/Descripción se detecta por el mayor espacio horizontal.
-    Devuelve (rows, error) con rows = [(grupo, nombre, precio_neto, None)].
+
+def _group_words_into_cells(words, gap=10.0):
+    """Agrupa palabras de una línea en celdas: corta donde el espacio horizontal
+    entre palabras supera `gap`. Devuelve [(x0, x1, texto)]."""
+    cells = []
+    cur = [words[0]]
+    for prev, w in zip(words, words[1:]):
+        if float(w["x0"]) - float(prev["x1"]) > gap:
+            cells.append(cur)
+            cur = [w]
+        else:
+            cur.append(w)
+    cells.append(cur)
+    return [
+        (float(c[0]["x0"]), float(c[-1]["x1"]), " ".join(x["text"] for x in c).strip())
+        for c in cells
+    ]
+
+
+def _classify_pdf_column(text: str):
+    t = text.strip().lower()
+    if any(k in t for k in ("grupo", "marca", "rubro")):
+        return "group"
+    if any(k in t for k in ("descrip", "producto", "nombre", "detalle", "articulo", "artículo")):
+        return "name"
+    if "sin iva" in t or "neto" in t:
+        return "net"
+    if "con iva" in t:
+        return "gross"
+    if "iva" in t or "alicuota" in t or "alícuota" in t:
+        return "iva"
+    if any(k in t for k in ("precio", "costo", "importe", "valor")):
+        return "price"
+    return None
+
+
+def _parse_price_list_pdf(pdf_bytes):
+    """Parsea un PDF de lista de precios.
+
+    Si encuentra encabezados (Grupo/Descripción/Precio…), mapea las columnas por
+    posición y soporta variantes con Precio Sin IVA, IVA y Precio Con IVA. Si no
+    hay encabezado, cae a una heurística: precio = último número, corte
+    Grupo/Descripción por el mayor espacio.
+    Devuelve (rows, error) con rows = [(grupo, nombre, precio_neto, iva_or_None)].
     """
     import io
     import re as _re
@@ -116,38 +177,64 @@ def _parse_price_list_pdf(pdf_bytes):
     except Exception as exc:
         return [], f"No se pudo abrir el PDF: {exc}"
 
-    price_re = _re.compile(r"^\$?\d[\d.]*,\d{2}$")
+    price_re = _re.compile(r"^\$?\d[\d.]*,\d{1,2}$")
+
+    def center(w):
+        return (float(w["x0"]) + float(w["x1"])) / 2.0
+
     rows = []
     try:
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            columns = None  # [(boundary_max_x, role)] una vez detectado el header
             for page in pdf.pages:
-                words = page.extract_words(use_text_flow=False, keep_blank_chars=False)
-                if not words:
-                    continue
-                # Agrupar palabras por línea (misma coordenada vertical, ±3px).
-                words.sort(key=lambda w: (round(float(w["top"])), float(w["x0"])))
-                lines = []
-                current = []
-                current_top = None
-                for w in words:
-                    top = float(w["top"])
-                    if current_top is None or abs(top - current_top) <= 3:
-                        current.append(w)
-                        current_top = top if current_top is None else current_top
-                    else:
-                        lines.append(current)
-                        current = [w]
-                        current_top = top
-                if current:
-                    lines.append(current)
-
-                for ws in lines:
-                    ws = sorted(ws, key=lambda x: float(x["x0"]))
+                for ws in _pdf_lines(page):
                     if len(ws) < 2:
                         continue
+                    joined = " ".join(w["text"] for w in ws).lower()
+
+                    # ¿Es la fila de encabezados?
+                    if columns is None and "descrip" in joined and "precio" in joined:
+                        cells = _group_words_into_cells(ws)
+                        roles = [(x0, x1, _classify_pdf_column(txt)) for x0, x1, txt in cells]
+                        # Límites = punto medio entre el fin de una celda y el inicio de la siguiente.
+                        cols = []
+                        for i, (x0, x1, role) in enumerate(roles):
+                            upper = (x1 + roles[i + 1][0]) / 2.0 if i + 1 < len(roles) else float("inf")
+                            cols.append((upper, role))
+                        columns = cols
+                        continue
+
+                    if columns is not None:
+                        # Asignar cada palabra a su columna por posición.
+                        buckets: dict = {}
+                        for w in ws:
+                            c = center(w)
+                            role = next((r for upper, r in columns if c <= upper), None)
+                            if role:
+                                buckets.setdefault(role, []).append(w["text"])
+                        group = " ".join(buckets.get("group", [])).strip()
+                        name = " ".join(buckets.get("name", [])).strip()
+                        net = _parse_price_decimal(" ".join(buckets.get("net", [])))
+                        gross = _parse_price_decimal(" ".join(buckets.get("gross", [])))
+                        vat = _parse_price_decimal(" ".join(buckets.get("iva", [])))
+                        single = _parse_price_decimal(" ".join(buckets.get("price", [])))
+                        if vat is not None and (vat < 0 or vat > 100):
+                            vat = None
+                        if net is None and gross is not None and vat is not None:
+                            net = (gross / (Decimal("1.00") + vat / Decimal("100.00"))).quantize(
+                                Decimal("0.01"), rounding=ROUND_HALF_UP
+                            )
+                        if net is None:
+                            net = single if single is not None else gross
+                        if not name or net is None or net < 0:
+                            continue
+                        rows.append((group, name, net, vat))
+                        continue
+
+                    # Sin header detectado: heurística por mayor espacio.
                     last = ws[-1]["text"].strip()
                     if not price_re.match(last):
-                        continue  # encabezado / fila sin precio
+                        continue
                     net = _parse_price_decimal(last)
                     if net is None or net < 0:
                         continue
@@ -163,7 +250,7 @@ def _parse_price_list_pdf(pdf_bytes):
                         group = " ".join(w["text"] for w in body[: idx + 1])
                         name = " ".join(w["text"] for w in body[idx + 1:])
                     name = name.strip()
-                    if not name or name.lower() in ("descripción", "descripcion"):
+                    if not name:
                         continue
                     rows.append((group.strip(), name, net, None))
     except Exception as exc:
