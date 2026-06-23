@@ -16,6 +16,7 @@ from ..models import (
     SupplierPayment,
     SupplierProduct,
 )
+from .common import _normalize_lookup_text
 from .forms import (
     SupplierForm,
     SupplierGroupForm,
@@ -23,6 +24,69 @@ from .forms import (
     SupplierProductForm,
     SupplierUnlinkGroupForm,
 )
+
+from decimal import ROUND_HALF_UP, InvalidOperation
+
+
+def _parse_price_decimal(value) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    raw = str(value).strip().replace("$", "").replace(" ", "")
+    if not raw:
+        return None
+    if "," in raw and "." in raw:
+        raw = raw.replace(".", "").replace(",", ".")
+    elif "," in raw:
+        raw = raw.replace(",", ".")
+    try:
+        return Decimal(raw)
+    except InvalidOperation:
+        return None
+
+
+def _parse_price_list_xlsx(file_obj):
+    """Parsea un xlsx de lista de precios: columna nombre + columna precio (neto).
+
+    Devuelve (rows, error) donde rows = [(nombre, precio_neto Decimal)].
+    Detecta encabezados por palabras clave; si no, asume col0=nombre, col1=precio.
+    """
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(file_obj, data_only=True)
+        ws = wb.active
+    except Exception as exc:
+        return [], f"No se pudo leer el archivo: {exc}"
+
+    all_rows = list(ws.iter_rows(values_only=True))
+    if not all_rows:
+        return [], "El archivo está vacío."
+
+    name_idx, price_idx = 0, 1
+    data_start = 0
+    NAME_KEYS = ("nombre", "producto", "descrip", "articulo", "artículo", "detalle")
+    PRICE_KEYS = ("precio", "costo", "neto", "importe", "valor", "unitario")
+    for i, row in enumerate(all_rows[:5]):
+        cells = [str(c).strip().lower() if c is not None else "" for c in row]
+        n_idx = next((j for j, c in enumerate(cells) if any(k in c for k in NAME_KEYS)), None)
+        p_idx = next((j for j, c in enumerate(cells) if any(k in c for k in PRICE_KEYS)), None)
+        if n_idx is not None and p_idx is not None:
+            name_idx, price_idx, data_start = n_idx, p_idx, i + 1
+            break
+
+    rows = []
+    for row in all_rows[data_start:]:
+        if not row:
+            continue
+        name = row[name_idx] if name_idx < len(row) else None
+        price = row[price_idx] if price_idx < len(row) else None
+        name = str(name).strip() if name is not None else ""
+        net = _parse_price_decimal(price)
+        if not name or net is None or net < 0:
+            continue
+        rows.append((name, net))
+    if not rows:
+        return [], "No se encontraron filas con nombre y precio válidos."
+    return rows, None
 
 
 @login_required
@@ -143,6 +207,65 @@ def suppliers(request):
                     ),
                 )
                 return redirect("inventory_suppliers")
+        elif action == "import_price_list":
+            supplier = Supplier.objects.filter(id=request.POST.get("price_supplier_id")).first()
+            upload = request.FILES.get("price_file")
+            iva_raw = (request.POST.get("price_vat") or "21").strip().replace(",", ".")
+            try:
+                iva = Decimal(iva_raw)
+            except Exception:
+                iva = Decimal("21")
+            if not supplier:
+                messages.error(request, "Elegí un proveedor para la lista de precios.")
+                return redirect("inventory_suppliers")
+            if not upload:
+                messages.error(request, "Subí un archivo .xlsx con la lista de precios.")
+                return redirect("inventory_suppliers")
+            rows, parse_error = _parse_price_list_xlsx(upload)
+            if parse_error:
+                messages.error(request, parse_error)
+                return redirect("inventory_suppliers")
+            existing = {}
+            for p in Product.objects.all():
+                existing.setdefault(_normalize_lookup_text(p.name), p)
+            created_products = new_links = updated_links = 0
+            for name, net in rows:
+                cost_with_vat = (net * (Decimal("1.00") + iva / Decimal("100.00"))).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP
+                )
+                key = _normalize_lookup_text(name)
+                product = existing.get(key)
+                if product is None:
+                    product = Product.objects.create(
+                        name=name,
+                        vat_percent=iva,
+                        avg_cost=net,
+                        default_supplier=supplier,
+                    )
+                    existing[key] = product
+                    created_products += 1
+                _, was_created = SupplierProduct.objects.update_or_create(
+                    supplier=supplier,
+                    product=product,
+                    defaults={
+                        "last_cost": cost_with_vat,
+                        "vat_percent": iva,
+                        "last_purchase_at": timezone.now(),
+                    },
+                )
+                if was_created:
+                    new_links += 1
+                else:
+                    updated_links += 1
+            messages.success(
+                request,
+                (
+                    f"Lista de precios de {supplier.name} importada: "
+                    f"{created_products} producto(s) nuevo(s), "
+                    f"{new_links} vínculo(s) nuevo(s), {updated_links} actualizado(s)."
+                ),
+            )
+            return redirect("inventory_suppliers")
         elif action == "delete_supplier":
             supplier_id = request.POST.get("supplier_id")
             Supplier.objects.filter(pk=supplier_id).delete()
