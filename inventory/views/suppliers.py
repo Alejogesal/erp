@@ -171,12 +171,13 @@ def _classify_pdf_column(text: str):
 
 
 def _parse_price_list_pdf(pdf_bytes):
-    """Parsea un PDF de lista de precios.
+    """Parsea un PDF de lista de precios (Grupo · Descripción · … · Precio).
 
-    Si encuentra encabezados (Grupo/Descripción/Precio…), mapea las columnas por
-    posición y soporta variantes con Precio Sin IVA, IVA y Precio Con IVA. Si no
-    hay encabezado, cae a una heurística: precio = último número, corte
-    Grupo/Descripción por el mayor espacio.
+    Robusto a descripciones largas: los precios se detectan por patrón (número con
+    coma decimal) y el IVA por el '%', NO por posición de columna. El primer precio
+    de la fila es el neto (sin IVA); si hay más de uno, el resto (p. ej. "con IVA")
+    se ignora y se recalcula. El corte Grupo/Descripción se detecta por el mayor
+    espacio horizontal entre las palabras de texto.
     Devuelve (rows, error) con rows = [(grupo, nombre, precio_neto, iva_or_None)].
     """
     import io
@@ -187,81 +188,53 @@ def _parse_price_list_pdf(pdf_bytes):
         return [], f"No se pudo abrir el PDF: {exc}"
 
     price_re = _re.compile(r"^\$?\d[\d.]*,\d{1,2}$")
-
-    def center(w):
-        return (float(w["x0"]) + float(w["x1"])) / 2.0
-
+    iva_re = _re.compile(r"^\d{1,3}([.,]\d+)?%$")
     rows = []
     try:
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-            columns = None  # [(boundary_max_x, role)] una vez detectado el header
             for page in pdf.pages:
                 for ws in _pdf_lines(page):
                     if len(ws) < 2:
                         continue
                     joined = " ".join(w["text"] for w in ws).lower()
+                    if "descrip" in joined and "precio" in joined:
+                        continue  # fila de encabezados
 
-                    # ¿Es la fila de encabezados?
-                    if columns is None and "descrip" in joined and "precio" in joined:
-                        cells = _group_words_into_cells(ws)
-                        roles = [(x0, x1, _classify_pdf_column(txt)) for x0, x1, txt in cells]
-                        # Límites = punto medio entre el fin de una celda y el inicio de la siguiente.
-                        cols = []
-                        for i, (x0, x1, role) in enumerate(roles):
-                            upper = (x1 + roles[i + 1][0]) / 2.0 if i + 1 < len(roles) else float("inf")
-                            cols.append((upper, role))
-                        columns = cols
+                    prices = []
+                    iva = None
+                    text_words = []
+                    for w in ws:
+                        t = w["text"].strip()
+                        if price_re.match(t):
+                            val = _parse_price_decimal(t)
+                            if val is not None:
+                                prices.append(val)
+                        elif iva_re.match(t):
+                            v = _parse_price_decimal(t)
+                            if v is not None and 0 <= v <= 100:
+                                iva = v
+                        else:
+                            text_words.append(w)
+                    if not prices or not text_words:
                         continue
-
-                    if columns is not None:
-                        # Asignar cada palabra a su columna por posición.
-                        buckets: dict = {}
-                        for w in ws:
-                            c = center(w)
-                            role = next((r for upper, r in columns if c <= upper), None)
-                            if role:
-                                buckets.setdefault(role, []).append(w["text"])
-                        group = " ".join(buckets.get("group", [])).strip()
-                        name = " ".join(buckets.get("name", [])).strip()
-                        net = _parse_price_decimal(" ".join(buckets.get("net", [])))
-                        gross = _parse_price_decimal(" ".join(buckets.get("gross", [])))
-                        vat = _parse_price_decimal(" ".join(buckets.get("iva", [])))
-                        single = _parse_price_decimal(" ".join(buckets.get("price", [])))
-                        if vat is not None and (vat < 0 or vat > 100):
-                            vat = None
-                        if net is None and gross is not None and vat is not None:
-                            net = (gross / (Decimal("1.00") + vat / Decimal("100.00"))).quantize(
-                                Decimal("0.01"), rounding=ROUND_HALF_UP
-                            )
-                        if net is None:
-                            net = single if single is not None else gross
-                        if not name or net is None or net < 0:
-                            continue
-                        rows.append((group, name, net, vat))
-                        continue
-
-                    # Sin header detectado: heurística por mayor espacio.
-                    last = ws[-1]["text"].strip()
-                    if not price_re.match(last):
-                        continue
-                    net = _parse_price_decimal(last)
+                    net = prices[0]
                     if net is None or net < 0:
                         continue
-                    body = ws[:-1]
-                    if len(body) == 1:
-                        group, name = "", body[0]["text"]
+
+                    if len(text_words) == 1:
+                        group, name = "", text_words[0]["text"]
                     else:
                         gaps = [
-                            (float(body[i + 1]["x0"]) - float(body[i]["x1"]), i)
-                            for i in range(len(body) - 1)
+                            (float(text_words[i + 1]["x0"]) - float(text_words[i]["x1"]), i)
+                            for i in range(len(text_words) - 1)
                         ]
                         _, idx = max(gaps, key=lambda g: g[0])
-                        group = " ".join(w["text"] for w in body[: idx + 1])
-                        name = " ".join(w["text"] for w in body[idx + 1:])
+                        group = " ".join(w["text"] for w in text_words[: idx + 1])
+                        name = " ".join(w["text"] for w in text_words[idx + 1:])
                     name = name.strip()
-                    if not name:
+                    if not name or name.lower() in ("descripción", "descripcion"):
                         continue
-                    rows.append((group.strip(), name, net, None))
+                    rows.append((group.strip(), name, net, iva))
     except Exception as exc:
         return [], f"No se pudo procesar el PDF: {exc}"
     if not rows:
@@ -425,14 +398,28 @@ def suppliers(request):
                 key = _normalize_lookup_text(name)
                 product = existing_by_key.get(key)
                 if product is None:
-                    # Match por coincidencia: solo entre productos con los MISMOS
-                    # números (tamaños) y texto muy parecido, para no duplicar pero
-                    # tampoco fusionar presentaciones distintas.
-                    best, best_r = None, 0.86
-                    for cand_nk, cand_p in existing_by_nums.get(_name_numbers(key), []):
-                        r = SequenceMatcher(None, key, cand_nk).ratio()
-                        if r >= best_r:
-                            best, best_r = cand_p, r
+                    # Match por coincidencia, SOLO entre productos con los mismos
+                    # números (tamaños/gramajes), para no fusionar presentaciones
+                    # distintas (250 ml vs 500 ml).
+                    key_tokens = set(key.split())
+                    candidates = existing_by_nums.get(_name_numbers(key), [])
+                    best, best_r = None, None
+                    for cand_nk, cand_p in candidates:
+                        cand_tokens = set(cand_nk.split())
+                        # (a) Un nombre es el otro + palabras extra (p. ej. la marca
+                        # "THE HUNTER"): subconjunto de tokens → mismo producto.
+                        if key_tokens <= cand_tokens or cand_tokens <= key_tokens:
+                            extra = len(key_tokens ^ cand_tokens)
+                            if best_r is None or extra < best_r:
+                                best, best_r = cand_p, extra
+                    if best is None:
+                        # (b) Si no hubo subconjunto, similitud de texto alta (typos,
+                        # puntuación) con los mismos números.
+                        best_r = 0.86
+                        for cand_nk, cand_p in candidates:
+                            r = SequenceMatcher(None, key, cand_nk).ratio()
+                            if r >= best_r:
+                                best, best_r = cand_p, r
                     if best is not None:
                         product = best
                         matched_fuzzy += 1
