@@ -44,7 +44,7 @@
     </div>
     <div class="card">
         <div class="card-title">Importar lista de precios (Excel)</div>
-        <p class="subtitle" style="margin-top:0;">Carga todos los productos de un proveedor desde un .xlsx (match por nombre; crea los que no existan). El precio es neto (sin IVA). Si el Excel trae una columna "IVA", se usa por producto; si no, se aplica el IVA de abajo (0 = sin IVA). El IVA real de cada compra igual se define al registrarla.</p>
+        <p class="subtitle" style="margin-top:0;">Carga todos los productos de un proveedor desde un .xlsx o .pdf (match por nombre; crea los que no existan, usando el Grupo como marca). El precio es neto (sin IVA). El IVA se puede editar luego por producto o para toda la lista. El IVA real de cada compra igual se define al registrarla.</p>
         <form method="post" enctype="multipart/form-data">
             {% csrf_token %}
             <input type="hidden" name="action" value="import_price_list">
@@ -58,12 +58,12 @@
                 </select>
             </p>
             <p>
-                <label for="id_price_vat">IVA % por defecto (si el Excel no trae columna IVA; 0 = sin IVA)</label>
+                <label for="id_price_vat">IVA % por defecto (si el archivo no trae columna IVA; 0 = sin IVA). Lo podés cambiar después por producto o para toda la lista.</label>
                 <input id="id_price_vat" type="number" step="0.01" name="price_vat" value="21">
             </p>
             <p>
-                <label for="id_price_file">Archivo .xlsx (columnas: nombre, precio neto y, opcional, IVA)</label>
-                <input id="id_price_file" type="file" name="price_file" accept=".xlsx" required>
+                <label for="id_price_file">Archivo .xlsx o .pdf (columnas: grupo opcional, nombre/descripción, precio neto e IVA opcional)</label>
+                <input id="id_price_file" type="file" name="price_file" accept=".xlsx,.pdf" required>
             </p>
             <button type="submit">Importar lista</button>
         </form>
@@ -114,6 +114,14 @@
     <details style="margin-bottom:8px;">
         <summary style="cursor:pointer; padding:6px 0; font-weight:600;">{{ supplier.name }} <span style="font-weight:400; color:var(--muted); font-size:12px;">({{ supplier.supplier_products.all|length }} producto{{ supplier.supplier_products.all|length|pluralize }})</span></summary>
         {% if supplier.supplier_products.all %}
+        <form method="post" style="display:flex; gap:8px; align-items:center; margin:6px 0 10px;" onsubmit="return confirm('¿Aplicar este IVA a TODA la lista de {{ supplier.name|escapejs }}? Recalcula el costo con IVA de cada producto manteniendo el neto.');">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="set_supplier_vat_all">
+            <input type="hidden" name="supplier_id" value="{{ supplier.id }}">
+            <label style="font-size:12px; color:var(--muted);">Aplicar IVA % a toda la lista:</label>
+            <input type="number" step="0.01" name="vat_percent" value="21" style="width:80px;">
+            <button type="submit" style="font-size:12px;">Aplicar a todos</button>
+        </form>
         <table style="margin-bottom:8px;">
             <thead>
                 <tr>
@@ -129,7 +137,15 @@
                 <tr>
                     <td>{{ sp.product.name }} <span style="color:var(--muted); font-size:11px;">[{{ sp.product.sku|default:"s/SKU" }}]</span></td>
                     <td>${{ sp.last_cost|latam_number:2 }}</td>
-                    <td>{{ sp.vat_percent|latam_number:2 }}%</td>
+                    <td>
+                        <form method="post" style="display:flex; gap:4px; align-items:center;">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="set_link_vat">
+                            <input type="hidden" name="link_id" value="{{ sp.id }}">
+                            <input type="number" step="0.01" name="vat_percent" value="{{ sp.vat_percent|stringformat:'.2f' }}" style="width:64px; font-size:12px;">
+                            <button type="submit" style="font-size:11px; padding:3px 6px;">✓</button>
+                        </form>
+                    </td>
                     <td>{% if sp.product.default_supplier_id == supplier.id %}★{% else %}—{% endif %}</td>
                     <td>
                         <form method="post" onsubmit="return confirm('¿Quitar este producto de la lista del proveedor?');" style="display:inline;">

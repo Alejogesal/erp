@@ -47,8 +47,8 @@ def _parse_price_decimal(value) -> Decimal | None:
 def _parse_price_list_xlsx(file_obj):
     """Parsea un xlsx de lista de precios.
 
-    Columnas: nombre + precio (neto) + IVA % (opcional, por producto).
-    Devuelve (rows, error) donde rows = [(nombre, precio_neto, iva_or_None)].
+    Columnas: (grupo opcional) + nombre/descripción + precio (neto) + IVA % opcional.
+    Devuelve (rows, error) donde rows = [(grupo, nombre, precio_neto, iva_or_None)].
     Detecta encabezados por palabras clave; si no, asume col0=nombre, col1=precio.
     """
     try:
@@ -62,11 +62,12 @@ def _parse_price_list_xlsx(file_obj):
     if not all_rows:
         return [], "El archivo está vacío."
 
-    name_idx, price_idx, vat_idx = 0, 1, None
+    name_idx, price_idx, vat_idx, group_idx = 0, 1, None, None
     data_start = 0
     NAME_KEYS = ("nombre", "producto", "descrip", "articulo", "artículo", "detalle")
     PRICE_KEYS = ("precio", "costo", "neto", "importe", "valor", "unitario")
     VAT_KEYS = ("iva", "alicuota", "alícuota")
+    GROUP_KEYS = ("grupo", "marca", "rubro", "categoria", "categoría", "linea", "línea")
     for i, row in enumerate(all_rows[:5]):
         cells = [str(c).strip().lower() if c is not None else "" for c in row]
         n_idx = next((j for j, c in enumerate(cells) if any(k in c for k in NAME_KEYS)), None)
@@ -74,6 +75,7 @@ def _parse_price_list_xlsx(file_obj):
         if n_idx is not None and p_idx is not None:
             name_idx, price_idx, data_start = n_idx, p_idx, i + 1
             vat_idx = next((j for j, c in enumerate(cells) if any(k in c for k in VAT_KEYS)), None)
+            group_idx = next((j for j, c in enumerate(cells) if any(k in c for k in GROUP_KEYS)), None)
             break
 
     rows = []
@@ -91,9 +93,83 @@ def _parse_price_list_xlsx(file_obj):
             vat = _parse_price_decimal(row[vat_idx])
             if vat is not None and (vat < 0 or vat > 100):
                 vat = None
-        rows.append((name, net, vat))
+        group = ""
+        if group_idx is not None and group_idx < len(row) and row[group_idx] is not None:
+            group = str(row[group_idx]).strip()
+        rows.append((group, name, net, vat))
     if not rows:
         return [], "No se encontraron filas con nombre y precio válidos."
+    return rows, None
+
+
+def _parse_price_list_pdf(pdf_bytes):
+    """Parsea un PDF de lista de precios con columnas Grupo · Descripción · Precio.
+
+    Separa las columnas por posición: el precio es el último token numérico de la
+    fila y el corte Grupo/Descripción se detecta por el mayor espacio horizontal.
+    Devuelve (rows, error) con rows = [(grupo, nombre, precio_neto, None)].
+    """
+    import io
+    import re as _re
+    try:
+        import pdfplumber
+    except Exception as exc:
+        return [], f"No se pudo abrir el PDF: {exc}"
+
+    price_re = _re.compile(r"^\$?\d[\d.]*,\d{2}$")
+    rows = []
+    try:
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            for page in pdf.pages:
+                words = page.extract_words(use_text_flow=False, keep_blank_chars=False)
+                if not words:
+                    continue
+                # Agrupar palabras por línea (misma coordenada vertical, ±3px).
+                words.sort(key=lambda w: (round(float(w["top"])), float(w["x0"])))
+                lines = []
+                current = []
+                current_top = None
+                for w in words:
+                    top = float(w["top"])
+                    if current_top is None or abs(top - current_top) <= 3:
+                        current.append(w)
+                        current_top = top if current_top is None else current_top
+                    else:
+                        lines.append(current)
+                        current = [w]
+                        current_top = top
+                if current:
+                    lines.append(current)
+
+                for ws in lines:
+                    ws = sorted(ws, key=lambda x: float(x["x0"]))
+                    if len(ws) < 2:
+                        continue
+                    last = ws[-1]["text"].strip()
+                    if not price_re.match(last):
+                        continue  # encabezado / fila sin precio
+                    net = _parse_price_decimal(last)
+                    if net is None or net < 0:
+                        continue
+                    body = ws[:-1]
+                    if len(body) == 1:
+                        group, name = "", body[0]["text"]
+                    else:
+                        gaps = [
+                            (float(body[i + 1]["x0"]) - float(body[i]["x1"]), i)
+                            for i in range(len(body) - 1)
+                        ]
+                        _, idx = max(gaps, key=lambda g: g[0])
+                        group = " ".join(w["text"] for w in body[: idx + 1])
+                        name = " ".join(w["text"] for w in body[idx + 1:])
+                    name = name.strip()
+                    if not name or name.lower() in ("descripción", "descripcion"):
+                        continue
+                    rows.append((group.strip(), name, net, None))
+    except Exception as exc:
+        return [], f"No se pudo procesar el PDF: {exc}"
+    if not rows:
+        return [], "No se encontraron filas con descripción y precio en el PDF."
     return rows, None
 
 
@@ -227,9 +303,12 @@ def suppliers(request):
                 messages.error(request, "Elegí un proveedor para la lista de precios.")
                 return redirect("inventory_suppliers")
             if not upload:
-                messages.error(request, "Subí un archivo .xlsx con la lista de precios.")
+                messages.error(request, "Subí un archivo .xlsx o .pdf con la lista de precios.")
                 return redirect("inventory_suppliers")
-            rows, parse_error = _parse_price_list_xlsx(upload)
+            if (upload.name or "").lower().endswith(".pdf"):
+                rows, parse_error = _parse_price_list_pdf(upload.read())
+            else:
+                rows, parse_error = _parse_price_list_xlsx(upload)
             if parse_error:
                 messages.error(request, parse_error)
                 return redirect("inventory_suppliers")
@@ -238,7 +317,7 @@ def suppliers(request):
                 existing.setdefault(_normalize_lookup_text(p.name), p)
             created_names = []
             new_links = updated_links = 0
-            for name, net, row_vat in rows:
+            for group, name, net, row_vat in rows:
                 iva = row_vat if row_vat is not None else default_iva
                 cost_with_vat = (net * (Decimal("1.00") + iva / Decimal("100.00"))).quantize(
                     Decimal("0.01"), rounding=ROUND_HALF_UP
@@ -248,6 +327,7 @@ def suppliers(request):
                 if product is None:
                     product = Product.objects.create(
                         name=name,
+                        group=group or "",
                         vat_percent=iva,
                         avg_cost=net,
                         default_supplier=supplier,
@@ -288,6 +368,37 @@ def suppliers(request):
             link_id = request.POST.get("link_id")
             SupplierProduct.objects.filter(pk=link_id).delete()
             messages.success(request, "Vínculo eliminado.")
+            return redirect("inventory_suppliers")
+        elif action == "set_link_vat":
+            link = SupplierProduct.objects.filter(pk=request.POST.get("link_id")).first()
+            new_vat = _parse_price_decimal(request.POST.get("vat_percent"))
+            if not link or new_vat is None or new_vat < 0 or new_vat > 100:
+                messages.error(request, "IVA inválido.")
+                return redirect("inventory_suppliers")
+            # El neto se mantiene; el costo con IVA se recalcula con la nueva alícuota.
+            net = (link.last_cost / (Decimal("1.00") + (link.vat_percent or Decimal("0.00")) / Decimal("100.00")))
+            link.last_cost = (net * (Decimal("1.00") + new_vat / Decimal("100.00"))).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+            link.vat_percent = new_vat
+            link.save(update_fields=["last_cost", "vat_percent"])
+            messages.success(request, "IVA actualizado.")
+            return redirect("inventory_suppliers")
+        elif action == "set_supplier_vat_all":
+            supplier = Supplier.objects.filter(id=request.POST.get("supplier_id")).first()
+            new_vat = _parse_price_decimal(request.POST.get("vat_percent"))
+            if not supplier or new_vat is None or new_vat < 0 or new_vat > 100:
+                messages.error(request, "IVA inválido.")
+                return redirect("inventory_suppliers")
+            factor_new = Decimal("1.00") + new_vat / Decimal("100.00")
+            count = 0
+            for link in SupplierProduct.objects.filter(supplier=supplier):
+                net = link.last_cost / (Decimal("1.00") + (link.vat_percent or Decimal("0.00")) / Decimal("100.00"))
+                link.last_cost = (net * factor_new).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                link.vat_percent = new_vat
+                link.save(update_fields=["last_cost", "vat_percent"])
+                count += 1
+            messages.success(request, f"IVA {new_vat}% aplicado a {count} producto(s) de {supplier.name}.")
             return redirect("inventory_suppliers")
 
     context = {
