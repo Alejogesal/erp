@@ -228,7 +228,8 @@ def suppliers(request):
             existing = {}
             for p in Product.objects.all():
                 existing.setdefault(_normalize_lookup_text(p.name), p)
-            created_products = new_links = updated_links = 0
+            created_names = []
+            new_links = updated_links = 0
             for name, net in rows:
                 cost_with_vat = (net * (Decimal("1.00") + iva / Decimal("100.00"))).quantize(
                     Decimal("0.01"), rounding=ROUND_HALF_UP
@@ -243,7 +244,7 @@ def suppliers(request):
                         default_supplier=supplier,
                     )
                     existing[key] = product
-                    created_products += 1
+                    created_names.append(name)
                 _, was_created = SupplierProduct.objects.update_or_create(
                     supplier=supplier,
                     product=product,
@@ -261,10 +262,13 @@ def suppliers(request):
                 request,
                 (
                     f"Lista de precios de {supplier.name} importada: "
-                    f"{created_products} producto(s) nuevo(s), "
+                    f"{len(created_names)} producto(s) nuevo(s), "
                     f"{new_links} vínculo(s) nuevo(s), {updated_links} actualizado(s)."
                 ),
             )
+            if created_names:
+                # Se muestran tras el redirect para revisar posibles duplicados.
+                request.session["price_import_created"] = created_names[:500]
             return redirect("inventory_suppliers")
         elif action == "delete_supplier":
             supplier_id = request.POST.get("supplier_id")
@@ -283,6 +287,7 @@ def suppliers(request):
         "link_group_form": link_group_form,
         "unlink_group_form": unlink_group_form,
         "suppliers": suppliers_qs,
+        "price_import_created": request.session.pop("price_import_created", None),
     }
     purchases_totals = {
         row["supplier_id"]: row["total"] or Decimal("0.00")

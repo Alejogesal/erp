@@ -70,6 +70,18 @@
     </div>
 </div>
 
+{% if price_import_created %}
+<div class="card" style="margin-top:16px; border:1px solid var(--positive);">
+    <div class="card-title">Productos creados en la última importación ({{ price_import_created|length }})</div>
+    <p class="subtitle" style="margin-top:0;">Revisá que ninguno sea un duplicado de uno que ya existía con otro nombre.</p>
+    <ul style="margin:0; columns:2; font-size:13px;">
+        {% for name in price_import_created %}
+        <li>{{ name }}</li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
 <div class="card table-card" style="margin-top:16px;">
     <div class="card-title" style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
         <span>Deuda pendiente a proveedores</span>
