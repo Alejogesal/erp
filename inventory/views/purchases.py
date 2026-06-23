@@ -622,6 +622,7 @@ def purchases_list(request):
                     messages.error(request, f"Hay {len(parse_errors)} filas con errores.")
                 items = []
             warehouse = header_form.cleaned_data["warehouse"]
+            purchase_supplier = header_form.cleaned_data.get("supplier")
             purchase_date = header_form.cleaned_data.get("purchase_date")
             header_discount_percent = header_form.cleaned_data.get("descuento_total") or Decimal("0.00")
             shipping_cost = header_form.cleaned_data.get("costo_envio") or Decimal("0.00")
@@ -630,7 +631,6 @@ def purchases_list(request):
                 return redirect("inventory_purchases_list")
             try:
                 with transaction.atomic():
-                    purchase_supplier = items[0].get("supplier") if items else None
                     purchase = Purchase.objects.create(
                         supplier=purchase_supplier,
                         warehouse=warehouse,
@@ -699,7 +699,7 @@ def purchases_list(request):
                             warehouse=warehouse,
                             quantity=qty,
                             unit_cost=effective_unit_cost_for_stock,
-                            supplier=data["supplier"],
+                            supplier=purchase_supplier,
                             vat_percent=vat_percent,
                             user=request.user,
                             reference=f"Compra #{purchase.id}",
@@ -965,7 +965,7 @@ def purchase_edit(request, purchase_id: int):
                     purchase.items.all().delete()
 
                     purchase.warehouse = new_warehouse
-                    purchase.supplier = items[0].get("supplier")
+                    purchase.supplier = header_form.cleaned_data.get("supplier")
                     purchase_date = header_form.cleaned_data.get("purchase_date")
                     header_discount_percent = header_form.cleaned_data.get("descuento_total") or Decimal("0.00")
                     shipping_cost = header_form.cleaned_data.get("costo_envio") or Decimal("0.00")
@@ -1075,6 +1075,7 @@ def purchase_edit(request, purchase_id: int):
         header_form = PurchaseHeaderForm(
             initial={
                 "warehouse": purchase.warehouse,
+                "supplier": purchase.supplier,
                 "purchase_date": timezone.localtime(purchase.created_at).date(),
                 "descuento_total": purchase.discount_percent,
                 "costo_envio": purchase.shipping_cost,

@@ -55,6 +55,11 @@ class ProductForm(forms.ModelForm):
 
 class PurchaseHeaderForm(forms.Form):
     warehouse = forms.ModelChoiceField(queryset=Warehouse.objects.all())
+    supplier = forms.ModelChoiceField(
+        queryset=Supplier.objects.all(),
+        label="Proveedor",
+        required=False,
+    )
     purchase_date = forms.DateField(
         label="Fecha",
         required=False,

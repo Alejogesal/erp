@@ -65,6 +65,11 @@
             {{ form.warehouse.errors }}
         </p>
         <p>
+            {{ form.supplier.label_tag }}
+            {{ form.supplier }}
+            {{ form.supplier.errors }}
+        </p>
+        <p>
             {{ form.purchase_date.label_tag }}
             <div style="display:flex; gap:8px; align-items:center;">
                 {{ form.purchase_date }}
@@ -90,7 +95,6 @@
                 <tr>
                     <th>Producto</th>
                     <th>Variedad</th>
-                    <th>Proveedor</th>
                     <th>Cantidad</th>
                     <th>Costo unitario sin IVA</th>
                     <th>DTO %</th>
@@ -105,7 +109,6 @@
                     <td>
                         <select name="{{ item_form.prefix }}-variant_id" class="variant-select" data-selected=""></select>
                     </td>
-                    <td>{{ item_form.supplier }}</td>
                     <td>{{ item_form.quantity }}</td>
                     <td>{{ item_form.unit_cost }}</td>
                     <td>{{ item_form.discount_percent }}</td>
@@ -119,7 +122,7 @@
                 </tr>
                 {% if item_form.errors %}
                 <tr>
-                    <td colspan="8">{{ item_form.errors }}</td>
+                    <td colspan="7">{{ item_form.errors }}</td>
                 </tr>
                 {% endif %}
                 {% endfor %}
@@ -485,14 +488,13 @@
             variant.name = `form-${idx}-variant_id`;
             variant.className = "variant-select";
             variant.dataset.selected = "";
-            const supplier = container.querySelector("[name$='-supplier']");
             const qty = container.querySelector("[name$='-quantity']");
             const cost = container.querySelector("[name$='-unit_cost']");
             const discount = container.querySelector("[name$='-discount_percent']");
             const vat = container.querySelector("[name$='-vat_percent']");
             const deleteField = container.querySelector("[name$='-DELETE']");
 
-            [product, variant, supplier, qty, cost, discount, vat].forEach(field => {
+            [product, variant, qty, cost, discount, vat].forEach(field => {
                 const td = document.createElement("td");
                 if (field) td.appendChild(field);
                 if (field && field.name?.includes("vat_percent")) td.classList.add("vat-col");

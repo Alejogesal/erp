@@ -15,7 +15,6 @@
             <thead>
                 <tr>
                     <th>Producto</th>
-                    <th>Proveedor</th>
                     <th>Cantidad</th>
                     <th>Costo unitario</th>
                     <th>IVA %</th>
@@ -26,7 +25,6 @@
                 {% for item_form in formset.forms %}
                 <tr>
                     <td>{{ item_form.product }}</td>
-                    <td>{{ item_form.supplier }}</td>
                     <td>{{ item_form.quantity }}</td>
                     <td>{{ item_form.unit_cost }}</td>
                     <td>{{ item_form.vat_percent }}</td>
@@ -34,7 +32,7 @@
                 </tr>
                 {% if item_form.errors %}
                 <tr>
-                    <td colspan="6">{{ item_form.errors }}</td>
+                    <td colspan="5">{{ item_form.errors }}</td>
                 </tr>
                 {% endif %}
                 {% endfor %}
@@ -57,13 +55,12 @@
 
             const tr = document.createElement("tr");
             const product = container.querySelector("[name$='-product']");
-            const supplier = container.querySelector("[name$='-supplier']");
             const qty = container.querySelector("[name$='-quantity']");
             const cost = container.querySelector("[name$='-unit_cost']");
             const vat = container.querySelector("[name$='-vat_percent']");
             const deleteField = container.querySelector("[name$='-DELETE']");
 
-            [product, supplier, qty, cost, vat, deleteField].forEach(field => {
+            [product, qty, cost, vat, deleteField].forEach(field => {
                 const td = document.createElement("td");
                 if (field) td.appendChild(field);
                 tr.appendChild(td);
