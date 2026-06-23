@@ -48,10 +48,17 @@ def suppliers(request):
                 supplier = link_form.cleaned_data["supplier"]
                 product = link_form.cleaned_data["product"]
                 last_cost = link_form.cleaned_data.get("last_cost") or product.avg_cost
+                vat_percent = link_form.cleaned_data.get("vat_percent")
+                if vat_percent is None:
+                    vat_percent = product.vat_percent or Decimal("0.00")
                 SupplierProduct.objects.update_or_create(
                     supplier=supplier,
                     product=product,
-                    defaults={"last_cost": last_cost, "last_purchase_at": timezone.now()},
+                    defaults={
+                        "last_cost": last_cost,
+                        "vat_percent": vat_percent,
+                        "last_purchase_at": timezone.now(),
+                    },
                 )
                 if product.default_supplier_id is None:
                     product.default_supplier = supplier
@@ -72,7 +79,11 @@ def suppliers(request):
                     _, created = SupplierProduct.objects.update_or_create(
                         supplier=supplier,
                         product=product,
-                        defaults={"last_cost": last_cost, "last_purchase_at": timezone.now()},
+                        defaults={
+                            "last_cost": last_cost,
+                            "vat_percent": product.vat_percent or Decimal("0.00"),
+                            "last_purchase_at": timezone.now(),
+                        },
                     )
                     linked_count += 1 if created else 0
                     if product.default_supplier_id is None:

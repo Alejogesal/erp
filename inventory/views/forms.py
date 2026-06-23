@@ -230,8 +230,15 @@ class SupplierProductForm(forms.Form):
     supplier = forms.ModelChoiceField(queryset=Supplier.objects.all(), label="Proveedor")
     product = forms.ModelChoiceField(queryset=Product.objects.all(), label="Producto")
     last_cost = forms.DecimalField(
-        label="Último costo",
+        label="Último costo (con IVA)",
         min_value=Decimal("0.00"),
+        decimal_places=2,
+        required=False,
+    )
+    vat_percent = forms.DecimalField(
+        label="IVA %",
+        min_value=Decimal("0.00"),
+        max_value=Decimal("100.00"),
         decimal_places=2,
         required=False,
     )

@@ -70,6 +70,51 @@
 </div>
 
 <div class="card table-card">
+    <div class="card-title">Listas de precios por proveedor</div>
+    <p class="subtitle" style="margin-top:0;">Cada proveedor con su precio (con IVA) y condición de IVA por producto. ★ = proveedor principal del producto (de ahí sale el costo para el margen).</p>
+    {% for supplier in suppliers %}
+    <details style="margin-bottom:8px;">
+        <summary style="cursor:pointer; padding:6px 0; font-weight:600;">{{ supplier.name }} <span style="font-weight:400; color:var(--muted); font-size:12px;">({{ supplier.supplier_products.all|length }} producto{{ supplier.supplier_products.all|length|pluralize }})</span></summary>
+        {% if supplier.supplier_products.all %}
+        <table style="margin-bottom:8px;">
+            <thead>
+                <tr>
+                    <th>Producto</th>
+                    <th>Costo (con IVA)</th>
+                    <th>IVA %</th>
+                    <th>Principal</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for sp in supplier.supplier_products.all %}
+                <tr>
+                    <td>{{ sp.product.name }} <span style="color:var(--muted); font-size:11px;">[{{ sp.product.sku|default:"s/SKU" }}]</span></td>
+                    <td>${{ sp.last_cost|latam_number:2 }}</td>
+                    <td>{{ sp.vat_percent|latam_number:2 }}%</td>
+                    <td>{% if sp.product.default_supplier_id == supplier.id %}★{% else %}—{% endif %}</td>
+                    <td>
+                        <form method="post" onsubmit="return confirm('¿Quitar este producto de la lista del proveedor?');" style="display:inline;">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="remove_link">
+                            <input type="hidden" name="link_id" value="{{ sp.id }}">
+                            <button type="submit" style="font-size:11px; padding:3px 6px;">Quitar</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="subtitle" style="margin:4px 0 8px;">Sin productos en la lista.</p>
+        {% endif %}
+    </details>
+    {% empty %}
+    <p class="subtitle">Aún no hay proveedores.</p>
+    {% endfor %}
+</div>
+
+<div class="card table-card">
     <div class="card-title">Listado de proveedores</div>
     <table>
         <thead>
