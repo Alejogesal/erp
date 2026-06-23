@@ -115,12 +115,30 @@
 </div>
 
 <div class="card table-card">
-    <div class="card-title">Listado de proveedores</div>
+    <div class="card-title" style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+        <span>Listado de proveedores</span>
+        <span style="font-size:12px; color:var(--muted);">Comprado en el período: ${{ period_total|latam_number:2 }}</span>
+    </div>
+    <form method="get" style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin-bottom:12px;">
+        <div>
+            <label style="font-size:12px; color:var(--muted); display:block;">Desde</label>
+            <input type="date" name="start_date" value="{{ period_start }}">
+        </div>
+        <div>
+            <label style="font-size:12px; color:var(--muted); display:block;">Hasta</label>
+            <input type="date" name="end_date" value="{{ period_end }}">
+        </div>
+        <button type="submit">Filtrar compras</button>
+        {% if period_start or period_end %}
+        <a class="pill" href="{% url 'inventory_suppliers' %}" style="font-size:12px; padding:6px 10px;">Limpiar</a>
+        {% endif %}
+    </form>
     <table>
         <thead>
             <tr>
                 <th>Nombre</th>
                 <th>Teléfono</th>
+                <th>Comprado (período)</th>
                 <th>Saldo CC</th>
                 <th>Acciones</th>
             </tr>
@@ -131,6 +149,7 @@
             <tr>
                 <td>{{ supplier.name }}</td>
                 <td>{{ supplier.phone }}</td>
+                <td>${{ row.purchases_period|latam_number:2 }}</td>
                 <td>${{ row.balance|latam_number:2 }}</td>
                 <td>
                     <a class="pill" href="{% url 'inventory_supplier_history' supplier.id %}" style="font-size:11px; padding:3px 6px; margin-right:4px;">Cuenta corriente</a>
@@ -144,7 +163,7 @@
             </tr>
             {% endwith %}
             {% empty %}
-            <tr><td colspan="4">Aún no hay proveedores.</td></tr>
+            <tr><td colspan="5">Aún no hay proveedores.</td></tr>
             {% endfor %}
         </tbody>
     </table>

@@ -167,6 +167,32 @@ def suppliers(request):
         .values("supplier_id")
         .annotate(total=Sum("total"))
     }
+    # Filtro de fechas para "comprado en el período" (no afecta el saldo CC,
+    # que es siempre acumulado).
+    period_start = (request.GET.get("start_date") or "").strip()
+    period_end = (request.GET.get("end_date") or "").strip()
+    period_qs = Purchase.objects.filter(supplier__isnull=False)
+    start_d = end_d = None
+    if period_start:
+        try:
+            start_d = datetime.strptime(period_start, "%Y-%m-%d").date()
+            period_qs = period_qs.filter(
+                created_at__gte=timezone.make_aware(datetime.combine(start_d, time.min))
+            )
+        except ValueError:
+            pass
+    if period_end:
+        try:
+            end_d = datetime.strptime(period_end, "%Y-%m-%d").date()
+            period_qs = period_qs.filter(
+                created_at__lte=timezone.make_aware(datetime.combine(end_d, time.max))
+            )
+        except ValueError:
+            pass
+    purchases_period_totals = {
+        row["supplier_id"]: row["total"] or Decimal("0.00")
+        for row in period_qs.values("supplier_id").annotate(total=Sum("total"))
+    }
     payments_totals = {
         row["supplier_id"]: row["total"] or Decimal("0.00")
         for row in SupplierPayment.objects.filter(kind=SupplierPayment.Kind.PAYMENT)
@@ -182,18 +208,28 @@ def suppliers(request):
     supplier_rows = []
     debtors = []
     total_debt = Decimal("0.00")
+    period_total = Decimal("0.00")
     for supplier in suppliers_qs.order_by("name"):
         purchases_total = purchases_totals.get(supplier.id, Decimal("0.00"))
         payments_total = payments_totals.get(supplier.id, Decimal("0.00"))
         adjustments_total = adjustments_totals.get(supplier.id, Decimal("0.00"))
         balance = purchases_total - payments_total + adjustments_total
-        supplier_rows.append({"supplier": supplier, "balance": balance})
+        purchases_period = purchases_period_totals.get(supplier.id, Decimal("0.00"))
+        period_total += purchases_period
+        supplier_rows.append({
+            "supplier": supplier,
+            "balance": balance,
+            "purchases_period": purchases_period,
+        })
         if balance > 0:
             debtors.append({"supplier": supplier, "balance": balance})
             total_debt += balance
     debtors.sort(key=lambda item: item["balance"], reverse=True)
     debtors = debtors[:8]
     context["supplier_rows"] = supplier_rows
+    context["period_start"] = period_start
+    context["period_end"] = period_end
+    context["period_total"] = period_total
     context["debtors"] = debtors
     context["total_debt"] = total_debt
     return render(request, "inventory/suppliers.html", context)
