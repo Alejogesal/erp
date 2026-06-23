@@ -44,7 +44,7 @@
     </div>
     <div class="card">
         <div class="card-title">Importar lista de precios (Excel)</div>
-        <p class="subtitle" style="margin-top:0;">Carga todos los productos de un proveedor desde un .xlsx (match por nombre; crea los que no existan). Precio sin IVA + un IVA % único.</p>
+        <p class="subtitle" style="margin-top:0;">Carga todos los productos de un proveedor desde un .xlsx (match por nombre; crea los que no existan). El precio es neto (sin IVA). Si el Excel trae una columna "IVA", se usa por producto; si no, se aplica el IVA de abajo (0 = sin IVA). El IVA real de cada compra igual se define al registrarla.</p>
         <form method="post" enctype="multipart/form-data">
             {% csrf_token %}
             <input type="hidden" name="action" value="import_price_list">
@@ -58,11 +58,11 @@
                 </select>
             </p>
             <p>
-                <label for="id_price_vat">IVA % (para toda la lista)</label>
+                <label for="id_price_vat">IVA % por defecto (si el Excel no trae columna IVA; 0 = sin IVA)</label>
                 <input id="id_price_vat" type="number" step="0.01" name="price_vat" value="21">
             </p>
             <p>
-                <label for="id_price_file">Archivo .xlsx (columnas: nombre y precio neto)</label>
+                <label for="id_price_file">Archivo .xlsx (columnas: nombre, precio neto y, opcional, IVA)</label>
                 <input id="id_price_file" type="file" name="price_file" accept=".xlsx" required>
             </p>
             <button type="submit">Importar lista</button>

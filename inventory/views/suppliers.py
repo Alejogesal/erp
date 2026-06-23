@@ -45,9 +45,10 @@ def _parse_price_decimal(value) -> Decimal | None:
 
 
 def _parse_price_list_xlsx(file_obj):
-    """Parsea un xlsx de lista de precios: columna nombre + columna precio (neto).
+    """Parsea un xlsx de lista de precios.
 
-    Devuelve (rows, error) donde rows = [(nombre, precio_neto Decimal)].
+    Columnas: nombre + precio (neto) + IVA % (opcional, por producto).
+    Devuelve (rows, error) donde rows = [(nombre, precio_neto, iva_or_None)].
     Detecta encabezados por palabras clave; si no, asume col0=nombre, col1=precio.
     """
     try:
@@ -61,16 +62,18 @@ def _parse_price_list_xlsx(file_obj):
     if not all_rows:
         return [], "El archivo está vacío."
 
-    name_idx, price_idx = 0, 1
+    name_idx, price_idx, vat_idx = 0, 1, None
     data_start = 0
     NAME_KEYS = ("nombre", "producto", "descrip", "articulo", "artículo", "detalle")
     PRICE_KEYS = ("precio", "costo", "neto", "importe", "valor", "unitario")
+    VAT_KEYS = ("iva", "alicuota", "alícuota")
     for i, row in enumerate(all_rows[:5]):
         cells = [str(c).strip().lower() if c is not None else "" for c in row]
         n_idx = next((j for j, c in enumerate(cells) if any(k in c for k in NAME_KEYS)), None)
         p_idx = next((j for j, c in enumerate(cells) if any(k in c for k in PRICE_KEYS)), None)
         if n_idx is not None and p_idx is not None:
             name_idx, price_idx, data_start = n_idx, p_idx, i + 1
+            vat_idx = next((j for j, c in enumerate(cells) if any(k in c for k in VAT_KEYS)), None)
             break
 
     rows = []
@@ -83,7 +86,12 @@ def _parse_price_list_xlsx(file_obj):
         net = _parse_price_decimal(price)
         if not name or net is None or net < 0:
             continue
-        rows.append((name, net))
+        vat = None
+        if vat_idx is not None and vat_idx < len(row):
+            vat = _parse_price_decimal(row[vat_idx])
+            if vat is not None and (vat < 0 or vat > 100):
+                vat = None
+        rows.append((name, net, vat))
     if not rows:
         return [], "No se encontraron filas con nombre y precio válidos."
     return rows, None
@@ -210,11 +218,11 @@ def suppliers(request):
         elif action == "import_price_list":
             supplier = Supplier.objects.filter(id=request.POST.get("price_supplier_id")).first()
             upload = request.FILES.get("price_file")
-            iva_raw = (request.POST.get("price_vat") or "21").strip().replace(",", ".")
+            iva_raw = (request.POST.get("price_vat") or "").strip().replace(",", ".")
             try:
-                iva = Decimal(iva_raw)
+                default_iva = Decimal(iva_raw) if iva_raw else Decimal("0.00")
             except Exception:
-                iva = Decimal("21")
+                default_iva = Decimal("0.00")
             if not supplier:
                 messages.error(request, "Elegí un proveedor para la lista de precios.")
                 return redirect("inventory_suppliers")
@@ -230,7 +238,8 @@ def suppliers(request):
                 existing.setdefault(_normalize_lookup_text(p.name), p)
             created_names = []
             new_links = updated_links = 0
-            for name, net in rows:
+            for name, net, row_vat in rows:
+                iva = row_vat if row_vat is not None else default_iva
                 cost_with_vat = (net * (Decimal("1.00") + iva / Decimal("100.00"))).quantize(
                     Decimal("0.01"), rounding=ROUND_HALF_UP
                 )
