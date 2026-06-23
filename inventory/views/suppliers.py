@@ -4,7 +4,8 @@ from decimal import Decimal
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.db.models import Sum
+from django.db import transaction
+from django.db.models import ProtectedError, Sum
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
@@ -42,6 +43,14 @@ def _parse_price_decimal(value) -> Decimal | None:
         return Decimal(raw)
     except InvalidOperation:
         return None
+
+
+def _name_numbers(norm_name: str) -> tuple:
+    """Números presentes en el nombre (tamaños/gramajes/cantidades). Sirven de
+    guarda para el match difuso: dos nombres con números distintos NO son el
+    mismo producto (p. ej. X 250 ML vs X 500 ML)."""
+    import re as _re
+    return tuple(sorted(_re.findall(r"\d+", norm_name or "")))
 
 
 def _parse_price_list_xlsx(file_obj):
@@ -399,18 +408,34 @@ def suppliers(request):
             if parse_error:
                 messages.error(request, parse_error)
                 return redirect("inventory_suppliers")
-            existing = {}
+            from difflib import SequenceMatcher
+            existing_by_key = {}
+            existing_by_nums = {}
             for p in Product.objects.all():
-                existing.setdefault(_normalize_lookup_text(p.name), p)
+                nk = _normalize_lookup_text(p.name)
+                existing_by_key.setdefault(nk, p)
+                existing_by_nums.setdefault(_name_numbers(nk), []).append((nk, p))
             created_names = []
-            new_links = updated_links = 0
+            new_links = updated_links = matched_fuzzy = 0
             for group, name, net, row_vat in rows:
                 iva = row_vat if row_vat is not None else default_iva
                 cost_with_vat = (net * (Decimal("1.00") + iva / Decimal("100.00"))).quantize(
                     Decimal("0.01"), rounding=ROUND_HALF_UP
                 )
                 key = _normalize_lookup_text(name)
-                product = existing.get(key)
+                product = existing_by_key.get(key)
+                if product is None:
+                    # Match por coincidencia: solo entre productos con los MISMOS
+                    # números (tamaños) y texto muy parecido, para no duplicar pero
+                    # tampoco fusionar presentaciones distintas.
+                    best, best_r = None, 0.86
+                    for cand_nk, cand_p in existing_by_nums.get(_name_numbers(key), []):
+                        r = SequenceMatcher(None, key, cand_nk).ratio()
+                        if r >= best_r:
+                            best, best_r = cand_p, r
+                    if best is not None:
+                        product = best
+                        matched_fuzzy += 1
                 if product is None:
                     product = Product.objects.create(
                         name=name,
@@ -419,7 +444,8 @@ def suppliers(request):
                         avg_cost=net,
                         default_supplier=supplier,
                     )
-                    existing[key] = product
+                    existing_by_key[key] = product
+                    existing_by_nums.setdefault(_name_numbers(key), []).append((key, product))
                     created_names.append(name)
                 _, was_created = SupplierProduct.objects.update_or_create(
                     supplier=supplier,
@@ -439,6 +465,7 @@ def suppliers(request):
                 (
                     f"Lista de precios de {supplier.name} importada: "
                     f"{len(created_names)} producto(s) nuevo(s), "
+                    f"{matched_fuzzy} por coincidencia, "
                     f"{new_links} vínculo(s) nuevo(s), {updated_links} actualizado(s)."
                 ),
             )
@@ -486,6 +513,34 @@ def suppliers(request):
                 link.save(update_fields=["last_cost", "vat_percent"])
                 count += 1
             messages.success(request, f"IVA {new_vat}% aplicado a {count} producto(s) de {supplier.name}.")
+            return redirect("inventory_suppliers")
+        elif action == "clear_supplier_pricelist":
+            supplier = Supplier.objects.filter(id=request.POST.get("supplier_id")).first()
+            if not supplier:
+                messages.error(request, "Proveedor no encontrado.")
+                return redirect("inventory_suppliers")
+            deleted, _ = SupplierProduct.objects.filter(supplier=supplier).delete()
+            messages.success(request, f"Se vació la lista de precios de {supplier.name} ({deleted} vínculo/s). Los productos no se borraron.")
+            return redirect("inventory_suppliers")
+        elif action == "delete_supplier_products":
+            supplier = Supplier.objects.filter(id=request.POST.get("supplier_id")).first()
+            if not supplier:
+                messages.error(request, "Proveedor no encontrado.")
+                return redirect("inventory_suppliers")
+            # Borra los productos cuyo proveedor principal es este. Los que tienen
+            # ventas/compras/movimientos quedan protegidos: se saltean y se informan.
+            deleted = skipped = 0
+            for product in Product.objects.filter(default_supplier=supplier):
+                try:
+                    with transaction.atomic():
+                        product.delete()
+                    deleted += 1
+                except ProtectedError:
+                    skipped += 1
+            msg = f"Se eliminaron {deleted} producto(s) de {supplier.name}."
+            if skipped:
+                msg += f" {skipped} se conservaron por tener ventas/compras asociadas."
+            messages.success(request, msg)
             return redirect("inventory_suppliers")
         elif action == "set_supplier_vat_group":
             supplier = Supplier.objects.filter(id=request.POST.get("supplier_id")).first()

@@ -138,6 +138,18 @@
                 <button type="submit" style="font-size:12px;">Aplicar a la marca</button>
             </form>
             {% endif %}
+            <form method="post" style="display:inline;" onsubmit="return confirm('¿Vaciar la lista de precios de {{ supplier.name|escapejs }}? Se quitan todos los vínculos de productos, pero los productos NO se borran.');">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="clear_supplier_pricelist">
+                <input type="hidden" name="supplier_id" value="{{ supplier.id }}">
+                <button type="submit" style="font-size:12px; background:rgba(239,68,68,0.12); color:#ef4444; border-color:rgba(239,68,68,0.3);">Vaciar lista de precios</button>
+            </form>
+            <form method="post" style="display:inline;" onsubmit="return confirm('¿ELIMINAR los productos cuyo proveedor principal es {{ supplier.name|escapejs }}? Los que tengan ventas o compras se conservan. Esta acción no se puede deshacer.');">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="delete_supplier_products">
+                <input type="hidden" name="supplier_id" value="{{ supplier.id }}">
+                <button type="submit" style="font-size:12px; background:var(--negative,#c0392b); color:#fff;">Eliminar productos del proveedor</button>
+            </form>
         </div>
         <table style="margin-bottom:8px;">
             <thead>
