@@ -146,12 +146,12 @@
                     <td style="color:var(--muted);">${{ sp.cost_net|latam_number:2 }}</td>
                     <td>${{ sp.last_cost|latam_number:2 }}</td>
                     <td>
-                        <form method="post" style="display:flex; gap:4px; align-items:center;">
+                        <form method="post" class="vat-form" style="display:flex; gap:4px; align-items:center;">
                             {% csrf_token %}
                             <input type="hidden" name="action" value="set_link_vat">
                             <input type="hidden" name="link_id" value="{{ sp.id }}">
-                            <input type="number" step="0.01" name="vat_percent" value="{{ sp.vat_percent|stringformat:'.2f' }}" style="width:64px; font-size:12px;">
-                            <button type="submit" style="font-size:11px; padding:3px 6px;">✓</button>
+                            <input type="number" step="0.01" name="vat_percent" value="{{ sp.vat_percent|stringformat:'.2f' }}" style="width:64px; font-size:12px;" onchange="saveLinkVat(this)">
+                            <span class="vat-saved" style="font-size:11px; color:var(--positive); opacity:0; transition:opacity .2s;">✓</span>
                         </form>
                     </td>
                     <td>{% if sp.product.default_supplier_id == supplier.id %}★{% else %}—{% endif %}</td>
@@ -230,4 +230,32 @@
         </tbody>
     </table>
 </div>
+
+<script>
+    function saveLinkVat(input) {
+        const form = input.closest("form");
+        const row = input.closest("tr");
+        if (!form) return;
+        fetch("{% url 'inventory_suppliers' %}", {
+            method: "POST",
+            body: new FormData(form),
+            headers: { "X-Requested-With": "XMLHttpRequest" },
+            credentials: "same-origin",
+        })
+            .then((r) => r.json())
+            .then((d) => {
+                if (!d || !d.ok) return;
+                if (row && row.children[2]) {
+                    row.children[2].textContent = "$" + d.cost_with_vat;
+                }
+                input.value = d.vat;
+                const ok = form.querySelector(".vat-saved");
+                if (ok) {
+                    ok.style.opacity = "1";
+                    setTimeout(() => { ok.style.opacity = "0"; }, 1200);
+                }
+            })
+            .catch(() => {});
+    }
+</script>
 {% endblock %}

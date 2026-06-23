@@ -6,6 +6,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
 from django.db.models import ProtectedError, Sum
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
@@ -43,6 +44,12 @@ def _parse_price_decimal(value) -> Decimal | None:
         return Decimal(raw)
     except InvalidOperation:
         return None
+
+
+def _fmt_money(value) -> str:
+    """Formato 1.234,56 (es-AR) para devolver en respuestas AJAX."""
+    s = f"{(value or Decimal('0.00')):,.2f}"
+    return s.replace(",", "X").replace(".", ",").replace("X", ".")
 
 
 def _name_numbers(norm_name: str) -> tuple:
@@ -471,9 +478,12 @@ def suppliers(request):
             messages.success(request, "Vínculo eliminado.")
             return redirect("inventory_suppliers")
         elif action == "set_link_vat":
+            is_ajax = request.headers.get("x-requested-with") == "XMLHttpRequest"
             link = SupplierProduct.objects.filter(pk=request.POST.get("link_id")).first()
             new_vat = _parse_price_decimal(request.POST.get("vat_percent"))
             if not link or new_vat is None or new_vat < 0 or new_vat > 100:
+                if is_ajax:
+                    return JsonResponse({"ok": False, "error": "IVA inválido."}, status=400)
                 messages.error(request, "IVA inválido.")
                 return redirect("inventory_suppliers")
             # El neto se mantiene; el costo con IVA se recalcula con la nueva alícuota.
@@ -483,6 +493,13 @@ def suppliers(request):
             )
             link.vat_percent = new_vat
             link.save(update_fields=["last_cost", "vat_percent"])
+            if is_ajax:
+                return JsonResponse({
+                    "ok": True,
+                    "vat": f"{new_vat:.2f}",
+                    "cost_net": _fmt_money(link.cost_net),
+                    "cost_with_vat": _fmt_money(link.last_cost),
+                })
             messages.success(request, "IVA actualizado.")
             return redirect("inventory_suppliers")
         elif action == "clear_supplier_pricelist":
