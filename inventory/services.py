@@ -101,16 +101,30 @@ def register_entry(
     stock = _get_stock_for_update(product, warehouse)
     current_total = _total_stock_quantity(product)
 
+    # El costo de margen sale del proveedor principal. Una compra a un proveedor
+    # que NO es el principal solo registra el precio de ese proveedor (su lista),
+    # sin tocar avg_cost / vat_percent del producto. Si el producto todavía no
+    # tiene proveedor principal, esta compra lo define (y sí actualiza el costo).
+    if supplier is None:
+        is_principal = True  # compra sin proveedor: comportamiento histórico
+    elif product.default_supplier_id is None:
+        product.default_supplier = supplier
+        product.save(update_fields=["default_supplier"])
+        is_principal = True
+    else:
+        is_principal = product.default_supplier_id == supplier.id
+
     # Store avg_cost WITHOUT VAT. cost_with_vat() adds vat_percent at read time.
     # For purchases with the same product on multiple lines with different VAT rates,
     # purchases.py calls update_product_avg_costs() after the loop to recalculate the
     # correct weighted average across all lines.
-    product.avg_cost = cost_base
-    update_fields = ["avg_cost"]
-    if vat_percent is not None:
-        product.vat_percent = vat
-        update_fields.append("vat_percent")
-    product.save(update_fields=update_fields)
+    if is_principal:
+        product.avg_cost = cost_base
+        update_fields = ["avg_cost"]
+        if vat_percent is not None:
+            product.vat_percent = vat
+            update_fields.append("vat_percent")
+        product.save(update_fields=update_fields)
 
     stock.quantity = (stock.quantity + qty).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     stock.save(update_fields=["quantity"])
@@ -127,15 +141,16 @@ def register_entry(
         reference=reference or "",
     )
     if supplier:
-        supplier_product, _ = SupplierProduct.objects.get_or_create(
-            supplier=supplier, product=product, defaults={"last_cost": cost_with_vat, "last_purchase_at": timezone.now()}
+        # Lista de precios por proveedor: precio CON IVA + condición de IVA.
+        SupplierProduct.objects.update_or_create(
+            supplier=supplier,
+            product=product,
+            defaults={
+                "last_cost": cost_with_vat,
+                "vat_percent": vat,
+                "last_purchase_at": timezone.now(),
+            },
         )
-        supplier_product.last_cost = cost_with_vat
-        supplier_product.last_purchase_at = timezone.now()
-        supplier_product.save(update_fields=["last_cost", "last_purchase_at"])
-        if product.default_supplier_id is None:
-            product.default_supplier = supplier
-            product.save(update_fields=["default_supplier"])
     return movement
 
 

@@ -337,7 +337,14 @@ class Supplier(models.Model):
 class SupplierProduct(models.Model):
     supplier = models.ForeignKey(Supplier, on_delete=models.CASCADE, related_name="supplier_products")
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="supplier_products")
-    last_cost = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    last_cost = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal("0.00"),
+        help_text="Último costo CON IVA de este proveedor para el producto",
+    )
+    vat_percent = models.DecimalField(
+        max_digits=5, decimal_places=2, default=Decimal("0.00"),
+        help_text="Condición de IVA de este proveedor para el producto",
+    )
     last_purchase_at = models.DateTimeField(null=True, blank=True, default=None)
 
     class Meta:

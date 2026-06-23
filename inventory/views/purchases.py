@@ -44,6 +44,17 @@ from .utils_purchase_pdf import (
 )
 
 
+def _purchase_updates_cost(product, supplier) -> bool:
+    """El costo de margen del producto se actualiza solo si la compra es al
+    proveedor principal (o el producto aún no tiene principal, o no hay proveedor).
+    Una compra a otro proveedor no altera el costo que se usa para el margen."""
+    if supplier is None:
+        return True
+    if product.default_supplier_id is None:
+        return True
+    return product.default_supplier_id == supplier.id
+
+
 @login_required
 def register_purchase(request):
     return purchases_list(request)
@@ -352,11 +363,12 @@ def purchases_list(request):
                             effective_unit_cost * (Decimal("1.00") + (vat_percent / Decimal("100.00")))
                         ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                         subtotal += qty * effective_unit_cost_with_vat
-                        avg_cost_tracker.append({
-                            "product": data["product"],
-                            "qty": qty,
-                            "cost_no_vat": effective_unit_cost,
-                        })
+                        if _purchase_updates_cost(data["product"], supplier):
+                            avg_cost_tracker.append({
+                                "product": data["product"],
+                                "qty": qty,
+                                "cost_no_vat": effective_unit_cost,
+                            })
                         PurchaseItem.objects.create(
                             purchase=purchase,
                             product=data["product"],
@@ -670,11 +682,12 @@ def purchases_list(request):
                         cost_with_vat_for_stock = (
                             effective_unit_cost_for_stock * (Decimal("1.00") + (vat_percent / Decimal("100.00")))
                         ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-                        avg_cost_tracker.append({
-                            "product": data["product"],
-                            "qty": qty,
-                            "cost_no_vat": effective_unit_cost_for_stock,
-                        })
+                        if _purchase_updates_cost(data["product"], purchase_supplier):
+                            avg_cost_tracker.append({
+                                "product": data["product"],
+                                "qty": qty,
+                                "cost_no_vat": effective_unit_cost_for_stock,
+                            })
                         PurchaseItem.objects.create(
                             purchase=purchase,
                             product=data["product"],
@@ -1015,11 +1028,12 @@ def purchase_edit(request, purchase_id: int):
                         cost_with_vat_for_stock = (
                             effective_unit_cost_for_stock * (Decimal("1.00") + (vat / Decimal("100.00")))
                         ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-                        avg_cost_tracker.append({
-                            "product": product,
-                            "qty": qty,
-                            "cost_no_vat": effective_unit_cost_for_stock,
-                        })
+                        if _purchase_updates_cost(product, purchase.supplier):
+                            avg_cost_tracker.append({
+                                "product": product,
+                                "qty": qty,
+                                "cost_no_vat": effective_unit_cost_for_stock,
+                            })
                         PurchaseItem.objects.create(
                             purchase=purchase,
                             product=product,
