@@ -122,7 +122,32 @@ def mercadolibre_dashboard(request):
 
     if request.method == "POST":
         action = request.POST.get("action")
-        if action == "sync":
+        if action == "sync_all":
+            # Un solo botón: trae ventas recientes + stock completo de una.
+            if not connection or not connection.access_token:
+                messages.error(request, "Primero conectá la cuenta de MercadoLibre.")
+            else:
+                try:
+                    orders = ml.sync_recent_orders(connection, request.user, days=7)
+                except Exception:
+                    orders = {}
+                result = ml.sync_items_and_stock(connection, request.user, ignore_env_limit=True)
+                metrics = result.metrics
+                if metrics.get("error") == "unauthorized":
+                    messages.error(
+                        request,
+                        "MercadoLibre rechazó el token. Volvé a conectar la cuenta para actualizar el acceso.",
+                    )
+                else:
+                    messages.success(
+                        request,
+                        (
+                            f"Sincronización completa OK. "
+                            f"Ventas nuevas: {orders.get('created', 0)}, actualizadas: {orders.get('updated', 0)}. "
+                            f"Stock: {result.total_items} publicaciones, {result.updated_stock} actualizadas."
+                        ),
+                    )
+        elif action == "sync":
             if not connection or not connection.access_token:
                 messages.error(request, "Primero conectá la cuenta de MercadoLibre.")
             else:

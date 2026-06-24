@@ -57,6 +57,12 @@
                 El token se renueva solo. <a href="{% url 'inventory_mercadolibre_connect' %}" style="color:var(--muted);">Reautorizar</a> solo si hay errores.
             </p>
             {% endif %}
+            <form method="post" style="margin-top:12px;" onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='Sincronizando…';">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="sync_all">
+                <button type="submit" style="background:var(--accent,#2d7ff9); color:#fff; font-weight:600;">↻ Sincronizar todo (ventas + stock)</button>
+            </form>
+            <p style="color:var(--muted); font-size:11px; margin-top:6px;">Trae las ventas recientes y el stock de todas las publicaciones. El sync automático igual corre solo cada pocos minutos.</p>
         {% else %}
             <p style="color:var(--muted);">Cuenta no conectada.</p>
             {% if not missing_credentials %}
