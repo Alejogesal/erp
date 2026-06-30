@@ -510,17 +510,9 @@ def product_costs(request):
             product = Product.objects.filter(id=product_id).first()
             if not product:
                 return JsonResponse({"ok": False, "error": "product_not_found"}, status=404)
+            # Costo e IVA no se editan acá: se cargan en Proveedores y se reflejan
+            # desde el proveedor principal. Solo se guardan los márgenes.
             update_fields = []
-            if "avg_cost" in request.POST:
-                avg_cost = _parse_decimal(request.POST.get("avg_cost"))
-                if product.avg_cost != avg_cost:
-                    product.avg_cost = avg_cost
-                    update_fields.append("avg_cost")
-            if "vat_percent" in request.POST:
-                vat_percent = _parse_decimal(request.POST.get("vat_percent"))
-                if product.vat_percent != vat_percent:
-                    product.vat_percent = vat_percent
-                    update_fields.append("vat_percent")
             if "margin_consumer" in request.POST:
                 margin_consumer = _parse_decimal(request.POST.get("margin_consumer"))
                 if product.margin_consumer != margin_consumer:
@@ -644,16 +636,15 @@ def product_costs(request):
                     product = product_map.get(form.cleaned_data["product_id"])
                     if not product:
                         continue
-                    avg_cost = form.cleaned_data["avg_cost"]
+                    # Costo e IVA NO se editan acá: salen del proveedor principal
+                    # (se cargan en Proveedores). Solo nombre, grupo, márgenes y
+                    # el proveedor principal.
                     supplier = form.cleaned_data.get("supplier")
                     name = form.cleaned_data.get("name") or product.name
                     group = (form.cleaned_data.get("group") or "").strip()
-                    vat_percent = form.cleaned_data.get("vat_percent")
                     margin_consumer = form.cleaned_data.get("margin_consumer")
                     margin_barber = form.cleaned_data.get("margin_barber")
                     margin_distributor = form.cleaned_data.get("margin_distributor")
-                    if vat_percent is None:
-                        vat_percent = Decimal("0.00")
                     update_fields = []
                     if product.name != name:
                         product.name = name
@@ -661,12 +652,6 @@ def product_costs(request):
                     if product.group != group:
                         product.group = group
                         update_fields.append("group")
-                    if product.avg_cost != avg_cost:
-                        product.avg_cost = avg_cost
-                        update_fields.append("avg_cost")
-                    if product.vat_percent != vat_percent:
-                        product.vat_percent = vat_percent
-                        update_fields.append("vat_percent")
                     if margin_consumer is not None and product.margin_consumer != margin_consumer:
                         product.margin_consumer = margin_consumer
                         update_fields.append("margin_consumer")
@@ -676,18 +661,17 @@ def product_costs(request):
                     if margin_distributor is not None and product.margin_distributor != margin_distributor:
                         product.margin_distributor = margin_distributor
                         update_fields.append("margin_distributor")
-                    if supplier and product.default_supplier_id != supplier.id:
+                    supplier_changed = supplier and product.default_supplier_id != supplier.id
+                    if supplier_changed:
                         product.default_supplier = supplier
                         update_fields.append("default_supplier")
                     if update_fields:
                         product.save(update_fields=update_fields)
-                    if supplier:
-                        SupplierProduct.objects.update_or_create(
-                            supplier=supplier,
-                            product=product,
-                            defaults={"last_cost": avg_cost, "last_purchase_at": timezone.now()},
-                        )
-                messages.success(request, "Costos, márgenes y proveedores actualizados.")
+                    # Si cambió el proveedor principal, el costo se toma de la lista
+                    # de ese proveedor (si la tiene).
+                    if supplier_changed:
+                        services.sync_product_cost_from_principal(product)
+                messages.success(request, "Márgenes y proveedor principal actualizados. El costo se edita en Proveedores.")
                 return redirect("inventory_product_costs")
             messages.error(request, "Revisá los costos ingresados.")
     return render(

@@ -18,6 +18,7 @@ from ..models import (
     SupplierPayment,
     SupplierProduct,
 )
+from ..services import sync_product_cost_from_principal
 from .common import _normalize_lookup_text
 from .forms import (
     SupplierForm,
@@ -287,6 +288,8 @@ def suppliers(request):
                 if product.default_supplier_id is None:
                     product.default_supplier = supplier
                     product.save(update_fields=["default_supplier"])
+                if product.default_supplier_id == supplier.id:
+                    sync_product_cost_from_principal(product)
                 messages.success(request, "Proveedor vinculado al producto.")
                 return redirect("inventory_suppliers")
         elif action == "link_supplier_group":
@@ -314,6 +317,8 @@ def suppliers(request):
                         product.default_supplier = supplier
                         product.save(update_fields=["default_supplier"])
                         default_updated_count += 1
+                    if product.default_supplier_id == supplier.id:
+                        sync_product_cost_from_principal(product)
                 if products.exists():
                     messages.success(
                         request,
@@ -354,10 +359,12 @@ def suppliers(request):
                     if replacement_supplier_id:
                         product.default_supplier_id = replacement_supplier_id
                         default_reassigned_count += 1
+                        product.save(update_fields=["default_supplier"])
+                        sync_product_cost_from_principal(product)
                     else:
                         product.default_supplier = None
                         default_cleared_count += 1
-                    product.save(update_fields=["default_supplier"])
+                        product.save(update_fields=["default_supplier"])
 
                 messages.success(
                     request,
@@ -454,6 +461,10 @@ def suppliers(request):
                     new_links += 1
                 else:
                     updated_links += 1
+                # Si este proveedor es el principal del producto, el costo del
+                # producto (para el margen) se actualiza desde su lista.
+                if product.default_supplier_id == supplier.id:
+                    sync_product_cost_from_principal(product)
             messages.success(
                 request,
                 (
@@ -493,6 +504,8 @@ def suppliers(request):
             )
             link.vat_percent = new_vat
             link.save(update_fields=["last_cost", "vat_percent"])
+            if link.product.default_supplier_id == link.supplier_id:
+                sync_product_cost_from_principal(link.product)
             if is_ajax:
                 return JsonResponse({
                     "ok": True,

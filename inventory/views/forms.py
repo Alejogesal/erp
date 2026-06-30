@@ -277,13 +277,21 @@ class ProductCostRowForm(forms.Form):
     name = forms.CharField(required=True, label="Producto")
     group = forms.CharField(required=False, label="Marca / Grupo")
     supplier = forms.ModelChoiceField(queryset=Supplier.objects.all(), required=False, label="Proveedor")
-    avg_cost = forms.DecimalField(min_value=Decimal("0.00"), decimal_places=2, label="Costo")
+    # Costo e IVA salen del proveedor principal (se editan en Proveedores): acá
+    # solo se muestran (solo lectura).
+    avg_cost = forms.DecimalField(
+        min_value=Decimal("0.00"), decimal_places=2, label="Costo", required=False,
+        widget=forms.NumberInput(attrs={"readonly": True, "tabindex": "-1",
+                                        "title": "El costo se edita en Proveedores"}),
+    )
     vat_percent = forms.DecimalField(
         min_value=Decimal("0.00"),
         max_value=Decimal("100.00"),
         decimal_places=2,
         required=False,
         label="IVA %",
+        widget=forms.NumberInput(attrs={"readonly": True, "tabindex": "-1",
+                                        "title": "El IVA se edita en Proveedores"}),
     )
     margin_consumer = forms.DecimalField(required=False, decimal_places=2, label="Margen % consumidor final")
     margin_barber = forms.DecimalField(required=False, decimal_places=2, label="Margen % peluquerías/barberías")

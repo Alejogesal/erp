@@ -52,6 +52,22 @@ def _weighted_average(current_avg: Decimal, current_qty: Decimal, unit_cost: Dec
     return (total_cost / new_total_qty).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
+def sync_product_cost_from_principal(product: Product) -> None:
+    """Deja el costo del producto (avg_cost sin IVA + vat_percent) igual al de su
+    proveedor principal. El costo se carga/edita siempre en Proveedores; acá se
+    refleja en el producto (que es de donde sale el margen)."""
+    if not product.default_supplier_id:
+        return
+    sp = SupplierProduct.objects.filter(
+        supplier_id=product.default_supplier_id, product=product
+    ).first()
+    if not sp:
+        return
+    product.avg_cost = sp.cost_net
+    product.vat_percent = sp.vat_percent or Decimal("0.00")
+    product.save(update_fields=["avg_cost", "vat_percent"])
+
+
 def update_product_avg_costs(items: list[dict]) -> None:
     """Recalculate avg_cost (WITHOUT VAT) as weighted average for products in a purchase.
 
