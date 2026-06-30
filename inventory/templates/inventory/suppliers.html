@@ -107,14 +107,41 @@
     </table>
 </div>
 
-<div class="card table-card">
+<style>
+    .pricelist details { border:1px solid var(--border, #2a313c); border-radius:10px; margin-bottom:10px; background:rgba(255,255,255,0.015); }
+    .pricelist summary { cursor:pointer; padding:12px 14px; font-weight:600; list-style:none; display:flex; align-items:center; gap:8px; border-radius:10px; }
+    .pricelist summary::-webkit-details-marker { display:none; }
+    .pricelist summary::before { content:"▸"; color:var(--muted); transition:transform .15s; display:inline-block; }
+    .pricelist details[open] summary::before { transform:rotate(90deg); }
+    .pricelist details[open] summary { border-bottom:1px solid var(--border, #2a313c); }
+    .pricelist .details-body { padding:12px 14px; }
+    .pricelist .pl-search { width:100%; max-width:380px; margin-bottom:12px; font-size:13px; padding:8px 12px;
+        border-radius:8px; border:1px solid var(--border, #2a313c); background:#0f1622; color:var(--text); }
+    .supplier-products-table { width:100%; border-collapse:collapse; }
+    .supplier-products-table th { text-align:left; font-size:11px; letter-spacing:.04em; text-transform:uppercase;
+        color:var(--muted); font-weight:600; padding:6px 10px; border-bottom:1px solid var(--border, #2a313c); }
+    .supplier-products-table td { padding:8px 10px; border-bottom:1px solid rgba(255,255,255,0.05); vertical-align:middle; }
+    .supplier-products-table tbody tr:hover { background:rgba(255,255,255,0.03); }
+    .supplier-products-table .num { text-align:right; font-variant-numeric:tabular-nums; }
+    .supplier-products-table .cost-with-vat-cell { font-weight:600; }
+    .supplier-products-table input[type="number"] { padding:5px 8px; border-radius:7px; border:1px solid var(--border, #2a313c);
+        background:#0f1622; color:var(--text); text-align:right; font-variant-numeric:tabular-nums; }
+    .supplier-products-table input[type="number"]:focus { border-color:var(--accent, #2d7ff9); outline:none; }
+    .pl-star { color:#f5b50a; font-size:15px; }
+    .pl-nostar { color:var(--muted); }
+    .pl-remove { font-size:11px; padding:4px 8px; background:transparent; border:1px solid var(--border,#2a313c); color:var(--muted); border-radius:7px; }
+    .pl-remove:hover { color:#ef4444; border-color:rgba(239,68,68,0.4); }
+    .pl-sku { color:var(--muted); font-size:11px; }
+</style>
+<div class="card table-card pricelist">
     <div class="card-title">Listas de precios por proveedor</div>
-    <p class="subtitle" style="margin-top:0;">Cada proveedor con su precio (con IVA) y condición de IVA por producto. ★ = proveedor principal del producto (de ahí sale el costo para el margen).</p>
+    <p class="subtitle" style="margin-top:0;">Cada proveedor con su precio (sin IVA), su IVA por producto, y ★ el proveedor principal (de ahí sale el costo para el margen). Editá el costo o el IVA y se guarda solo.</p>
     {% for supplier in suppliers %}
-    <details style="margin-bottom:8px;">
-        <summary style="cursor:pointer; padding:6px 0; font-weight:600;">{{ supplier.name }} <span style="font-weight:400; color:var(--muted); font-size:12px;">({{ supplier.supplier_products.all|length }} producto{{ supplier.supplier_products.all|length|pluralize }})</span></summary>
+    <details>
+        <summary>{{ supplier.name }} <span style="font-weight:400; color:var(--muted); font-size:12px;">· {{ supplier.supplier_products.all|length }} producto{{ supplier.supplier_products.all|length|pluralize }}</span></summary>
         {% if supplier.supplier_products.all %}
-        <div style="display:flex; gap:12px; flex-wrap:wrap; margin:6px 0 10px;">
+        <div class="details-body">
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
             <form method="post" style="display:inline;" onsubmit="return confirm('¿Vaciar la lista de precios de {{ supplier.name|escapejs }}? Se quitan todos los vínculos de productos, pero los productos NO se borran.');">
                 {% csrf_token %}
                 <input type="hidden" name="action" value="clear_supplier_pricelist">
@@ -128,57 +155,57 @@
                 <button type="submit" style="font-size:12px; background:var(--negative,#c0392b); color:#fff;">Eliminar productos del proveedor</button>
             </form>
         </div>
-        <input type="search" placeholder="Buscar producto por nombre o SKU…" oninput="filterSupplierProducts(this)"
-               style="width:100%; max-width:360px; margin-bottom:8px; font-size:13px;">
-        <table style="margin-bottom:8px;" class="supplier-products-table">
+        <input type="search" class="pl-search" placeholder="🔍 Buscar producto por nombre o SKU…" oninput="filterSupplierProducts(this)">
+        <table class="supplier-products-table">
             <thead>
                 <tr>
                     <th>Producto</th>
-                    <th>Costo sin IVA</th>
-                    <th>Costo con IVA</th>
-                    <th>IVA %</th>
-                    <th>Principal</th>
+                    <th class="num">Costo sin IVA</th>
+                    <th class="num">Costo con IVA</th>
+                    <th class="num">IVA %</th>
+                    <th style="text-align:center;">Principal</th>
                     <th></th>
                 </tr>
             </thead>
             <tbody>
                 {% for sp in supplier.supplier_products.all %}
                 <tr data-search="{{ sp.product.name|lower|escape }} {{ sp.product.sku|default:''|lower|escape }}">
-                    <td>{{ sp.product.name }} <span style="color:var(--muted); font-size:11px;">[{{ sp.product.sku|default:"s/SKU" }}]</span></td>
-                    <td>
-                        <form method="post" class="cost-form" style="display:flex; gap:4px; align-items:center;">
+                    <td>{{ sp.product.name }}<br><span class="pl-sku">{{ sp.product.sku|default:"s/SKU" }}</span></td>
+                    <td class="num">
+                        <form method="post" class="cost-form" style="display:flex; gap:4px; align-items:center; justify-content:flex-end;">
                             {% csrf_token %}
                             <input type="hidden" name="action" value="set_link_cost">
                             <input type="hidden" name="link_id" value="{{ sp.id }}">
-                            <input type="number" step="0.01" name="cost_net" value="{{ sp.cost_net|stringformat:'.2f' }}" style="width:96px; font-size:12px;" onchange="saveLinkCost(this)">
+                            <input type="number" step="0.01" name="cost_net" value="{{ sp.cost_net|stringformat:'.2f' }}" style="width:100px;" onchange="saveLinkCost(this)">
                             <span class="vat-saved" style="font-size:11px; color:var(--positive); opacity:0; transition:opacity .2s;">✓</span>
                         </form>
                     </td>
-                    <td class="cost-with-vat-cell">${{ sp.last_cost|latam_number:2 }}</td>
-                    <td>
-                        <form method="post" class="vat-form" style="display:flex; gap:4px; align-items:center;">
+                    <td class="num cost-with-vat-cell">${{ sp.last_cost|latam_number:2 }}</td>
+                    <td class="num">
+                        <form method="post" class="vat-form" style="display:flex; gap:4px; align-items:center; justify-content:flex-end;">
                             {% csrf_token %}
                             <input type="hidden" name="action" value="set_link_vat">
                             <input type="hidden" name="link_id" value="{{ sp.id }}">
-                            <input type="number" step="0.01" name="vat_percent" value="{{ sp.vat_percent|stringformat:'.2f' }}" style="width:64px; font-size:12px;" onchange="saveLinkVat(this)">
+                            <input type="number" step="0.01" name="vat_percent" value="{{ sp.vat_percent|stringformat:'.2f' }}" style="width:62px;" onchange="saveLinkVat(this)">
                             <span class="vat-saved" style="font-size:11px; color:var(--positive); opacity:0; transition:opacity .2s;">✓</span>
                         </form>
                     </td>
-                    <td>{% if sp.product.default_supplier_id == supplier.id %}★{% else %}—{% endif %}</td>
-                    <td>
+                    <td style="text-align:center;">{% if sp.product.default_supplier_id == supplier.id %}<span class="pl-star" title="Proveedor principal">★</span>{% else %}<span class="pl-nostar">—</span>{% endif %}</td>
+                    <td style="text-align:right;">
                         <form method="post" onsubmit="return confirm('¿Quitar este producto de la lista del proveedor?');" style="display:inline;">
                             {% csrf_token %}
                             <input type="hidden" name="action" value="remove_link">
                             <input type="hidden" name="link_id" value="{{ sp.id }}">
-                            <button type="submit" style="font-size:11px; padding:3px 6px;">Quitar</button>
+                            <button type="submit" class="pl-remove">Quitar</button>
                         </form>
                     </td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
+        </div>
         {% else %}
-        <p class="subtitle" style="margin:4px 0 8px;">Sin productos en la lista.</p>
+        <div class="details-body"><p class="subtitle" style="margin:0;">Sin productos en la lista.</p></div>
         {% endif %}
     </details>
     {% empty %}
