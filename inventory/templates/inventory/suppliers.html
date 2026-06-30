@@ -128,7 +128,9 @@
                 <button type="submit" style="font-size:12px; background:var(--negative,#c0392b); color:#fff;">Eliminar productos del proveedor</button>
             </form>
         </div>
-        <table style="margin-bottom:8px;">
+        <input type="search" placeholder="Buscar producto por nombre o SKU…" oninput="filterSupplierProducts(this)"
+               style="width:100%; max-width:360px; margin-bottom:8px; font-size:13px;">
+        <table style="margin-bottom:8px;" class="supplier-products-table">
             <thead>
                 <tr>
                     <th>Producto</th>
@@ -141,7 +143,7 @@
             </thead>
             <tbody>
                 {% for sp in supplier.supplier_products.all %}
-                <tr>
+                <tr data-search="{{ sp.product.name|lower|escape }} {{ sp.product.sku|default:''|lower|escape }}">
                     <td>{{ sp.product.name }} <span style="color:var(--muted); font-size:11px;">[{{ sp.product.sku|default:"s/SKU" }}]</span></td>
                     <td>
                         <form method="post" class="cost-form" style="display:flex; gap:4px; align-items:center;">
@@ -240,6 +242,16 @@
 </div>
 
 <script>
+    function filterSupplierProducts(input) {
+        const term = (input.value || "").trim().toLowerCase();
+        const details = input.closest("details");
+        const table = details ? details.querySelector(".supplier-products-table") : null;
+        if (!table) return;
+        table.querySelectorAll("tbody tr").forEach((row) => {
+            const hay = (row.dataset.search || "").includes(term);
+            row.style.display = hay ? "" : "none";
+        });
+    }
     function _postLink(input, onData) {
         const form = input.closest("form");
         const row = input.closest("tr");
