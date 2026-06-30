@@ -179,68 +179,11 @@
             <button type="submit">Aplicar márgenes</button>
         </form>
     </details>
-    <details class="product-advanced" style="margin-bottom:12px;">
-        <summary>Costos por marca (% ajuste)</summary>
-        <form method="post" style="margin-top:10px;">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="bulk_update">
-            <div class="product-form-grid">
-                <div>
-                    <label for="bulk-group">Marca / Grupo</label>
-                    <input id="bulk-group" name="group" list="group-options" placeholder="Ej: Bellissima">
-                </div>
-                <div>
-                    <label for="bulk-cost-percent">Ajuste % costo</label>
-                    <input id="bulk-cost-percent" name="cost_percent" placeholder="Ej: 10 o -5" required>
-                </div>
-            </div>
-            <button type="submit">Aplicar ajuste</button>
-        </form>
-    </details>
-    <details class="product-advanced">
-        <summary>Costo por producto</summary>
-        <form method="post" style="margin-top:10px;">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="update_cost_by_product">
-            <div class="product-form-grid">
-                <div class="full">
-                    <label for="single-product">Producto</label>
-                    <select id="single-product" name="product_id">
-                        <option value="">Seleccionar producto</option>
-                        {% for product in products %}
-                            <option value="{{ product.id }}">{{ product.sku }} - {{ product.name }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div>
-                    <label for="single-cost">Costo unitario sin IVA</label>
-                    <input id="single-cost" name="avg_cost" placeholder="0,00">
-                </div>
-            </div>
-            <button type="submit">Actualizar costo</button>
-        </form>
-    </details>
+    <p class="hint" style="margin-top:4px;">El costo y el IVA se cargan en <strong>Proveedores</strong> (lista por proveedor, también por XLSX). Acá el costo es solo lectura.</p>
 </div>
 
 <div class="card" style="margin-bottom:16px;">
-    <div class="card-title">Importar / Administrar</div>
-    <details class="product-advanced" style="margin-bottom:12px;">
-        <summary>Importar costos desde XLSX</summary>
-        <form method="post" enctype="multipart/form-data" style="margin-top:10px;">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="import_costs">
-            <p>
-                <label for="file">Archivo XLSX</label>
-                <input id="file" name="file" type="file" accept=".xlsx">
-            </p>
-            <p>
-                <label for="import-group">Marca / Grupo (opcional)</label>
-                <input id="import-group" name="group_override" list="group-options" placeholder="Ej: Bellissima">
-                <span class="hint">Si indicás marca, solo se actualizan productos existentes de esa marca.</span>
-            </p>
-            <button type="submit">Importar</button>
-        </form>
-    </details>
+    <div class="card-title">Administrar</div>
     <details class="product-advanced">
         <summary>Eliminar productos importados</summary>
         <form method="post" enctype="multipart/form-data" style="margin-top:10px;" onsubmit="return confirm('¿Eliminar productos del archivo? Solo se borran los que no tienen movimientos.');">
