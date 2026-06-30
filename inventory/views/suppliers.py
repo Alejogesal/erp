@@ -515,6 +515,30 @@ def suppliers(request):
                 })
             messages.success(request, "IVA actualizado.")
             return redirect("inventory_suppliers")
+        elif action == "set_link_cost":
+            is_ajax = request.headers.get("x-requested-with") == "XMLHttpRequest"
+            link = SupplierProduct.objects.filter(pk=request.POST.get("link_id")).first()
+            net = _parse_price_decimal(request.POST.get("cost_net"))
+            if not link or net is None or net < 0:
+                if is_ajax:
+                    return JsonResponse({"ok": False, "error": "Costo inválido."}, status=400)
+                messages.error(request, "Costo inválido.")
+                return redirect("inventory_suppliers")
+            # Se carga el neto; el costo con IVA se recalcula con el IVA del producto.
+            link.last_cost = (net * (Decimal("1.00") + (link.vat_percent or Decimal("0.00")) / Decimal("100.00"))).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+            link.save(update_fields=["last_cost"])
+            if link.product.default_supplier_id == link.supplier_id:
+                sync_product_cost_from_principal(link.product)
+            if is_ajax:
+                return JsonResponse({
+                    "ok": True,
+                    "cost_net": _fmt_money(link.cost_net),
+                    "cost_with_vat": _fmt_money(link.last_cost),
+                })
+            messages.success(request, "Costo actualizado.")
+            return redirect("inventory_suppliers")
         elif action == "clear_supplier_pricelist":
             supplier = Supplier.objects.filter(id=request.POST.get("supplier_id")).first()
             if not supplier:
