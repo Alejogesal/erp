@@ -272,15 +272,21 @@ def suppliers(request):
             if link_form.is_valid():
                 supplier = link_form.cleaned_data["supplier"]
                 product = link_form.cleaned_data["product"]
-                last_cost = link_form.cleaned_data.get("last_cost") or product.avg_cost
+                # El costo ingresado es NETO (sin IVA); el con-IVA se calcula.
+                net = link_form.cleaned_data.get("last_cost")
+                if net is None:
+                    net = product.avg_cost or Decimal("0.00")
                 vat_percent = link_form.cleaned_data.get("vat_percent")
                 if vat_percent is None:
                     vat_percent = product.vat_percent or Decimal("0.00")
+                cost_with_vat = (net * (Decimal("1.00") + vat_percent / Decimal("100.00"))).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP
+                )
                 SupplierProduct.objects.update_or_create(
                     supplier=supplier,
                     product=product,
                     defaults={
-                        "last_cost": last_cost,
+                        "last_cost": cost_with_vat,
                         "vat_percent": vat_percent,
                         "last_purchase_at": timezone.now(),
                     },
@@ -302,13 +308,18 @@ def suppliers(request):
                 linked_count = 0
                 default_updated_count = 0
                 for product in products:
-                    last_cost = override_last_cost if override_last_cost is not None else product.avg_cost
+                    # Costo NETO (sin IVA); el con-IVA se calcula con el IVA del producto.
+                    net = override_last_cost if override_last_cost is not None else (product.avg_cost or Decimal("0.00"))
+                    vat = product.vat_percent or Decimal("0.00")
+                    cost_with_vat = (net * (Decimal("1.00") + vat / Decimal("100.00"))).quantize(
+                        Decimal("0.01"), rounding=ROUND_HALF_UP
+                    )
                     _, created = SupplierProduct.objects.update_or_create(
                         supplier=supplier,
                         product=product,
                         defaults={
-                            "last_cost": last_cost,
-                            "vat_percent": product.vat_percent or Decimal("0.00"),
+                            "last_cost": cost_with_vat,
+                            "vat_percent": vat,
                             "last_purchase_at": timezone.now(),
                         },
                     )

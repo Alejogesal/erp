@@ -230,7 +230,7 @@ class SupplierProductForm(forms.Form):
     supplier = forms.ModelChoiceField(queryset=Supplier.objects.all(), label="Proveedor")
     product = forms.ModelChoiceField(queryset=Product.objects.all(), label="Producto")
     last_cost = forms.DecimalField(
-        label="Último costo (con IVA)",
+        label="Costo (sin IVA)",
         min_value=Decimal("0.00"),
         decimal_places=2,
         required=False,
@@ -248,7 +248,7 @@ class SupplierGroupForm(forms.Form):
     supplier = forms.ModelChoiceField(queryset=Supplier.objects.all(), label="Proveedor")
     group = forms.CharField(label="Marca / Grupo")
     last_cost = forms.DecimalField(
-        label="Último costo (opcional)",
+        label="Costo sin IVA (opcional)",
         min_value=Decimal("0.00"),
         decimal_places=2,
         required=False,
