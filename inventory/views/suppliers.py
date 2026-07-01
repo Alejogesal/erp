@@ -550,20 +550,6 @@ def suppliers(request):
                 })
             messages.success(request, "Costo actualizado.")
             return redirect("inventory_suppliers")
-        elif action == "resync_product_costs":
-            updated = 0
-            for product in Product.objects.filter(default_supplier__isnull=False).select_related("default_supplier"):
-                sp = SupplierProduct.objects.filter(
-                    supplier_id=product.default_supplier_id, product=product
-                ).first()
-                if not sp or not sp.last_cost or sp.last_cost <= 0:
-                    continue
-                before = product.avg_cost
-                sync_product_cost_from_principal(product)
-                if product.avg_cost != before:
-                    updated += 1
-            messages.success(request, f"Costos recalculados desde el proveedor principal: {updated} producto(s) actualizado(s).")
-            return redirect("inventory_suppliers")
         elif action == "clear_supplier_pricelist":
             supplier = Supplier.objects.filter(id=request.POST.get("supplier_id")).first()
             if not supplier:
