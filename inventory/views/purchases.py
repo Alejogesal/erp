@@ -954,9 +954,10 @@ def purchase_edit(request, purchase_id: int):
                                     warehouse=movement.to_warehouse,
                                     defaults={"quantity": Decimal("0.00")},
                                 )
+                                # Se permite quedar negativo: los productos que
+                                # siguen en la compra se vuelven a sumar más abajo,
+                                # y revertir unidades ya vendidas no debe bloquear.
                                 stock.quantity = (stock.quantity - movement.quantity).quantize(Decimal("0.01"))
-                                if stock.quantity < 0:
-                                    raise services.NegativeStockError("Stock cannot go negative")
                                 stock.save(update_fields=["quantity"])
                             movement.delete()
                         if purchase.warehouse.type == Warehouse.WarehouseType.COMUN:
@@ -970,8 +971,6 @@ def purchase_edit(request, purchase_id: int):
                                 )
                                 if not variant:
                                     continue
-                                if variant.quantity - item.quantity < 0:
-                                    raise services.NegativeStockError("Stock cannot go negative")
                                 variant.quantity = (variant.quantity - item.quantity).quantize(Decimal("0.01"))
                                 variant.save(update_fields=["quantity"])
                                 _sync_common_with_variants(item.product, purchase.warehouse)
@@ -1144,15 +1143,14 @@ def purchase_delete(request, purchase_id: int):
                         warehouse=movement.to_warehouse,
                         defaults={"quantity": Decimal("0.00")},
                     )
-                    stock.quantity = (stock.quantity - movement.quantity).quantize(Decimal("0.01"))
-                    if stock.quantity < 0:
-                        raise services.NegativeStockError("Stock cannot go negative")
+                    # No se bloquea si esas unidades ya se vendieron: el stock baja
+                    # hasta 0 como piso.
+                    new_qty = (stock.quantity - movement.quantity).quantize(Decimal("0.01"))
+                    stock.quantity = new_qty if new_qty > 0 else Decimal("0.00")
                     stock.save(update_fields=["quantity"])
                 movement.delete()
             purchase.delete()
         messages.success(request, "Compra eliminada y stock ajustado.")
-    except services.NegativeStockError:
-        messages.error(request, "No se puede eliminar: el stock quedaría negativo.")
     except Exception as exc:
         messages.error(request, f"No se pudo eliminar la compra: {exc}")
     return redirect("inventory_purchases_list")
