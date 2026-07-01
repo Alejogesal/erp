@@ -134,7 +134,14 @@
     .pl-sku { color:var(--muted); font-size:11px; }
 </style>
 <div class="card table-card pricelist">
-    <div class="card-title">Listas de precios por proveedor</div>
+    <div class="card-title" style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+        <span>Listas de precios por proveedor</span>
+        <form method="post" style="display:inline;" onsubmit="return confirm('Recalcular el costo de todos los productos desde su proveedor principal?');">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="resync_product_costs">
+            <button type="submit" style="font-size:12px;">↻ Recalcular costos de productos</button>
+        </form>
+    </div>
     <p class="subtitle" style="margin-top:0;">Cada proveedor con su precio (sin IVA), su IVA por producto, y ★ el proveedor principal (de ahí sale el costo para el margen). Editá el costo o el IVA y se guarda solo.</p>
     {% for supplier in suppliers %}
     <details>
