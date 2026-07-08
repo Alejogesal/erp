@@ -27,6 +27,8 @@
         color: var(--text); padding: 7px 10px; border-radius: 6px; font-size: 13px;
     }
     .product-search-results button:hover { background: rgba(47,129,247,0.12); }
+    .variant-select { width: 100%; margin-top: 6px; font-size: 12px; display: none; }
+    .variant-select.variant-auto { border-color: rgba(34,197,94,0.5); }
     .qty-input { width: 70px; text-align: right; }
     .row-disabled td { opacity: 0.4; }
     .row-disabled input, .row-disabled select { pointer-events: none; }
@@ -80,6 +82,11 @@
                             >
                             <input type="hidden" name="product_id" class="product-id-field" value="{{ item.product_id }}">
                             <div class="product-search-results"></div>
+                            <select
+                                name="variant_id"
+                                class="variant-select"
+                                data-selected="{{ item.variant_id }}"
+                            ></select>
                         </div>
                     </td>
                     <td>
@@ -124,6 +131,34 @@
 
 <script>
 const allProducts = {{ all_products_json|safe }};
+const variantsByProduct = {{ variants_json|safe }};
+
+function populateVariants(row, productId, selectedVariantId) {
+    const sel = row.querySelector('.variant-select');
+    const variants = variantsByProduct[String(productId)] || [];
+    sel.innerHTML = '';
+    sel.classList.remove('variant-auto');
+    if (!variants.length) {
+        sel.value = '';
+        sel.style.display = 'none';
+        return;
+    }
+    const opt0 = document.createElement('option');
+    opt0.value = '';
+    opt0.textContent = '— Variedad: automática (mayor stock primero) —';
+    sel.appendChild(opt0);
+    variants.forEach(v => {
+        const o = document.createElement('option');
+        o.value = v.id;
+        o.textContent = v.name + ' (' + v.quantity + ')';
+        sel.appendChild(o);
+    });
+    if (selectedVariantId && variants.some(v => String(v.id) === String(selectedVariantId))) {
+        sel.value = String(selectedVariantId);
+        sel.classList.add('variant-auto');
+    }
+    sel.style.display = 'block';
+}
 
 function updateSelectedCount() {
     const checked = document.querySelectorAll('.row-check:checked').length;
@@ -136,6 +171,16 @@ function setupRow(row) {
     const hiddenInput = row.querySelector('.product-id-field');
     const resultsDiv = row.querySelector('.product-search-results');
     const qtyInput = row.querySelector('.qty-input');
+    const variantSelect = row.querySelector('.variant-select');
+
+    // Estado inicial: poblar variedades del producto matcheado
+    if (hiddenInput.value) {
+        populateVariants(row, hiddenInput.value, variantSelect.dataset.selected);
+    }
+
+    variantSelect.addEventListener('change', () => {
+        variantSelect.classList.remove('variant-auto');
+    });
 
     function filterProducts(q) {
         const ql = q.toLowerCase();
@@ -155,6 +200,7 @@ function setupRow(row) {
             btn.addEventListener('mousedown', () => {
                 searchInput.value = p.name;
                 hiddenInput.value = p.id;
+                populateVariants(row, p.id, '');
                 resultsDiv.style.display = 'none';
                 if (checkbox.disabled) {
                     checkbox.disabled = false;
@@ -170,6 +216,9 @@ function setupRow(row) {
 
     searchInput.addEventListener('input', () => {
         hiddenInput.value = '';
+        variantSelect.innerHTML = '';
+        variantSelect.value = '';
+        variantSelect.style.display = 'none';
         showResults(searchInput.value);
     });
     searchInput.addEventListener('focus', () => {
@@ -204,8 +253,10 @@ document.querySelector('form').addEventListener('submit', function() {
         if (!checkbox.checked) {
             const hidden = row.querySelector('.product-id-field');
             const qty = row.querySelector('.qty-input');
+            const variant = row.querySelector('.variant-select');
             hidden.disabled = true;
             qty.disabled = true;
+            variant.disabled = true;
         }
     });
 });

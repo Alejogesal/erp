@@ -1,5 +1,7 @@
 """Import stock deductions from a FULL/MercadoLibre shipment preparation PDF."""
+import json
 import re
+import unicodedata
 from decimal import Decimal
 from difflib import SequenceMatcher
 
@@ -130,6 +132,50 @@ def _match_product(ml_code: str, name: str, all_products):
     return None, best_ratio
 
 
+def _normalize_text(value: str) -> str:
+    """Lowercase, sin acentos, espacios colapsados."""
+    value = unicodedata.normalize("NFKD", value or "")
+    value = "".join(c for c in value if not unicodedata.combining(c))
+    return " ".join(value.lower().split())
+
+
+def _match_variant(pdf_name: str, variants):
+    """
+    Intenta detectar la variedad por el nombre del PDF.
+    Returns (variant, confidence_0_to_1) or (None, 0.0).
+    """
+    norm_name = _normalize_text(pdf_name)
+    if not norm_name:
+        return None, 0.0
+    name_tokens = set(norm_name.split())
+
+    best = None
+    best_score = 0.0
+    for variant in variants:
+        norm_variant = _normalize_text(variant.name)
+        if not norm_variant:
+            continue
+        variant_tokens = norm_variant.split()
+        if variant_tokens and all(t in name_tokens for t in variant_tokens):
+            # Todas las palabras de la variedad aparecen en el nombre del PDF
+            score = 0.95
+        else:
+            token_overlap = (
+                len(set(variant_tokens) & name_tokens) / len(variant_tokens)
+                if variant_tokens
+                else 0.0
+            )
+            ratio = SequenceMatcher(None, norm_variant, norm_name).ratio()
+            score = max(token_overlap * 0.8, ratio)
+        if score > best_score:
+            best_score = score
+            best = variant
+
+    if best_score >= 0.60 and best:
+        return best, best_score
+    return None, best_score
+
+
 def _get_comun_stock(product, comun_wh) -> Decimal:
     """Stock COMUN: suma de variantes si tiene, sino Stock directo."""
     has_variants = ProductVariant.objects.filter(product=product).exists()
@@ -169,11 +215,22 @@ def import_transfer_pdf(request):
             return redirect("inventory_stock_list")
 
         all_products = list(Product.objects.order_by("name"))
+
+        # Variedades de todos los productos (para el selector en el template)
+        variants_by_product = {}
+        for variant in ProductVariant.objects.order_by("name", "id"):
+            variants_by_product.setdefault(variant.product_id, []).append(variant)
+
         matched = []
         for item in parsed_items:
             product, confidence = _match_product(item["ml_code"], item["name"], all_products)
             comun_stock = _get_comun_stock(product, comun_wh) if product else Decimal("0.00")
-            has_variants = ProductVariant.objects.filter(product=product).exists() if product else False
+            product_variants = variants_by_product.get(product.id, []) if product else []
+            variant, variant_confidence = (
+                _match_variant(item["name"], product_variants)
+                if product_variants
+                else (None, 0.0)
+            )
             matched.append(
                 {
                     "pdf_name": item["name"],
@@ -184,14 +241,24 @@ def import_transfer_pdf(request):
                     "product_id": product.id if product else "",
                     "confidence": round(confidence * 100),
                     "comun_stock": comun_stock,
-                    "has_variants": has_variants,
+                    "has_variants": bool(product_variants),
+                    "variant_id": variant.id if variant else "",
+                    "variant_confidence": round(variant_confidence * 100),
                 }
             )
 
-        all_products_json = [
-            {"id": p.id, "name": p.name, "sku": p.sku or ""}
-            for p in all_products
-        ]
+        all_products_json = json.dumps(
+            [{"id": p.id, "name": p.name, "sku": p.sku or ""} for p in all_products]
+        )
+        variants_json = json.dumps(
+            {
+                str(product_id): [
+                    {"id": v.id, "name": v.name, "quantity": str(v.quantity)}
+                    for v in variants
+                ]
+                for product_id, variants in variants_by_product.items()
+            }
+        )
 
         return render(
             request,
@@ -199,6 +266,7 @@ def import_transfer_pdf(request):
             {
                 "matched": matched,
                 "all_products_json": all_products_json,
+                "variants_json": variants_json,
                 "comun_wh": comun_wh,
             },
         )
@@ -206,15 +274,21 @@ def import_transfer_pdf(request):
     elif request.method == "POST":
         # Step 2: descontar del stock COMUN
         product_ids = request.POST.getlist("product_id")
+        variant_ids = request.POST.getlist("variant_id")
         quantities = request.POST.getlist("quantity")
 
         if not product_ids:
             messages.error(request, "No hay productos para descontar.")
             return redirect("inventory_stock_list")
 
+        if len(variant_ids) != len(product_ids):
+            variant_ids = [""] * len(product_ids)
+
         bulk_items = []
         errors = []
-        for i, (pid, qty_raw) in enumerate(zip(product_ids, quantities), start=1):
+        for i, (pid, vid, qty_raw) in enumerate(
+            zip(product_ids, variant_ids, quantities), start=1
+        ):
             if not pid:
                 continue
             try:
@@ -228,7 +302,15 @@ def import_transfer_pdf(request):
             if not product:
                 errors.append(f"Línea {i}: producto no encontrado.")
                 continue
-            bulk_items.append({"product": product, "quantity": quantity})
+            variant = None
+            if vid:
+                variant = ProductVariant.objects.filter(id=vid, product=product).first()
+                if not variant:
+                    errors.append(
+                        f"Línea {i}: la variedad elegida no pertenece al producto {product.name}."
+                    )
+                    continue
+            bulk_items.append({"product": product, "variant": variant, "quantity": quantity})
 
         if errors:
             messages.error(request, " ".join(errors))
@@ -242,10 +324,17 @@ def import_transfer_pdf(request):
             with transaction.atomic():
                 for item in bulk_items:
                     product = item["product"]
+                    variant = item["variant"]
                     qty = item["quantity"]
                     has_variants = ProductVariant.objects.filter(product=product).exists()
-                    if has_variants:
-                        # Descontar de variantes proporcionalmente (mayor stock primero)
+                    if variant:
+                        # Descontar de la variedad elegida (puede quedar en negativo)
+                        variant.refresh_from_db(fields=["quantity"])
+                        variant.quantity = (variant.quantity - qty).quantize(Decimal("0.01"))
+                        variant.save(update_fields=["quantity"])
+                        services.sync_comun_from_variants(product)
+                    elif has_variants:
+                        # Sin variedad elegida: descontar en cascada (mayor stock primero)
                         variants = list(
                             ProductVariant.objects.filter(product=product).order_by("-quantity")
                         )
