@@ -310,7 +310,13 @@
             // vacío que Django prioriza sobre el campo del formulario, tirando
             // 403 en TODOS los guardados aunque el campo del form sea válido.
             const csrfToken = payload.get("csrfmiddlewaretoken") || "";
-            fetch(form.action, {
+            // OJO: no usar form.action acá. El form tiene un input oculto
+            // name="action" ("update_margin_row"), y eso "clobbea" la propiedad
+            // nativa form.action del DOM: en vez de la URL del formulario,
+            // devuelve ese INPUT (form.action == el elemento, no el string), y
+            // fetch() termina pidiendo literalmente ".../[object HTMLInputElement]"
+            // → 404 en todos los guardados. Por eso la URL va fija acá.
+            fetch("{% url 'inventory_product_margins' %}", {
                 method: "POST",
                 headers: csrfToken ? { "X-CSRFToken": csrfToken } : {},
                 body: payload,
