@@ -292,14 +292,6 @@
             renderMeta(row, ".margin-distributor", ".meta-distributor");
         };
 
-        const getCookie = (name) => {
-            const value = `; ${document.cookie}`;
-            const parts = value.split(`; ${name}=`);
-            if (parts.length === 2) return parts.pop().split(";").shift();
-            return "";
-        };
-        const csrfToken = getCookie("csrftoken");
-
         const autosave = (row) => {
             const form = row.querySelector("form[id^='margin-form-']");
             if (!form) return;
@@ -312,15 +304,34 @@
             normalize("margin_consumer", ".margin-consumer");
             normalize("margin_barber", ".margin-barber");
             normalize("margin_distributor", ".margin-distributor");
+            // El token CSRF sale del propio formulario (ya renderizado por el
+            // servidor con la sesión actual), no de la cookie: leer la cookie
+            // por JS puede fallar según el navegador/proxy y mandar un header
+            // vacío que Django prioriza sobre el campo del formulario, tirando
+            // 403 en TODOS los guardados aunque el campo del form sea válido.
+            const csrfToken = payload.get("csrfmiddlewaretoken") || "";
             fetch(form.action, {
                 method: "POST",
-                headers: { "X-CSRFToken": csrfToken || "" },
+                headers: csrfToken ? { "X-CSRFToken": csrfToken } : {},
                 body: payload,
                 credentials: "same-origin",
-            }).then((res) => {
-                if (status) status.textContent = res.ok ? "Auto-guardado activo." : "Error al guardar.";
-            }).catch(() => {
-                if (status) status.textContent = "No se pudo auto-guardar.";
+            }).then(async (res) => {
+                if (res.ok) {
+                    if (status) status.textContent = "Auto-guardado activo.";
+                    return;
+                }
+                let detail = `HTTP ${res.status}`;
+                try {
+                    const data = await res.json();
+                    if (data && data.error) detail = data.error;
+                } catch (e) {
+                    // respuesta no era JSON (ej. página de error/login): nos quedamos con el status
+                }
+                if (status) status.textContent = `Error al guardar: ${detail}`;
+                console.error("Error al autoguardar margen:", detail);
+            }).catch((err) => {
+                if (status) status.textContent = "No se pudo auto-guardar (sin conexión).";
+                console.error(err);
             });
         };
 

@@ -389,7 +389,10 @@
 <script>
 (function() {
     const SAVE_URL = "{% url 'inventory_stock_set_comun_ajax' %}";
-    const CSRF = document.cookie.match(/csrftoken=([^;]+)/)?.[1] || "";
+    // Del input ya renderizado por el servidor, no de la cookie: leerla por JS
+    // puede fallar según navegador/proxy y mandar un header vacío que Django
+    // prioriza sobre un campo de formulario válido, rechazando con 403.
+    const CSRF = document.querySelector('input[name="csrfmiddlewaretoken"]')?.value || "";
 
     // Formatea "1234.56" → "1.234,56" igual que el filtro latam_number
     function toLatam(qtyStr) {

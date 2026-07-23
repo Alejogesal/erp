@@ -81,81 +81,69 @@ def dashboard(request):
             return item.cost_unit
         return _product_fallback_cost(item.product)
 
+    # Un solo recorrido de sales_qs (antes eran 3 loops separados sobre el mismo
+    # queryset, recalculando lo mismo tres veces): margen, ranking por producto
+    # y ranking por cliente se acumulan juntos.
     margin_ml = Decimal("0.00")
     margin_comun = Decimal("0.00")
+    ranking_map: dict = {}
+    customer_ranking_map: dict = {}
+
     for sale in sales_qs:
         is_ml = sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE
-        cost_total = Decimal("0.00")
-        for item in sale.items.all():
-            cost_total += item.quantity * _resolve_cost(item)
-        if is_ml:
-            net_total = (sale.total or Decimal("0.00")) - (sale.ml_commission_total or Decimal("0.00")) - (
-                sale.ml_tax_total or Decimal("0.00")
-            )
-            margin_ml += net_total - cost_total
-        else:
-            margin_comun += (sale.total or Decimal("0.00")) - cost_total
-
-    net_margin = (margin_ml + margin_comun) - tax_total
-
-    ranking_map = {}
-    for sale in sales_qs:
         items = list(sale.items.all())
-        if not items:
-            continue
-        items_total = sum((item.line_total or Decimal("0.00")) for item in items)
-        if items_total <= 0:
-            continue
-        is_ml = sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE
+        cost_total = Decimal("0.00")
+        for item in items:
+            cost_total += item.quantity * _resolve_cost(item)
+
         if is_ml:
             revenue_total = (sale.total or Decimal("0.00")) - (sale.ml_commission_total or Decimal("0.00")) - (
                 sale.ml_tax_total or Decimal("0.00")
             )
+            margin_ml += revenue_total - cost_total
         else:
             revenue_total = sale.total or Decimal("0.00")
-        for item in items:
-            line_total = item.line_total or Decimal("0.00")
-            revenue_share = (revenue_total * line_total / items_total) if items_total else Decimal("0.00")
-            unit_cost = _resolve_cost(item)
-            cost_total = item.quantity * unit_cost
-            profit = (revenue_share - cost_total).quantize(Decimal("0.01"))
-            key = (item.product_id, item.variant_id)
-            if key not in ranking_map:
-                ranking_map[key] = {
-                    "product_id": item.product_id,
-                    "sku": item.product.sku,
-                    "name": item.product.name,
-                    "variant": item.variant.name if item.variant else None,
-                    "quantity": Decimal("0.00"),
-                    "profit": Decimal("0.00"),
-                    "zero_cost": unit_cost <= Decimal("0.00"),
-                }
-            ranking_map[key]["quantity"] += item.quantity
-            ranking_map[key]["profit"] += profit
-            if unit_cost > Decimal("0.00"):
-                ranking_map[key]["zero_cost"] = False
+            margin_comun += revenue_total - cost_total
 
+        items_total = sum((item.line_total or Decimal("0.00")) for item in items)
+        if items and items_total > 0:
+            for item in items:
+                line_total = item.line_total or Decimal("0.00")
+                revenue_share = (revenue_total * line_total / items_total) if items_total else Decimal("0.00")
+                unit_cost = _resolve_cost(item)
+                item_cost_total = item.quantity * unit_cost
+                profit = (revenue_share - item_cost_total).quantize(Decimal("0.01"))
+                key = (item.product_id, item.variant_id)
+                if key not in ranking_map:
+                    ranking_map[key] = {
+                        "product_id": item.product_id,
+                        "sku": item.product.sku,
+                        "name": item.product.name,
+                        "variant": item.variant.name if item.variant else None,
+                        "quantity": Decimal("0.00"),
+                        "profit": Decimal("0.00"),
+                        "zero_cost": unit_cost <= Decimal("0.00"),
+                    }
+                ranking_map[key]["quantity"] += item.quantity
+                ranking_map[key]["profit"] += profit
+                if unit_cost > Decimal("0.00"):
+                    ranking_map[key]["zero_cost"] = False
+
+        customer_key = sale.customer_id
+        if customer_key not in customer_ranking_map:
+            customer_ranking_map[customer_key] = {
+                "customer_id": customer_key,
+                "name": sale.customer.name if sale.customer else "Consumidor final",
+                "profit": Decimal("0.00"),
+                "total": Decimal("0.00"),
+                "sale_count": 0,
+            }
+        customer_ranking_map[customer_key]["profit"] += revenue_total - cost_total
+        customer_ranking_map[customer_key]["total"] += sale.total or Decimal("0.00")
+        customer_ranking_map[customer_key]["sale_count"] += 1
+
+    net_margin = (margin_ml + margin_comun) - tax_total
     ranking = sorted(ranking_map.values(), key=lambda item: item["profit"], reverse=True)
-
-    customer_ranking_map: dict = {}
-    for sale in sales_qs:
-        key = sale.customer_id
-        name = sale.customer.name if sale.customer else "Consumidor final"
-        is_ml = sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE
-        cost_total = Decimal("0.00")
-        for item in sale.items.all():
-            cost_total += item.quantity * _resolve_cost(item)
-        if is_ml:
-            net = (sale.total or Decimal("0.00")) - (sale.ml_commission_total or Decimal("0.00")) - (sale.ml_tax_total or Decimal("0.00"))
-            profit = net - cost_total
-        else:
-            profit = (sale.total or Decimal("0.00")) - cost_total
-        if key not in customer_ranking_map:
-            customer_ranking_map[key] = {"customer_id": key, "name": name, "profit": Decimal("0.00"), "total": Decimal("0.00"), "sale_count": 0}
-        customer_ranking_map[key]["profit"] += profit
-        customer_ranking_map[key]["total"] += sale.total or Decimal("0.00")
-        customer_ranking_map[key]["sale_count"] += 1
-
     customer_ranking = sorted(
         (r for r in customer_ranking_map.values() if r["customer_id"] is not None),
         key=lambda x: x["profit"],

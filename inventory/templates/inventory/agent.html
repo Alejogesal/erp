@@ -184,12 +184,10 @@
     let history = [];
     let busy = false;
 
-    const getCookie = (name) => {
-        const v = `; ${document.cookie}`;
-        const parts = v.split(`; ${name}=`);
-        if (parts.length === 2) return parts.pop().split(";").shift();
-        return "";
-    };
+    // Token CSRF del contexto de template (siempre disponible), no de la
+    // cookie por JS: leerla puede fallar según navegador/proxy y rechazar el
+    // POST con 403.
+    const getCookie = () => "{{ csrf_token }}";
 
     const escapeHtml = (str) => str
         .replace(/&/g, "&amp;")

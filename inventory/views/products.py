@@ -286,11 +286,25 @@ def product_margins(request):
             product_id = request.POST.get("product_id")
             product = Product.objects.filter(id=product_id).first()
             if not product:
-                return JsonResponse({"ok": False, "error": "product_not_found"}, status=404)
-            product.margin_consumer = _parse_margin(request.POST.get("margin_consumer"))
-            product.margin_barber = _parse_margin(request.POST.get("margin_barber"))
-            product.margin_distributor = _parse_margin(request.POST.get("margin_distributor"))
-            product.save(update_fields=["margin_consumer", "margin_barber", "margin_distributor"])
+                return JsonResponse({"ok": False, "error": "Producto no encontrado."}, status=404)
+            margins = {
+                "margin_consumer": _parse_margin(request.POST.get("margin_consumer")),
+                "margin_barber": _parse_margin(request.POST.get("margin_barber")),
+                "margin_distributor": _parse_margin(request.POST.get("margin_distributor")),
+            }
+            for field_name, value in margins.items():
+                if value < 0 or value > Decimal("999.99"):
+                    return JsonResponse(
+                        {"ok": False, "error": f"Margen fuera de rango en {field_name} ({value})."},
+                        status=400,
+                    )
+            product.margin_consumer = margins["margin_consumer"]
+            product.margin_barber = margins["margin_barber"]
+            product.margin_distributor = margins["margin_distributor"]
+            try:
+                product.save(update_fields=["margin_consumer", "margin_barber", "margin_distributor"])
+            except Exception as exc:
+                return JsonResponse({"ok": False, "error": str(exc)}, status=400)
             return JsonResponse({"ok": True})
 
         if action == "bulk_update_all_margins":

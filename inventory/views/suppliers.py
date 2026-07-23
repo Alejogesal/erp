@@ -753,7 +753,10 @@ def suppliers(request):
     debtors = []
     total_debt = Decimal("0.00")
     period_total = Decimal("0.00")
-    for supplier in suppliers_qs.order_by("name"):
+    # suppliers_qs ya está ordenado por nombre (Meta.ordering) y ya se evaluó
+    # arriba con su prefetch: reusarlo evita re-ejecutar la consulta y el
+    # prefetch de supplier_products__product una segunda vez.
+    for supplier in suppliers_qs:
         purchases_total = purchases_totals.get(supplier.id, Decimal("0.00"))
         payments_total = payments_totals.get(supplier.id, Decimal("0.00"))
         adjustments_total = adjustments_totals.get(supplier.id, Decimal("0.00"))

@@ -369,13 +369,10 @@
         });
 
         const status = document.getElementById("autosave-status");
-        const getCookie = (name) => {
-            const value = `; ${document.cookie}`;
-            const parts = value.split(`; ${name}=`);
-            if (parts.length === 2) return parts.pop().split(";").shift();
-            return "";
-        };
-        const csrfToken = getCookie("csrftoken");
+        // El token CSRF sale de un input ya renderizado por el servidor (no de
+        // la cookie por JS): leer la cookie puede fallar según navegador/proxy
+        // y mandar un header vacío, que Django prioriza y rechaza con 403.
+        const csrfToken = document.querySelector('input[name="csrfmiddlewaretoken"]')?.value || "";
         const timers = new Map();
         const autosave = (row) => {
             const productId = row.querySelector("input[name$='-product_id']")?.value;
@@ -389,9 +386,7 @@
             payload.append("vat_percent", vatInput?.value || "");
             fetch(window.location.href, {
                 method: "POST",
-                headers: {
-                    "X-CSRFToken": csrfToken || "",
-                },
+                headers: csrfToken ? { "X-CSRFToken": csrfToken } : {},
                 body: payload,
                 credentials: "same-origin",
             }).then(() => {

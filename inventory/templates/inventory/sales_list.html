@@ -130,12 +130,10 @@
         const loadBtn = document.getElementById("history-load");
         let historyEnabled = historyEl?.dataset.loaded === "1";
         let debounceId = null;
-        const getCookie = (name) => {
-            const value = `; ${document.cookie}`;
-            const parts = value.split(`; ${name}=`);
-            if (parts.length === 2) return parts.pop().split(";").shift();
-            return "";
-        };
+        // Lee el token CSRF de un input ya renderizado por el servidor, no de
+        // la cookie: leerla por JS puede fallar según navegador/proxy y mandar
+        // un header vacío que Django prioriza, rechazando el POST con 403.
+        const getCookie = () => document.querySelector('input[name="csrfmiddlewaretoken"]')?.value || "";
 
         const buildParams = (page) => {
             const params = new URLSearchParams();

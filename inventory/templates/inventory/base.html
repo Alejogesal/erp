@@ -533,11 +533,10 @@
         } catch { return []; }
     };
 
-    const getCookie = (n) => {
-        const v = `; ${document.cookie}`;
-        const p = v.split(`; ${n}=`);
-        return p.length === 2 ? p.pop().split(";").shift() : "";
-    };
+    // Token CSRF que Django expone siempre en el contexto de template (no
+    // depende de que haya un formulario en la página ni de leer la cookie por
+    // JS, que puede fallar según navegador/proxy y rechazar el POST con 403).
+    const getCookie = () => "{{ csrf_token }}";
 
     const escHtml = (s) => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 

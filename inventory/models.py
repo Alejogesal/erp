@@ -117,19 +117,29 @@ class Product(models.Model):
         return (self.cost_with_vat() / divisor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     def cost_with_vat(self) -> Decimal:
+        # Se llama varias veces por producto en la misma request (precios de
+        # consumidor/peluquería/distribuidor, márgenes): cachea en la instancia
+        # para no repetir la consulta de kit_components en productos-kit.
+        cached = getattr(self, "_cost_with_vat_cache", None)
+        if cached is not None:
+            return cached
         if self.is_kit:
             total = Decimal("0.00")
             for component in self.kit_components.select_related("component").all():
                 total += (component.component.cost_with_vat() * component.quantity)
-            return total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        # avg_cost is always stored WITHOUT VAT. Add vat_percent here.
-        base = self.avg_cost or Decimal("0.00")
-        vat = self.vat_percent or Decimal("0.00")
-        if vat > Decimal("0.00"):
-            return (base * (Decimal("1.00") + vat / Decimal("100.00"))).quantize(
-                Decimal("0.01"), rounding=ROUND_HALF_UP
-            )
-        return base
+            result = total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        else:
+            # avg_cost is always stored WITHOUT VAT. Add vat_percent here.
+            base = self.avg_cost or Decimal("0.00")
+            vat = self.vat_percent or Decimal("0.00")
+            if vat > Decimal("0.00"):
+                result = (base * (Decimal("1.00") + vat / Decimal("100.00"))).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP
+                )
+            else:
+                result = base
+        self._cost_with_vat_cache = result
+        return result
 
     @property
     def consumer_price(self) -> Decimal:
