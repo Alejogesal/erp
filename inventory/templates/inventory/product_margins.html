@@ -256,6 +256,10 @@
         const rows = Array.from(document.querySelectorAll("#margenes tbody tr"));
         const status = document.getElementById("margin-status");
         const timers = new Map();
+        // Token CSRF de un input ya renderizado por el servidor (no de la
+        // cookie por JS, que puede fallar según navegador/proxy). Compartido
+        // por el autoguardado por fila y los botones "Aplicar a marca/todos".
+        const csrfToken = document.querySelector('input[name="csrfmiddlewaretoken"]')?.value || "";
 
         const parseNumber = (value) => {
             if (!value) return 0;
@@ -304,12 +308,6 @@
             normalize("margin_consumer", ".margin-consumer");
             normalize("margin_barber", ".margin-barber");
             normalize("margin_distributor", ".margin-distributor");
-            // El token CSRF sale del propio formulario (ya renderizado por el
-            // servidor con la sesión actual), no de la cookie: leer la cookie
-            // por JS puede fallar según el navegador/proxy y mandar un header
-            // vacío que Django prioriza sobre el campo del formulario, tirando
-            // 403 en TODOS los guardados aunque el campo del form sea válido.
-            const csrfToken = payload.get("csrfmiddlewaretoken") || "";
             // OJO: no usar form.action acá. El form tiene un input oculto
             // name="action" ("update_margin_row"), y eso "clobbea" la propiedad
             // nativa form.action del DOM: en vez de la URL del formulario,
