@@ -26,7 +26,47 @@ from .common import (
 )
 
 
-class ProductForm(forms.ModelForm):
+def _normalize_decimal_input(raw):
+    """Acepta coma o punto como separador decimal (ej. '10,5' o '1.234,56'),
+    igual que el resto de los formularios de precios/costos del sistema."""
+    if raw is None:
+        return raw
+    s = str(raw).strip()
+    if not s:
+        return raw
+    if "," in s and "." in s:
+        s = s.replace(".", "").replace(",", ".")
+    elif "," in s:
+        s = s.replace(",", ".")
+    return s
+
+
+class _CommaDecimalFormMixin:
+    """Mixin para que los DecimalField del formulario acepten coma como
+    separador decimal (ej. '10,5'), igual que el resto del sistema. La
+    subclase declara qué campos son decimales en DECIMAL_FIELD_NAMES."""
+
+    DECIMAL_FIELD_NAMES: tuple = ()
+
+    def __init__(self, data=None, *args, prefix=None, **kwargs):
+        if data is not None and self.DECIMAL_FIELD_NAMES:
+            data = data.copy()
+            for field_name in self.DECIMAL_FIELD_NAMES:
+                key = f"{prefix}-{field_name}" if prefix else field_name
+                if key in data:
+                    data[key] = _normalize_decimal_input(data.get(key))
+        super().__init__(data, *args, prefix=prefix, **kwargs)
+
+
+class ProductForm(_CommaDecimalFormMixin, forms.ModelForm):
+    DECIMAL_FIELD_NAMES = (
+        "avg_cost",
+        "vat_percent",
+        "margin_consumer",
+        "margin_barber",
+        "margin_distributor",
+    )
+
     class Meta:
         model = Product
         fields = [
@@ -272,7 +312,15 @@ class ProductVariantRowForm(forms.Form):
     delete = forms.BooleanField(required=False, label="Eliminar")
 
 
-class ProductCostRowForm(forms.Form):
+class ProductCostRowForm(_CommaDecimalFormMixin, forms.Form):
+    DECIMAL_FIELD_NAMES = (
+        "avg_cost",
+        "vat_percent",
+        "margin_consumer",
+        "margin_barber",
+        "margin_distributor",
+    )
+
     product_id = forms.IntegerField(widget=forms.HiddenInput)
     name = forms.CharField(required=True, label="Producto")
     group = forms.CharField(required=False, label="Marca / Grupo")
@@ -298,7 +346,14 @@ class ProductCostRowForm(forms.Form):
     margin_distributor = forms.DecimalField(required=False, decimal_places=2, label="Margen % distribuidores")
 
 
-class ProductBulkUpdateForm(forms.Form):
+class ProductBulkUpdateForm(_CommaDecimalFormMixin, forms.Form):
+    DECIMAL_FIELD_NAMES = (
+        "cost_percent",
+        "margin_consumer",
+        "margin_barber",
+        "margin_distributor",
+    )
+
     group = forms.CharField(required=False, label="Marca / Grupo")
     supplier = forms.ModelChoiceField(queryset=Supplier.objects.all(), required=False, label="Proveedor")
     cost_percent = forms.DecimalField(

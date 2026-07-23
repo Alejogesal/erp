@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import ProtectedError, Sum
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -18,7 +18,7 @@ from ..models import (
     SupplierPayment,
     SupplierProduct,
 )
-from ..services import sync_product_cost_from_principal
+from ..services import sync_principal_to_cheapest
 from .common import _normalize_lookup_text
 from .forms import (
     SupplierForm,
@@ -27,6 +27,7 @@ from .forms import (
     SupplierProductForm,
     SupplierUnlinkGroupForm,
 )
+from .utils_xlsx import _sku_prefix
 
 from decimal import ROUND_HALF_UP, InvalidOperation
 
@@ -291,11 +292,7 @@ def suppliers(request):
                         "last_purchase_at": timezone.now(),
                     },
                 )
-                if product.default_supplier_id is None:
-                    product.default_supplier = supplier
-                    product.save(update_fields=["default_supplier"])
-                if product.default_supplier_id == supplier.id:
-                    sync_product_cost_from_principal(product)
+                sync_principal_to_cheapest(product)
                 messages.success(request, "Proveedor vinculado al producto.")
                 return redirect("inventory_suppliers")
         elif action == "link_supplier_group":
@@ -324,12 +321,8 @@ def suppliers(request):
                         },
                     )
                     linked_count += 1 if created else 0
-                    if product.default_supplier_id is None:
-                        product.default_supplier = supplier
-                        product.save(update_fields=["default_supplier"])
+                    if sync_principal_to_cheapest(product):
                         default_updated_count += 1
-                    if product.default_supplier_id == supplier.id:
-                        sync_product_cost_from_principal(product)
                 if products.exists():
                     messages.success(
                         request,
@@ -360,19 +353,11 @@ def suppliers(request):
                 default_reassigned_count = 0
                 affected_products = products.filter(default_supplier=supplier)
                 for product in affected_products:
-                    replacement_supplier_id = (
-                        SupplierProduct.objects.filter(product=product)
-                        .exclude(supplier=supplier)
-                        .order_by("-last_purchase_at", "-id")
-                        .values_list("supplier_id", flat=True)
-                        .first()
-                    )
-                    if replacement_supplier_id:
-                        product.default_supplier_id = replacement_supplier_id
+                    # El vínculo con este proveedor ya se borró arriba: reasigna
+                    # al más barato de los que queden, si queda alguno.
+                    if sync_principal_to_cheapest(product):
                         default_reassigned_count += 1
-                        product.save(update_fields=["default_supplier"])
-                        sync_product_cost_from_principal(product)
-                    else:
+                    elif not SupplierProduct.objects.filter(product=product).exists():
                         product.default_supplier = None
                         default_cleared_count += 1
                         product.save(update_fields=["default_supplier"])
@@ -472,10 +457,9 @@ def suppliers(request):
                     new_links += 1
                 else:
                     updated_links += 1
-                # Si este proveedor es el principal del producto, el costo del
-                # producto (para el margen) se actualiza desde su lista.
-                if product.default_supplier_id == supplier.id:
-                    sync_product_cost_from_principal(product)
+                # El proveedor principal se reevalúa: si este es el más barato
+                # entre los vinculados, el costo del producto sale de acá.
+                sync_principal_to_cheapest(product)
             messages.success(
                 request,
                 (
@@ -491,12 +475,23 @@ def suppliers(request):
             return redirect("inventory_suppliers")
         elif action == "delete_supplier":
             supplier_id = request.POST.get("supplier_id")
+            # SET_NULL en default_supplier ocurre en cascada al borrar: capturamos
+            # antes quiénes lo tenían como principal para reasignar al más barato.
+            affected_ids = list(Product.objects.filter(default_supplier_id=supplier_id).values_list("id", flat=True))
             Supplier.objects.filter(pk=supplier_id).delete()
+            for product in Product.objects.filter(id__in=affected_ids):
+                sync_principal_to_cheapest(product)
             messages.success(request, "Proveedor eliminado.")
             return redirect("inventory_suppliers")
         elif action == "remove_link":
             link_id = request.POST.get("link_id")
-            SupplierProduct.objects.filter(pk=link_id).delete()
+            link = SupplierProduct.objects.filter(pk=link_id).first()
+            if link:
+                product = link.product
+                link.delete()
+                if not sync_principal_to_cheapest(product) and not SupplierProduct.objects.filter(product=product).exists():
+                    product.default_supplier = None
+                    product.save(update_fields=["default_supplier"])
             messages.success(request, "Vínculo eliminado.")
             return redirect("inventory_suppliers")
         elif action == "set_link_vat":
@@ -515,8 +510,7 @@ def suppliers(request):
             )
             link.vat_percent = new_vat
             link.save(update_fields=["last_cost", "vat_percent"])
-            if link.product.default_supplier_id == link.supplier_id:
-                sync_product_cost_from_principal(link.product)
+            sync_principal_to_cheapest(link.product)
             if is_ajax:
                 return JsonResponse({
                     "ok": True,
@@ -540,8 +534,7 @@ def suppliers(request):
                 Decimal("0.01"), rounding=ROUND_HALF_UP
             )
             link.save(update_fields=["last_cost"])
-            if link.product.default_supplier_id == link.supplier_id:
-                sync_product_cost_from_principal(link.product)
+            sync_principal_to_cheapest(link.product)
             if is_ajax:
                 return JsonResponse({
                     "ok": True,
@@ -555,7 +548,12 @@ def suppliers(request):
             if not supplier:
                 messages.error(request, "Proveedor no encontrado.")
                 return redirect("inventory_suppliers")
+            affected_ids = list(Product.objects.filter(default_supplier=supplier).values_list("id", flat=True))
             deleted, _ = SupplierProduct.objects.filter(supplier=supplier).delete()
+            for product in Product.objects.filter(id__in=affected_ids):
+                if not sync_principal_to_cheapest(product) and not SupplierProduct.objects.filter(product=product).exists():
+                    product.default_supplier = None
+                    product.save(update_fields=["default_supplier"])
             messages.success(request, f"Se vació la lista de precios de {supplier.name} ({deleted} vínculo/s). Los productos no se borraron.")
             return redirect("inventory_suppliers")
         elif action == "delete_supplier_products":
@@ -578,13 +576,133 @@ def suppliers(request):
                 msg += f" {skipped} se conservaron por tener ventas/compras asociadas."
             messages.success(request, msg)
             return redirect("inventory_suppliers")
+        elif action == "create_product_for_supplier":
+            name = (request.POST.get("new_product_name") or "").strip()
+            group = (request.POST.get("new_product_group") or "").strip()
+            supplier = Supplier.objects.filter(id=request.POST.get("new_product_supplier_id")).first()
+            net = _parse_price_decimal(request.POST.get("new_product_cost_net"))
+            vat_percent = _parse_price_decimal(request.POST.get("new_product_vat_percent")) or Decimal("0.00")
+            if not name or not supplier:
+                messages.error(request, "Ingresá el nombre del producto y elegí un proveedor.")
+                return redirect("inventory_suppliers")
+            if net is None or net < 0:
+                messages.error(request, "Costo inválido.")
+                return redirect("inventory_suppliers")
+            prefix = _sku_prefix(group, name)
+            existing_skus = Product.objects.filter(sku__startswith=prefix).values_list("sku", flat=True)
+            max_suffix = 0
+            for sku in existing_skus:
+                suffix = sku[len(prefix):]
+                if suffix.isdigit():
+                    max_suffix = max(max_suffix, int(suffix))
+            product = Product.objects.create(
+                name=name,
+                group=group,
+                sku=f"{prefix}{max_suffix + 1:04d}",
+                avg_cost=net,
+                vat_percent=vat_percent,
+                default_supplier=supplier,
+            )
+            cost_with_vat = (net * (Decimal("1.00") + vat_percent / Decimal("100.00"))).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+            SupplierProduct.objects.create(
+                supplier=supplier,
+                product=product,
+                last_cost=cost_with_vat,
+                vat_percent=vat_percent,
+                last_purchase_at=timezone.now(),
+            )
+            messages.success(request, f"Producto '{name}' creado y vinculado a {supplier.name}.")
+            return redirect("inventory_suppliers")
+        elif action == "edit_product_inline":
+            is_ajax = request.headers.get("x-requested-with") == "XMLHttpRequest"
+            product = Product.objects.filter(pk=request.POST.get("product_id")).first()
+            if not product:
+                if is_ajax:
+                    return JsonResponse({"ok": False, "error": "Producto no encontrado."}, status=404)
+                messages.error(request, "Producto no encontrado.")
+                return redirect("inventory_suppliers")
+            name = (request.POST.get("name") or "").strip()
+            if not name:
+                if is_ajax:
+                    return JsonResponse({"ok": False, "error": "El nombre es obligatorio."}, status=400)
+                messages.error(request, "El nombre es obligatorio.")
+                return redirect("inventory_suppliers")
+            sku = (request.POST.get("sku") or "").strip()
+            group = (request.POST.get("group") or "").strip()
+            product.name = name
+            product.sku = sku or None
+            product.group = group
+            try:
+                product.save(update_fields=["name", "sku", "group"])
+            except IntegrityError:
+                if is_ajax:
+                    return JsonResponse({"ok": False, "error": "Ese SKU ya está en uso por otro producto."}, status=400)
+                messages.error(request, "Ese SKU ya está en uso por otro producto.")
+                return redirect("inventory_suppliers")
+            if is_ajax:
+                return JsonResponse({
+                    "ok": True,
+                    "name": product.name,
+                    "sku": product.sku or "",
+                    "group": product.group or "",
+                })
+            messages.success(request, "Producto actualizado.")
+            return redirect("inventory_suppliers")
+        elif action == "delete_product":
+            product = Product.objects.filter(pk=request.POST.get("product_id")).first()
+            if not product:
+                messages.error(request, "Producto no encontrado.")
+                return redirect("inventory_suppliers")
+            try:
+                product.delete()
+                messages.success(request, "Producto eliminado.")
+            except ProtectedError:
+                messages.error(
+                    request,
+                    "No se puede eliminar el producto porque está usado en ventas, compras o movimientos. "
+                    "Podés quitarlo del proveedor (sin borrarlo) en vez de eliminarlo.",
+                )
+            return redirect("inventory_suppliers")
+        elif action == "rename_group":
+            old_group = (request.POST.get("old_group") or "").strip()
+            new_group = (request.POST.get("new_group") or "").strip()
+            if not old_group or not new_group:
+                messages.error(request, "Ingresá la marca actual y el nuevo nombre.")
+                return redirect("inventory_suppliers")
+            updated = Product.objects.filter(group__iexact=old_group).update(group=new_group)
+            if updated:
+                messages.success(request, f"Se renombró la marca '{old_group}' a '{new_group}' en {updated} producto(s).")
+            else:
+                messages.warning(request, f"No hay productos con la marca '{old_group}'.")
+            return redirect("inventory_suppliers")
+        elif action == "clear_group":
+            group = (request.POST.get("group") or "").strip()
+            if not group:
+                messages.error(request, "Ingresá la marca a quitar.")
+                return redirect("inventory_suppliers")
+            updated = Product.objects.filter(group__iexact=group).update(group="")
+            if updated:
+                messages.success(request, f"Se quitó la marca '{group}' de {updated} producto(s). Los productos no se borraron.")
+            else:
+                messages.warning(request, f"No hay productos con la marca '{group}'.")
+            return redirect("inventory_suppliers")
 
+    group_options = (
+        Product.objects.exclude(group="")
+        .exclude(group__isnull=True)
+        .values_list("group", flat=True)
+        .distinct()
+        .order_by("group")
+    )
     context = {
         "supplier_form": supplier_form,
         "link_form": link_form,
         "link_group_form": link_group_form,
         "unlink_group_form": unlink_group_form,
         "suppliers": suppliers_qs,
+        "group_options": group_options,
         "price_import_created": request.session.pop("price_import_created", None),
     }
     purchases_totals = {

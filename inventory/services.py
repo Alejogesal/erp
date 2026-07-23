@@ -68,6 +68,33 @@ def sync_product_cost_from_principal(product: Product) -> None:
     product.save(update_fields=["avg_cost", "vat_percent"])
 
 
+def select_cheapest_supplier_link(product: Product) -> SupplierProduct | None:
+    """Entre los proveedores vinculados al producto, devuelve el vínculo con menor
+    costo neto (sin IVA), que es la comparación justa entre proveedores con
+    distinta condición de IVA. Si ninguno tiene costo cargado (>0), devuelve
+    cualquiera igual para no dejar el producto sin proveedor principal."""
+    links = list(SupplierProduct.objects.filter(product=product).select_related("supplier"))
+    if not links:
+        return None
+    priced = [link for link in links if link.cost_net and link.cost_net > Decimal("0.00")]
+    candidates = priced or links
+    return min(candidates, key=lambda link: link.cost_net)
+
+
+def sync_principal_to_cheapest(product: Product) -> bool:
+    """Asigna como proveedor principal al vínculo más barato del producto y
+    sincroniza el costo desde ahí. Devuelve True si el principal cambió."""
+    cheapest = select_cheapest_supplier_link(product)
+    if cheapest is None:
+        return False
+    changed = product.default_supplier_id != cheapest.supplier_id
+    if changed:
+        product.default_supplier = cheapest.supplier
+        product.save(update_fields=["default_supplier"])
+    sync_product_cost_from_principal(product)
+    return changed
+
+
 def update_product_avg_costs(items: list[dict]) -> None:
     """Recalculate avg_cost (WITHOUT VAT) as weighted average for products in a purchase.
 

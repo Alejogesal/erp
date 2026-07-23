@@ -43,6 +43,75 @@
         </form>
     </div>
     <div class="card">
+        <div class="card-title">Renombrar marca</div>
+        <p class="subtitle" style="margin-top:0;">Cambia el nombre de la marca en todos los productos que la tengan. No borra ni desvincula nada.</p>
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="rename_group">
+            <p>
+                <label for="id_old_group">Marca actual</label>
+                <input id="id_old_group" name="old_group" list="group-options-suppliers" required>
+            </p>
+            <p>
+                <label for="id_new_group">Nuevo nombre</label>
+                <input id="id_new_group" name="new_group" required>
+            </p>
+            <button type="submit">Renombrar</button>
+        </form>
+    </div>
+    <div class="card">
+        <div class="card-title">Quitar marca de productos</div>
+        <p class="subtitle" style="margin-top:0;">Borra el texto de la marca en esos productos (quedan sin marca). Los productos NO se borran.</p>
+        <form method="post" onsubmit="return confirm('¿Quitar esta marca de todos sus productos? Los productos no se borran, solo pierden la marca.');">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="clear_group">
+            <p>
+                <label for="id_clear_group">Marca</label>
+                <input id="id_clear_group" name="group" list="group-options-suppliers" required>
+            </p>
+            <button type="submit">Quitar marca</button>
+        </form>
+    </div>
+    <div class="card">
+        <div class="card-title">Crear producto nuevo</div>
+        <p class="subtitle" style="margin-top:0;">Crea el producto y lo vincula al proveedor elegido en un solo paso.</p>
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="create_product_for_supplier">
+            <p>
+                <label for="id_new_product_name">Nombre</label>
+                <input id="id_new_product_name" name="new_product_name" required>
+            </p>
+            <p>
+                <label for="id_new_product_group">Marca / Grupo</label>
+                <input id="id_new_product_group" name="new_product_group" list="group-options-suppliers">
+            </p>
+            <p>
+                <label for="id_new_product_supplier_id">Proveedor</label>
+                <select id="id_new_product_supplier_id" name="new_product_supplier_id" required>
+                    <option value="">Seleccionar</option>
+                    {% for supplier in suppliers %}
+                    <option value="{{ supplier.id }}">{{ supplier.name }}</option>
+                    {% endfor %}
+                </select>
+            </p>
+            <p>
+                <label for="id_new_product_cost_net">Costo (sin IVA)</label>
+                <input id="id_new_product_cost_net" type="number" step="0.01" min="0" name="new_product_cost_net" required>
+            </p>
+            <p>
+                <label for="id_new_product_vat_percent">IVA %</label>
+                <input id="id_new_product_vat_percent" type="number" step="0.01" min="0" max="100" name="new_product_vat_percent" value="0">
+            </p>
+            <button type="submit">Crear producto</button>
+        </form>
+    </div>
+    <datalist id="group-options-suppliers">
+        {% for group in group_options %}
+        <option value="{{ group }}"></option>
+        {% endfor %}
+    </datalist>
+    <div class="card">
         <div class="card-title">Importar lista de precios (Excel)</div>
         <p class="subtitle" style="margin-top:0;">Carga los productos de un proveedor desde .xlsx o .pdf (match por nombre; crea los que no existan, usando el Grupo como marca). El costo se carga <strong>sin IVA</strong>. El IVA es por producto: sale de la columna IVA del archivo si la tiene (ej. The Hunter), o lo agregás vos por producto. El IVA real de cada compra igual se define al registrarla.</p>
         <form method="post" enctype="multipart/form-data">
@@ -132,6 +201,10 @@
     .pl-remove { font-size:11px; padding:4px 8px; background:transparent; border:1px solid var(--border,#2a313c); color:var(--muted); border-radius:7px; }
     .pl-remove:hover { color:#ef4444; border-color:rgba(239,68,68,0.4); }
     .pl-sku { color:var(--muted); font-size:11px; }
+    .pl-edit-btn { background:transparent; border:none; color:var(--muted); cursor:pointer; font-size:12px; padding:0 2px; }
+    .pl-edit-btn:hover { color:var(--accent, #2d7ff9); }
+    .pl-edit-form input[type="text"] { padding:5px 8px; border-radius:7px; border:1px solid var(--border, #2a313c);
+        background:#0f1622; color:var(--text); font-size:12px; }
 </style>
 <div class="card table-card pricelist">
     <div class="card-title">Listas de precios por proveedor</div>
@@ -170,7 +243,25 @@
             <tbody>
                 {% for sp in supplier.supplier_products.all %}
                 <tr data-search="{{ sp.product.name|lower|escape }} {{ sp.product.sku|default:''|lower|escape }}">
-                    <td>{{ sp.product.name }}<br><span class="pl-sku">{{ sp.product.sku|default:"s/SKU" }}</span></td>
+                    <td>
+                        <div data-view>
+                            <span class="pl-name">{{ sp.product.name }}</span>
+                            <button type="button" class="pl-edit-btn" onclick="toggleEditProduct(this)" title="Editar nombre/SKU/marca">✎</button>
+                            <br><span class="pl-sku">{{ sp.product.sku|default:"s/SKU" }}{% if sp.product.group %} · {{ sp.product.group }}{% endif %}</span>
+                        </div>
+                        <form class="pl-edit-form" data-edit-form style="display:none;" onsubmit="return saveProductInline(this);">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="edit_product_inline">
+                            <input type="hidden" name="product_id" value="{{ sp.product.id }}">
+                            <input type="text" name="name" value="{{ sp.product.name }}" placeholder="Nombre" style="width:100%; margin-bottom:4px;">
+                            <input type="text" name="sku" value="{{ sp.product.sku|default:'' }}" placeholder="SKU" style="width:80px;">
+                            <input type="text" name="group" value="{{ sp.product.group|default:'' }}" placeholder="Marca" list="group-options-suppliers" style="width:100px;">
+                            <div style="margin-top:4px;">
+                                <button type="submit" style="font-size:11px;">Guardar</button>
+                                <button type="button" style="font-size:11px;" onclick="cancelEditProduct(this)">Cancelar</button>
+                            </div>
+                        </form>
+                    </td>
                     <td class="num">
                         <form method="post" class="cost-form" style="display:flex; gap:4px; align-items:center; justify-content:flex-end;">
                             {% csrf_token %}
@@ -191,12 +282,18 @@
                         </form>
                     </td>
                     <td style="text-align:center;">{% if sp.product.default_supplier_id == supplier.id %}<span class="pl-star" title="Proveedor principal">★</span>{% else %}<span class="pl-nostar">—</span>{% endif %}</td>
-                    <td style="text-align:right;">
+                    <td style="text-align:right; white-space:nowrap;">
                         <form method="post" onsubmit="return confirm('¿Quitar este producto de la lista del proveedor?');" style="display:inline;">
                             {% csrf_token %}
                             <input type="hidden" name="action" value="remove_link">
                             <input type="hidden" name="link_id" value="{{ sp.id }}">
                             <button type="submit" class="pl-remove">Quitar</button>
+                        </form>
+                        <form method="post" onsubmit="return confirm('¿ELIMINAR el producto {{ sp.product.name|escapejs }} por completo (de todos los proveedores)? Esta acción no se puede deshacer.');" style="display:inline;">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="delete_product">
+                            <input type="hidden" name="product_id" value="{{ sp.product.id }}">
+                            <button type="submit" class="pl-remove" style="color:#ef4444; border-color:rgba(239,68,68,0.4);">Eliminar</button>
                         </form>
                     </td>
                 </tr>
@@ -308,6 +405,39 @@
     }
     function saveLinkCost(input) {
         _postLink(input, (d) => { if (d.cost_net) input.value = d.cost_net.replace(/\./g, "").replace(",", "."); });
+    }
+    function toggleEditProduct(btn) {
+        const td = btn.closest("td");
+        td.querySelector("[data-view]").style.display = "none";
+        td.querySelector("[data-edit-form]").style.display = "block";
+    }
+    function cancelEditProduct(btn) {
+        const td = btn.closest("td");
+        td.querySelector("[data-edit-form]").style.display = "none";
+        td.querySelector("[data-view]").style.display = "";
+    }
+    function saveProductInline(form) {
+        const td = form.closest("td");
+        fetch("{% url 'inventory_suppliers' %}", {
+            method: "POST",
+            body: new FormData(form),
+            headers: { "X-Requested-With": "XMLHttpRequest" },
+            credentials: "same-origin",
+        })
+            .then((r) => r.json())
+            .then((d) => {
+                if (!d || !d.ok) {
+                    alert((d && d.error) || "No se pudo guardar.");
+                    return;
+                }
+                const view = td.querySelector("[data-view]");
+                view.querySelector(".pl-name").textContent = d.name;
+                view.querySelector(".pl-sku").textContent = [d.sku || "s/SKU", d.group].filter(Boolean).join(" · ");
+                form.style.display = "none";
+                view.style.display = "";
+            })
+            .catch(() => { alert("No se pudo guardar."); });
+        return false;
     }
 </script>
 {% endblock %}
