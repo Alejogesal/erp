@@ -177,7 +177,7 @@
         <form method="post" style="display:inline;">
             {% csrf_token %}
             <input type="hidden" name="action" value="resync_all_commissions">
-            <button type="submit" style="background:#c0392b; font-size:12px;" onclick="return confirm('Recalcula comisiones e impuestos de TODAS las ventas ML con datos frescos de MercadoLibre (corrige montos ya guardados que estén mal). Puede tardar varios minutos. ¿Continuar?')">Recalcular TODAS</button>
+            <button type="submit" style="background:#c0392b; font-size:12px;" onclick="return confirm('Corrige las ventas ML con comisión mal calculada (varias unidades). Re-trae los montos reales de ML. Si son muchas puede tardar; si da error usá el comando resync_ml_commissions por consola. ¿Continuar?')">Corregir comisiones mal calculadas</button>
         </form>
         <form method="post" style="display:inline;">
             {% csrf_token %}

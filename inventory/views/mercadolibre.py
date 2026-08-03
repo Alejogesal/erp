@@ -446,13 +446,25 @@ def mercadolibre_dashboard(request):
             if not connection:
                 messages.error(request, "No hay conexión ML.")
             else:
-                from decimal import Decimal as _Dec
-                sales_to_fix = Sale.objects.filter(ml_order_id__gt="")
-                # "resync_commissions" solo recalcula las que quedaron en $0.
-                # "resync_all_commissions" recalcula TODAS (para corregir montos
-                # ya guardados que estaban mal, p. ej. comisión de 1 sola unidad).
+                from decimal import Decimal as _Dec, ROUND_HALF_EVEN as _RHE
+                _CENT = _Dec("0.01")
                 if action == "resync_commissions":
-                    sales_to_fix = sales_to_fix.filter(ml_commission_total=_Dec("0.00"))
+                    # Solo las que quedaron en comisión $0.
+                    sales_to_fix = list(Sale.objects.filter(ml_order_id__gt="", ml_commission_total=_Dec("0.00")))
+                else:
+                    # "Recalcular TODAS": apunta SOLO a las ventas mal calculadas
+                    # (línea > 1 unidad + impuesto == 3,5% de la comisión, la firma
+                    # del bug). Así se corrige lo roto sin golpear cada orden ML,
+                    # que provocaba timeouts (500) en ventas de mucho volumen.
+                    sales_to_fix = []
+                    candidates = Sale.objects.filter(ml_order_id__gt="").prefetch_related("items")
+                    for _s in candidates:
+                        _qtys = [_it.quantity for _it in _s.items.all()]
+                        if not _qtys or max(_qtys) <= 1:
+                            continue
+                        _c = _s.ml_commission_total
+                        if _c > 0 and abs(_s.ml_tax_total - (_c * _Dec("0.035")).quantize(_CENT, rounding=_RHE)) <= _CENT:
+                            sales_to_fix.append(_s)
                 updated = 0
                 skipped = 0
                 for sale in sales_to_fix:
