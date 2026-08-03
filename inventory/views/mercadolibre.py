@@ -442,15 +442,17 @@ def mercadolibre_dashboard(request):
                     )
                 except Exception as exc:
                     messages.error(request, f"Error debug: {exc}")
-        elif action == "resync_commissions":
+        elif action in ("resync_commissions", "resync_all_commissions"):
             if not connection:
                 messages.error(request, "No hay conexión ML.")
             else:
                 from decimal import Decimal as _Dec
-                sales_to_fix = Sale.objects.filter(
-                    ml_order_id__gt="",
-                    ml_commission_total=_Dec("0.00"),
-                )
+                sales_to_fix = Sale.objects.filter(ml_order_id__gt="")
+                # "resync_commissions" solo recalcula las que quedaron en $0.
+                # "resync_all_commissions" recalcula TODAS (para corregir montos
+                # ya guardados que estaban mal, p. ej. comisión de 1 sola unidad).
+                if action == "resync_commissions":
+                    sales_to_fix = sales_to_fix.filter(ml_commission_total=_Dec("0.00"))
                 updated = 0
                 skipped = 0
                 for sale in sales_to_fix:

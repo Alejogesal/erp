@@ -176,6 +176,11 @@
         </form>
         <form method="post" style="display:inline;">
             {% csrf_token %}
+            <input type="hidden" name="action" value="resync_all_commissions">
+            <button type="submit" style="background:#c0392b; font-size:12px;" onclick="return confirm('Recalcula comisiones e impuestos de TODAS las ventas ML con datos frescos de MercadoLibre (corrige montos ya guardados que estén mal). Puede tardar varios minutos. ¿Continuar?')">Recalcular TODAS</button>
+        </form>
+        <form method="post" style="display:inline;">
+            {% csrf_token %}
             <input type="hidden" name="action" value="recost_ml_sales">
             <button type="submit" style="background:#1a6a9a; font-size:12px;" onclick="return confirm('Actualiza el costo de todos los items ML con costo $0. ¿Continuar?')">Recostear ventas ML</button>
         </form>

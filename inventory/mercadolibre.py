@@ -894,16 +894,9 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
         else:
             fee_total += amount
 
-    # fallback 1: sale_fee in order_items is the total fee for that item (not per unit)
-    if fee_total == Decimal("0.00"):
-        for oi in order.get("order_items") or []:
-            sf = Decimal(str(oi.get("sale_fee") or 0)).copy_abs()
-            fee_total += sf
-        if fee_total > Decimal("0.00"):
-            # IIBB ≈ 3.5% of commission (standard ML Argentina rate)
-            tax_total = (fee_total * Decimal("0.035")).quantize(Decimal("0.01"))
-
-    # fallback 2: try payment-level data if still empty
+    # fallback 1: payment-level data (marketplace_fee + taxes_amount). This is
+    # authoritative for the WHOLE order (todas las unidades) e incluye los
+    # impuestos realmente retenidos por ML, así que se prioriza sobre sale_fee.
     if fee_total == Decimal("0.00"):
         payments = order.get("payments") or []
         if not payments:
@@ -916,6 +909,19 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
             except Exception:
                 payments = []
         fee_total, tax_total = _sum_payment_details(payments)
+
+    # fallback 2 (última opción, estimada): sale_fee en order_items es la comisión
+    # POR UNIDAD, así que hay que multiplicarla por la cantidad de cada línea.
+    # Antes se sumaba sin multiplicar y las ventas de N unidades quedaban con la
+    # comisión (y el impuesto) de 1 sola unidad.
+    if fee_total == Decimal("0.00"):
+        for oi in order.get("order_items") or []:
+            sf = Decimal(str(oi.get("sale_fee") or 0)).copy_abs()
+            qty = Decimal(str(oi.get("quantity") or 1))
+            fee_total += sf * qty
+        if fee_total > Decimal("0.00"):
+            # IIBB ≈ 3.5% of commission (standard ML Argentina rate)
+            tax_total = (fee_total * Decimal("0.035")).quantize(Decimal("0.01"))
 
     if existing_sale:
         existing_sale.ml_commission_total = fee_total.quantize(Decimal("0.01"))
