@@ -753,12 +753,6 @@ def product_search(request):
 
 @login_required
 def product_prices_download(request, audience: str):
-    products = Product.objects.order_by("sku")
-    groups_raw = request.GET.get("groups", "")
-    if groups_raw:
-        groups = [g.strip() for g in groups_raw.split(",") if g.strip()]
-        if groups:
-            products = products.filter(group__in=groups)
     headers = ["Marca", "Producto", "Precio"]
     price_attr_map = {
         "consumer": "consumer_price",
@@ -767,9 +761,45 @@ def product_prices_download(request, audience: str):
     }
     if audience not in price_attr_map:
         return redirect("inventory_product_prices")
-
     attr = price_attr_map[audience]
-    rows = [[p.group or "", p.name, getattr(p, attr)] for p in products]
+
+    products = Product.objects.all()
+    groups_raw = request.GET.get("groups", "")
+    groups = []
+    if groups_raw:
+        groups = [g.strip() for g in groups_raw.split(",") if g.strip()]
+        if groups:
+            products = products.filter(group__in=groups)
+    products = list(products)
+
+    # Proveedor principal de cada marca = el default_supplier más frecuente entre
+    # los productos de esa marca (que es el más barato, del cual ya sale el costo).
+    # Solo se listan los productos cuyo proveedor principal coincide con el de su
+    # marca, para no repetir productos por proveedores secundarios/duplicados.
+    from collections import Counter, defaultdict
+
+    brand_supplier_counts: dict[str, Counter] = defaultdict(Counter)
+    for p in products:
+        if p.group and p.default_supplier_id:
+            brand_supplier_counts[p.group][p.default_supplier_id] += 1
+    brand_principal = {
+        group: counts.most_common(1)[0][0]
+        for group, counts in brand_supplier_counts.items()
+    }
+
+    def _include(p) -> bool:
+        # Los kits son productos propios (sin proveedor): se incluyen siempre.
+        if p.is_kit:
+            return True
+        # Solo productos de una marca cuyo proveedor principal es el de la marca.
+        if not p.group:
+            return False
+        principal = brand_principal.get(p.group)
+        return principal is not None and p.default_supplier_id == principal
+
+    rows = [[p.group or "", p.name, getattr(p, attr)] for p in products if _include(p)]
+    # Marcas en orden alfabético (case-insensitive), luego producto. Sin marca al final.
+    rows.sort(key=lambda r: (r[0] == "", r[0].casefold(), r[1].casefold()))
     xlsx_bytes = _build_xlsx(headers, rows, blue_cols={1}, number_cols={3})
     audience_label_map = {
         "consumer": "consumidor",
