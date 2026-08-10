@@ -13,6 +13,7 @@ from django.utils import timezone
 
 from . import services
 from .models import (
+    ML_SELLER_FULFILLED_TYPES,
     Customer,
     MercadoLibreConnection,
     MercadoLibreItem,
@@ -21,6 +22,7 @@ from .models import (
     Sale,
     SaleItem,
     Stock,
+    StockMovement,
     Warehouse,
 )
 
@@ -50,7 +52,21 @@ def get_authorize_url(state: str) -> str:
     return f"{ML_AUTH_URL}?{urlencode(params)}"
 
 
-def _request(method: str, path: str, access_token: str | None = None, params=None, data=None):
+def _request(
+    method: str,
+    path: str,
+    access_token: str | None = None,
+    params=None,
+    data=None,
+    extra_headers: dict | None = None,
+    with_headers: bool = False,
+):
+    """Llamada a la API de ML.
+
+    `with_headers=True` devuelve (payload, headers) en vez del payload solo: hace
+    falta para el stock de user-products, donde el header `x-version` de la
+    respuesta hay que reenviarlo en el PUT.
+    """
     url = f"{ML_BASE_URL}{path}"
     if params:
         url = f"{url}?{urlencode(params)}"
@@ -61,10 +77,22 @@ def _request(method: str, path: str, access_token: str | None = None, params=Non
     if data is not None:
         body = json.dumps(data).encode("utf-8")
         headers["Content-Type"] = "application/json"
+    if extra_headers:
+        headers.update(extra_headers)
     req = Request(url, data=body, headers=headers, method=method)
     with urlopen(req, timeout=30) as resp:
         raw = resp.read()
-    return json.loads(raw.decode("utf-8") or "{}")
+        resp_headers = dict(resp.headers)
+    payload = json.loads(raw.decode("utf-8") or "{}")
+    if with_headers:
+        return payload, resp_headers
+    return payload
+
+
+# El JSON nuevo de /shipments requiere este header. ML lo volvió obligatorio en
+# octubre de 2025; sin él, `logistic` viene aplanado como `logistic_type` y los
+# campos order_id/external_reference ya no se devuelven.
+_SHIPMENT_HEADERS = {"x-format-new": "true"}
 
 
 def _token_request(payload: dict) -> dict:
@@ -283,6 +311,24 @@ def _extract_user_product_ids(item: dict) -> list[str]:
     return result
 
 
+def item_logistic_type(item: dict) -> str:
+    """logistic_type de una publicación (viene suelto o dentro de shipping)."""
+    shipping = (item or {}).get("shipping") or {}
+    return str((item or {}).get("logistic_type") or shipping.get("logistic_type") or "")
+
+
+def item_has_flex(item: dict) -> bool:
+    """La publicación tiene Envíos Flex activo.
+
+    ML lo marca con el tag `self_service_in` en shipping.tags. Combinado con
+    logistic_type=fulfillment identifica las publicaciones en convivencia
+    Full/Flex, que son las que necesitan manejo de stock por separado.
+    """
+    shipping = (item or {}).get("shipping") or {}
+    tags = shipping.get("tags") or []
+    return "self_service_in" in {str(t) for t in tags}
+
+
 def _full_stock_from_locations(data: dict) -> tuple[int, bool]:
     """Sum the Full (meli_facility) quantity from a user-products/stock payload.
 
@@ -314,8 +360,7 @@ def resolve_authoritative_stock(
     user_product_id to avoid duplicate API calls within a sync run. Falls back
     to available_quantity when the stock payload can't be fetched.
     """
-    shipping = item.get("shipping") or {}
-    logistic_type = item.get("logistic_type", "") or shipping.get("logistic_type", "") or ""
+    logistic_type = item_logistic_type(item)
     fallback = int(item.get("available_quantity", 0) or 0)
     up_ids = _extract_user_product_ids(item)
     if not up_ids:
@@ -384,6 +429,114 @@ def update_item_quantity(item_id: str, quantity: int, access_token: str) -> dict
 
 def get_order(order_id: str, access_token: str) -> dict:
     return _request("GET", f"/orders/{order_id}", access_token=access_token)
+
+
+def get_shipment(shipment_id: str, access_token: str) -> dict:
+    """Detalle del envío. El JSON nuevo de /orders ya no trae datos de shipping,
+    solo el id, así que el tipo logístico y el estado real salen de acá."""
+    return _request(
+        "GET", f"/shipments/{shipment_id}", access_token=access_token, extra_headers=_SHIPMENT_HEADERS
+    )
+
+
+def get_shipment_costs(shipment_id: str, access_token: str) -> dict:
+    """Costos del envío: cuánto paga el comprador y cuánto el vendedor."""
+    return _request(
+        "GET", f"/shipments/{shipment_id}/costs", access_token=access_token, extra_headers=_SHIPMENT_HEADERS
+    )
+
+
+def extract_logistic_type(shipment: dict) -> str:
+    """Tipo logístico de un shipment, tolerando los dos formatos de JSON.
+
+    Formato nuevo (x-format-new): {"logistic": {"mode": "me2", "type": "self_service"}}
+    Formato viejo:                {"logistic_type": "self_service"}
+    """
+    logistic = (shipment or {}).get("logistic") or {}
+    if isinstance(logistic, dict) and logistic.get("type"):
+        return str(logistic["type"])
+    return str((shipment or {}).get("logistic_type") or "")
+
+
+def seller_shipping_cost(costs: dict, seller_id: str | int | None) -> Decimal:
+    """Costo de envío que efectivamente paga el vendedor.
+
+    Sale de `senders[].cost` (el neto después de descuentos), no de
+    `gross_amount`, que es el bruto del envío sin ningún descuento aplicado.
+    `senders` es una lista pensada para carritos multi-vendedor: se filtra por
+    user_id cuando se conoce, y si no se toma el primero.
+    """
+    senders = (costs or {}).get("senders") or []
+    if not senders:
+        return Decimal("0.00")
+    chosen = None
+    if seller_id:
+        wanted = str(seller_id)
+        chosen = next((s for s in senders if str(s.get("user_id") or "") == wanted), None)
+    if chosen is None:
+        chosen = senders[0]
+    try:
+        return Decimal(str(chosen.get("cost", 0) or 0)).quantize(Decimal("0.01"))
+    except Exception:
+        return Decimal("0.00")
+
+
+# Estados de /shipments mapeados al estado de entrega del ERP. Los tags
+# delivered/not_delivered de la orden ya no se agregan automáticamente (ML lo
+# documenta explícitamente), así que el shipment es la fuente confiable.
+_SHIPMENT_STATUS_TO_DELIVERY = {
+    "delivered": "DELIVERED",
+    "shipped": "IN_TRANSIT",
+    "ready_to_ship": "IN_TRANSIT",
+    "handling": "NOT_DELIVERED",
+    "pending": "NOT_DELIVERED",
+    "not_delivered": "NOT_DELIVERED",
+    "cancelled": "NOT_DELIVERED",
+}
+
+
+def delivery_status_from_shipment(shipment: dict) -> str | None:
+    """Estado de entrega del ERP a partir del status del shipment, o None."""
+    status = str((shipment or {}).get("status") or "").lower()
+    return _SHIPMENT_STATUS_TO_DELIVERY.get(status)
+
+
+def push_selling_address_stock(user_product_id: str, quantity: int, access_token: str) -> bool:
+    """Fijar el stock Flex (selling_address) de un user_product.
+
+    Es el camino obligado para publicaciones en convivencia Full/Flex: ahí un
+    PUT /items available_quantity no separa el stock propio del stock en Full.
+    El PUT exige el header x-version que devuelve el GET; si otro proceso tocó
+    la entidad en el medio, ML responde 409 y hay que releer la versión.
+    """
+    for _ in range(2):
+        try:
+            _, headers = _request(
+                "GET",
+                f"/user-products/{user_product_id}/stock",
+                access_token=access_token,
+                with_headers=True,
+            )
+        except HTTPError:
+            return False
+        version = headers.get("x-version") or headers.get("X-Version")
+        if not version:
+            return False
+        try:
+            _request(
+                "PUT",
+                f"/user-products/{user_product_id}/stock/type/selling_address",
+                access_token=access_token,
+                data={"quantity": max(0, int(quantity))},
+                extra_headers={"x-version": str(version)},
+            )
+            return True
+        except HTTPError as exc:
+            if exc.code == 409:
+                # Versión desactualizada: releer y reintentar una vez.
+                continue
+            return False
+    return False
 
 
 def get_order_payments(order_id: str, access_token: str):
@@ -709,6 +862,10 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
     # Cache user-product stock per user_product_id so publications sharing the
     # same Full stock (catalog + traditional) don't trigger duplicate API calls.
     fulfillment_cache: dict[str, dict] = {}
+    # product_id -> {user_product_id|item_id: cantidad en Full}. Ver el comentario
+    # en el cuerpo del loop: sirve para deduplicar el stock Full compartido.
+    full_by_product: dict[int, dict[str, int]] = {}
+    products_seen: dict[int, Product] = {}
 
     for item_id in item_ids:
         try:
@@ -719,8 +876,8 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
             raise
         title = item.get("title", "") or ""
         status = item.get("status", "") or ""
-        shipping = item.get("shipping") or {}
-        logistic_type = item.get("logistic_type", "") or shipping.get("logistic_type", "") or ""
+        logistic_type = item_logistic_type(item)
+        has_flex = item_has_flex(item)
         permalink = item.get("permalink", "") or ""
         # For Full items the /items available_quantity is unreliable (Full/Flex
         # coexistence); the user-products stock endpoint (meli_facility) is the
@@ -738,6 +895,7 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
                 "available_quantity": available,
                 "status": status,
                 "logistic_type": logistic_type,
+                "has_flex": has_flex,
                 "user_product_id": user_product_id,
                 "permalink": permalink,
                 "product": product,
@@ -747,23 +905,43 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
         total += 1
         if product:
             matched += 1
-            if ml_wh:
-                stock = Stock.objects.filter(product=product, warehouse=ml_wh).first()
-                current_qty = stock.quantity if stock else Decimal("0.00")
-                desired_qty = Decimal(str(available))
-                diff = desired_qty - current_qty
-                if diff != 0:
-                    services.register_adjustment(
-                        product=product,
-                        warehouse=ml_wh,
-                        quantity=diff,
-                        user=user,
-                        reference=f"Sync ML {item_id}",
-                        allow_negative=True,
-                    )
-                    updated_stock += 1
+            # El depósito ML refleja SOLO el stock en Full (meli_facility), que
+            # es el único que administra MercadoLibre. El stock de Flex/Colecta/
+            # Correo vive en el depósito COMUN, que es la fuente de verdad y se
+            # empuja hacia ML — reflejarlo acá también lo contaría dos veces.
+            # Se acumula por producto y se aplica al final del barrido: un mismo
+            # producto puede tener varias publicaciones, y las de catálogo
+            # comparten user_product_id (y por lo tanto el mismo stock Full),
+            # así que se deduplica por esa clave antes de sumar.
+            if logistic_type == "fulfillment":
+                key = user_product_id or item_id
+                full_by_product.setdefault(product.id, {})[key] = int(available)
+            else:
+                full_by_product.setdefault(product.id, {})
+            products_seen[product.id] = product
         else:
             unmatched += 1
+
+    # Con el barrido truncado (ML_SYNC_MAX_ITEMS) puede faltar la publicación Full
+    # de un producto del que sí se vio la de Flex, y reconciliar ahí pondría en
+    # cero stock Full real. Solo se reconcilia sobre un barrido completo.
+    if ml_wh and not truncated:
+        for product_id, per_location in full_by_product.items():
+            product = products_seen[product_id]
+            desired_qty = Decimal(str(sum(per_location.values())))
+            stock = Stock.objects.filter(product=product, warehouse=ml_wh).first()
+            current_qty = stock.quantity if stock else Decimal("0.00")
+            diff = desired_qty - current_qty
+            if diff != 0:
+                services.register_adjustment(
+                    product=product,
+                    warehouse=ml_wh,
+                    quantity=diff,
+                    user=user,
+                    reference="Sync ML stock Full",
+                    allow_negative=True,
+                )
+                updated_stock += 1
 
     try:
         metrics = _call_with_refresh(
@@ -803,6 +981,175 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
     return SyncResult(total, matched, unmatched, updated_stock, metrics)
 
 
+def _default_connection() -> "MercadoLibreConnection | None":
+    from django.contrib.auth import get_user_model
+
+    User = get_user_model()
+    return (
+        MercadoLibreConnection.objects.filter(
+            user__in=User.objects.filter(is_superuser=True).order_by("id")[:1]
+        ).first()
+        or MercadoLibreConnection.objects.first()
+    )
+
+
+def push_comun_stock_to_ml(products, connection=None) -> int:
+    """Empujar el stock del depósito COMUN a las publicaciones de ML.
+
+    COMUN es la fuente de verdad para todo lo que no sea Full: da igual si la
+    venta entró por MercadoLibre (Flex/Colecta/Correo) o por fuera, el stock
+    publicado se recalcula desde el mismo número. Como se manda el valor
+    absoluto y no un delta, repetir el push es inofensivo.
+
+    Tres casos por publicación:
+      - Full puro          → no se toca (el stock lo administra ML).
+      - convivencia Full+Flex → PUT selling_address del user_product: es el único
+        camino que separa el stock propio del que está en el depósito de ML.
+        Un PUT /items pisaría los dos juntos.
+      - resto (Flex puro, Colecta, Correo, custom) → PUT /items available_quantity.
+
+    Devuelve la cantidad de publicaciones actualizadas.
+    """
+    connection = connection or _default_connection()
+    if not connection or not connection.access_token:
+        return 0
+    access_token = get_valid_access_token(connection)
+    if not access_token:
+        return 0
+    comun_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
+    if not comun_wh:
+        return 0
+
+    pushed = 0
+    seen_products: set[int] = set()
+    seen_user_products: set[str] = set()
+    for product in products:
+        if product.id in seen_products:
+            continue
+        seen_products.add(product.id)
+        ml_items = list(MercadoLibreItem.objects.filter(product=product))
+        if not ml_items:
+            continue
+        stock = Stock.objects.filter(product=product, warehouse=comun_wh).first()
+        qty = max(0, int(stock.quantity)) if stock else 0
+        for ml_item in ml_items:
+            is_full = ml_item.logistic_type == "fulfillment"
+            try:
+                if is_full and ml_item.has_flex and ml_item.user_product_id:
+                    if ml_item.user_product_id in seen_user_products:
+                        continue
+                    seen_user_products.add(ml_item.user_product_id)
+                    if push_selling_address_stock(ml_item.user_product_id, qty, access_token):
+                        pushed += 1
+                elif is_full:
+                    continue
+                else:
+                    push_item_stock_and_price(ml_item.item_id, qty, None, access_token)
+                    pushed += 1
+            except Exception:
+                # Un ítem cerrado o con error no debe frenar el resto.
+                continue
+    return pushed
+
+
+def _resolve_shipment_info(connection, order: dict, access_token: str) -> dict:
+    """Datos de envío de una orden: tipo logístico, estado y costo del vendedor.
+
+    El JSON nuevo de /orders solo trae `shipping.id`, así que todo lo demás sale
+    de /shipments. El id puede venir nulo un rato (el envío tarda en crearse) o
+    directamente no existir en ventas "a convenir": en ese caso se devuelve lo
+    que se pueda y el llamador cae al logistic_type de la publicación.
+    """
+    info = {"shipment_id": "", "logistic_type": "", "delivery_status": None, "shipping_cost": None}
+    shipping = order.get("shipping") or {}
+    shipment_id = str(shipping.get("id") or "")
+    if not shipment_id:
+        return info
+    info["shipment_id"] = shipment_id
+    try:
+        shipment = _call_with_refresh(connection, get_shipment, shipment_id, access_token=access_token)
+    except Exception:
+        return info
+    info["logistic_type"] = extract_logistic_type(shipment)
+    info["delivery_status"] = delivery_status_from_shipment(shipment)
+    seller_id = (order.get("seller") or {}).get("id") or connection.ml_user_id
+    try:
+        costs = _call_with_refresh(connection, get_shipment_costs, shipment_id, access_token=access_token)
+        info["shipping_cost"] = seller_shipping_cost(costs, seller_id)
+    except Exception:
+        pass
+    return info
+
+
+def _logistic_type_from_items(matched_items) -> str:
+    """Tipo logístico deducido de las publicaciones, para cuando no hay shipment."""
+    for _product, _qty, _price, _vat, _variant, item_id in matched_items:
+        if not item_id:
+            continue
+        ml_item = MercadoLibreItem.objects.filter(item_id=item_id).first()
+        if ml_item and ml_item.logistic_type:
+            return ml_item.logistic_type
+    return ""
+
+
+def _apply_ml_stock_exit(sale: Sale, matched_items, user) -> None:
+    """Descontar del depósito COMUN el stock de una venta ML no-Full.
+
+    Idempotente: si la venta ya tiene movimientos de salida asociados no hace
+    nada, así un re-sync de la misma orden (que ocurre en cada notificación de
+    ML) nunca descuenta dos veces.
+    """
+    if StockMovement.objects.filter(sale=sale, movement_type=StockMovement.MovementType.EXIT).exists():
+        return
+    comun_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
+    if not comun_wh:
+        return
+    for product, quantity, unit_price, vat_percent, _variant, _item_id in matched_items:
+        components = (
+            [(kc.component, quantity * kc.quantity) for kc in product.kit_components.select_related("component")]
+            if product.is_kit
+            else [(product, quantity)]
+        )
+        for target_product, qty in components:
+            services.register_exit(
+                product=target_product,
+                warehouse=comun_wh,
+                quantity=qty,
+                user=user,
+                reference=f"Venta ML {sale.ml_order_id or sale.id}",
+                sale_price=unit_price,
+                vat_percent=vat_percent,
+                sale=sale,
+                allow_negative=True,
+            )
+
+
+def _revert_ml_stock_exit(sale: Sale, user) -> None:
+    """Devolver al depósito COMUN el stock de una venta ML cancelada."""
+    movements = list(
+        StockMovement.objects.filter(sale=sale, movement_type=StockMovement.MovementType.EXIT).select_related(
+            "product", "from_warehouse"
+        )
+    )
+    if not movements:
+        return
+    for movement in movements:
+        if not movement.from_warehouse:
+            continue
+        services.register_adjustment(
+            product=movement.product,
+            warehouse=movement.from_warehouse,
+            quantity=movement.quantity,
+            user=user,
+            reference=f"Reversa venta ML cancelada {sale.ml_order_id or sale.id}",
+            allow_negative=True,
+        )
+    # Los movimientos de salida originales se dejan como están: el ajuste de
+    # reversa ya deja el rastro completo en el historial. Además solo se llega
+    # acá en la transición a cancelada (después la orden sale por
+    # "ignored_status"), así que no hay riesgo de revertir dos veces.
+
+
 def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple[bool, str]:
     access_token = get_valid_access_token(connection)
     if not access_token:
@@ -827,15 +1174,26 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
             existing.is_cancelled = True
             existing.cancelled_at = timezone.now()
             existing.save(update_fields=["is_cancelled", "cancelled_at"])
+            # Si era una venta que había descontado del depósito propio
+            # (Flex/Colecta/Correo), la mercadería nunca salió: se devuelve.
+            if existing.is_seller_fulfilled_ml:
+                _revert_ml_stock_exit(existing, user)
             return False, "cancelled_marked"
         return False, "ignored_status"
 
     order_date = _parse_ml_datetime(order.get("date_created"))
 
-    # Delivery status and fraud risk from order tags (no extra API call needed)
     order_tags = {str(t).lower() for t in (order.get("tags") or [])}
     fraud_risk = "fraud_risk_detected" in order_tags
-    if "delivered" in order_tags:
+
+    shipment_info = _resolve_shipment_info(connection, order, access_token)
+
+    # El estado real de entrega sale del shipment. Los tags delivered /
+    # not_delivered de la orden ya no se agregan solos, así que solo se usan
+    # como respaldo cuando todavía no hay envío creado.
+    if shipment_info["delivery_status"]:
+        delivery_status = shipment_info["delivery_status"]
+    elif "delivered" in order_tags:
         delivery_status = Sale.DeliveryStatus.DELIVERED
     elif order_status == "paid" and "not_delivered" not in order_tags:
         delivery_status = Sale.DeliveryStatus.IN_TRANSIT
@@ -869,8 +1227,7 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
                 item_detail = {}
             title = item_detail.get("title", "") or ""
             status = item_detail.get("status", "") or ""
-            shipping = item_detail.get("shipping") or {}
-            logistic_type = item_detail.get("logistic_type", "") or shipping.get("logistic_type", "") or ""
+            logistic_type = item_logistic_type(item_detail)
             permalink = item_detail.get("permalink", "") or ""
             available, user_product_id = resolve_authoritative_stock(connection, item_detail, access_token)
             MercadoLibreItem.objects.update_or_create(
@@ -880,6 +1237,7 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
                     "available_quantity": available,
                     "status": status,
                     "logistic_type": logistic_type,
+                    "has_flex": item_has_flex(item_detail),
                     "user_product_id": user_product_id,
                     "permalink": permalink,
                 },
@@ -888,10 +1246,16 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
             continue
         vat_percent = product.vat_percent or Decimal("0.00")
         variant = _resolve_variant_for_order_item(product, order_item, item_id, access_token, connection=connection)
-        matched_items.append((product, quantity, unit_price, vat_percent, variant))
+        matched_items.append((product, quantity, unit_price, vat_percent, variant, item_id))
 
     if not matched_items:
         return False, "no_matches"
+
+    # Si el envío todavía no existe (ML lo crea con demora) se cae al tipo
+    # logístico de la publicación, que para Full/Flex puros es el mismo.
+    logistic_type = shipment_info["logistic_type"] or _logistic_type_from_items(matched_items)
+    seller_fulfilled = logistic_type in ML_SELLER_FULFILLED_TYPES
+    shipping_cost = shipment_info["shipping_cost"]
 
     total_amount = Decimal(str(order.get("total_amount", 0) or 0))
 
@@ -941,8 +1305,29 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
         existing_sale.ml_order_id = str(order_id)
         existing_sale.delivery_status = delivery_status
         existing_sale.ml_fraud_risk = fraud_risk
-        existing_sale.save(update_fields=["ml_commission_total", "ml_tax_total", "ml_order_id", "delivery_status", "ml_fraud_risk"])
-        for product, quantity, unit_price, vat_percent, variant in matched_items:
+        update_fields = [
+            "ml_commission_total",
+            "ml_tax_total",
+            "ml_order_id",
+            "delivery_status",
+            "ml_fraud_risk",
+        ]
+        if logistic_type:
+            existing_sale.ml_logistic_type = logistic_type
+            update_fields.append("ml_logistic_type")
+        if shipment_info["shipment_id"]:
+            existing_sale.ml_shipment_id = shipment_info["shipment_id"]
+            update_fields.append("ml_shipment_id")
+        if shipping_cost is not None:
+            existing_sale.shipping_cost = shipping_cost
+            update_fields.append("shipping_cost")
+        existing_sale.save(update_fields=update_fields)
+        # Ventas que salen del depósito propio: puede ser una venta importada
+        # antes de conocerse el tipo logístico, o un re-sync. _apply_ml_stock_exit
+        # es idempotente, así que descuenta solo la primera vez.
+        if seller_fulfilled and not existing_sale.is_cancelled:
+            _apply_ml_stock_exit(existing_sale, matched_items, user)
+        for product, quantity, unit_price, vat_percent, variant, _item_id in matched_items:
             target = (
                 SaleItem.objects.filter(sale=existing_sale, product=product, quantity=quantity)
                 .order_by("id")
@@ -970,15 +1355,18 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
         total=total_amount,
         reference=reference,
         ml_order_id=str(order_id),
+        ml_logistic_type=logistic_type,
+        ml_shipment_id=shipment_info["shipment_id"],
         ml_commission_total=fee_total.quantize(Decimal("0.01")),
         ml_tax_total=tax_total.quantize(Decimal("0.01")),
+        shipping_cost=shipping_cost if shipping_cost is not None else Decimal("0.00"),
         delivery_status=delivery_status,
         ml_fraud_risk=fraud_risk,
         user=user,
     )
     if order_date:
         Sale.objects.filter(pk=sale.pk).update(created_at=order_date)
-    for product, quantity, unit_price, vat_percent, variant in matched_items:
+    for product, quantity, unit_price, vat_percent, variant, _item_id in matched_items:
         line_total = (unit_price * quantity).quantize(Decimal("0.01"))
         cost_unit = product.last_purchase_cost()
         if not cost_unit or cost_unit <= Decimal("0.00"):
@@ -995,5 +1383,20 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
             line_total=line_total,
             vat_percent=vat_percent,
         )
+
+    # Full lo despacha MercadoLibre desde su depósito: el stock del ERP no se
+    # toca y se refleja desde meli_facility en el sync de items. En cambio
+    # Flex/Colecta/Places/Correo salen del depósito propio, así que se descuenta
+    # de COMUN igual que una venta mostrador.
+    if seller_fulfilled:
+        _apply_ml_stock_exit(sale, matched_items, user)
+        # Reflejar el COMUN ya descontado en las publicaciones. ML normalmente ya
+        # bajó su propio available_quantity al concretarse la venta, así que esto
+        # suele ser un no-op; sirve para corregir desvíos (ventas por fuera de
+        # ML, ajustes manuales) sin esperar al sync completo de items.
+        try:
+            push_comun_stock_to_ml([p for p, *_ in matched_items], connection=connection)
+        except Exception:
+            pass
 
     return True, "ok"

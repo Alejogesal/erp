@@ -23,6 +23,7 @@ from .. import mercadolibre as ml
 from ..models import (
     Customer,
     KitComponent,
+    MLLogisticType,
     MercadoLibreItem,
     Product,
     ProductVariant,
@@ -36,7 +37,33 @@ from .common import _resolve_sale_item_pricing
 from .forms import SaleHeaderForm, SaleItemForm
 from .stock import _sync_common_with_variants
 from .utils_xlsx import _read_ml_sales_xlsx_rows
-from ..models import MercadoLibreConnection
+
+# Valor especial del filtro para las ventas ML sin tipo logístico conocido:
+# las importadas antes de que se guardara el canal, o las que se sincronizaron
+# cuando ML todavía no había creado el envío.
+ML_TYPE_UNKNOWN = "unknown"
+
+# (valor, etiqueta) para los checkboxes de canal. Se arma desde el enum para que
+# agregar un tipo logístico en el modelo lo haga aparecer solo en el filtro.
+ML_TYPE_FILTER_CHOICES = [(value, label) for value, label in MLLogisticType.choices] + [
+    (ML_TYPE_UNKNOWN, "Sin dato")
+]
+_ML_TYPE_FILTER_VALUES = {value for value, _label in ML_TYPE_FILTER_CHOICES}
+
+
+def _movement_restores_stock(movement) -> bool:
+    """Si al borrar la venta hay que devolver este movimiento al stock.
+
+    Se devuelve todo lo que salió del depósito COMUN, sin importar el canal: las
+    ventas Flex/Colecta/Correo descuentan de COMUN igual que una venta mostrador
+    y borrarlas tiene que reponer. El depósito MercadoLibre queda afuera porque
+    es un espejo del stock en Full, que administra ML y se recalcula en el sync.
+    """
+    return (
+        movement.movement_type == StockMovement.MovementType.EXIT
+        and movement.from_warehouse is not None
+        and movement.from_warehouse.type == Warehouse.WarehouseType.COMUN
+    )
 
 
 def _resolve_sale_item_cost(item) -> Decimal:
@@ -56,39 +83,6 @@ def _resolve_sale_item_cost(item) -> Decimal:
     if cost_vat and cost_vat > 0:
         return cost_vat
     return Decimal("0.00")
-
-
-def _push_products_stock_to_ml(products, user):
-    """After a COMUN sale, push updated stock to linked ML publications."""
-    from django.contrib.auth import get_user_model
-    User = get_user_model()
-    connection = MercadoLibreConnection.objects.filter(
-        user__in=User.objects.filter(is_superuser=True).order_by("id")[:1]
-    ).first() or MercadoLibreConnection.objects.first()
-    if not connection or not connection.access_token:
-        return
-    access_token = ml.get_valid_access_token(connection)
-    if not access_token:
-        return
-    comun_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
-    if not comun_wh:
-        return
-    seen = set()
-    for product in products:
-        if product.id in seen:
-            continue
-        seen.add(product.id)
-        # Skip Full/fulfillment items — ML manages their stock
-        ml_items = MercadoLibreItem.objects.filter(product=product).exclude(logistic_type="fulfillment")
-        if not ml_items.exists():
-            continue
-        stock = Stock.objects.filter(product=product, warehouse=comun_wh).first()
-        qty = max(0, int(stock.quantity)) if stock else 0
-        for ml_item in ml_items:
-            try:
-                ml.push_item_stock_and_price(ml_item.item_id, qty, None, access_token)
-            except Exception:
-                pass
 
 
 @login_required
@@ -316,12 +310,6 @@ def sale_edit(request, sale_id: int):
                 audience = customer.audience
             try:
                 with transaction.atomic():
-                    is_ml_sale = (
-                        sale.ml_order_id
-                        or sale.reference.startswith("ML ORDER")
-                        or sale.reference.startswith("GS ORDER")
-                        or warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE
-                    )
                     previous_items = list(sale.items.select_related("variant", "product"))
                     if sale.warehouse.type == Warehouse.WarehouseType.COMUN:
                         for prev_item in previous_items:
@@ -336,8 +324,8 @@ def sale_edit(request, sale_id: int):
                                     variant.save(update_fields=["quantity"])
                                     if comun_wh:
                                         _sync_common_with_variants(prev_item.product, comun_wh)
-                    for movement in sale.movements.select_for_update():
-                        if not is_ml_sale and movement.movement_type == StockMovement.MovementType.EXIT and movement.from_warehouse:
+                    for movement in sale.movements.select_for_update().select_related("from_warehouse"):
+                        if _movement_restores_stock(movement):
                             stock, _ = Stock.objects.select_for_update().get_or_create(
                                 product=movement.product,
                                 warehouse=movement.from_warehouse,
@@ -583,6 +571,12 @@ def sales_list(request):
     end_date_raw = (request.GET.get("end_date") or "").strip()
     include_comun = request.GET.get("wh_comun") == "1"
     include_ml = request.GET.get("wh_ml") == "1"
+    # Canal logístico dentro de MercadoLibre. Se acepta repetido (?ml_type=...)
+    # y solo se conservan los valores conocidos, para que un parámetro mal
+    # tipeado no vacíe el listado en silencio.
+    selected_ml_types = [
+        value for value in request.GET.getlist("ml_type") if value in _ML_TYPE_FILTER_VALUES
+    ]
     show_history = request.GET.get("show_history") == "1"
     customers = Customer.objects.order_by("name")
     action = request.POST.get("action") if request.method == "POST" else ""
@@ -995,7 +989,6 @@ def sales_list(request):
         deleted = 0
         with transaction.atomic():
             for sale in sales:
-                is_ml_sale = sale.ml_order_id or sale.reference.startswith("ML ORDER") or sale.reference.startswith("GS ORDER")
                 comun_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
                 if sale.warehouse.type == Warehouse.WarehouseType.COMUN:
                     for item in sale.items.select_related("variant", "product"):
@@ -1010,8 +1003,8 @@ def sales_list(request):
                                 variant.save(update_fields=["quantity"])
                                 if comun_wh:
                                     _sync_common_with_variants(item.product, comun_wh)
-                for movement in sale.movements.select_for_update():
-                    if not is_ml_sale and movement.movement_type == StockMovement.MovementType.EXIT and movement.from_warehouse:
+                for movement in sale.movements.select_for_update().select_related("from_warehouse"):
+                    if _movement_restores_stock(movement):
                         stock, _ = Stock.objects.select_for_update().get_or_create(
                             product=movement.product,
                             warehouse=movement.from_warehouse,
@@ -1229,7 +1222,7 @@ def sales_list(request):
                     # After transaction commits, push updated stock to ML (non-blocking)
                     if warehouse.type == Warehouse.WarehouseType.COMUN:
                         try:
-                            _push_products_stock_to_ml([data["product"] for data in items], request.user)
+                            ml.push_comun_stock_to_ml([data["product"] for data in items])
                         except Exception:
                             pass
                     if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE:
@@ -1301,6 +1294,18 @@ def sales_list(request):
             sales = sales.filter(warehouse__type=Warehouse.WarehouseType.COMUN)
         elif include_ml and not include_comun:
             sales = sales.filter(warehouse__type=Warehouse.WarehouseType.MERCADOLIBRE)
+        if selected_ml_types:
+            # El filtro de canal solo acota las ventas de ML; las del depósito
+            # común pasan derecho (su inclusión la decide el checkbox de arriba).
+            ml_type_filter = Q()
+            for value in selected_ml_types:
+                if value == ML_TYPE_UNKNOWN:
+                    ml_type_filter |= Q(ml_logistic_type="")
+                else:
+                    ml_type_filter |= Q(ml_logistic_type=value)
+            sales = sales.filter(
+                Q(warehouse__type=Warehouse.WarehouseType.COMUN) | ml_type_filter
+            )
         page_number = request.GET.get("page")
         paginator = Paginator(sales, 25)
         page_obj = paginator.get_page(page_number)
@@ -1355,6 +1360,8 @@ def sales_list(request):
                 "end_date": end_date_raw,
                 "include_comun": include_comun,
                 "include_ml": include_ml,
+                "ml_type_choices": ML_TYPE_FILTER_CHOICES,
+                "selected_ml_types": selected_ml_types,
                 "show_history": show_history,
                 "show_comun": show_comun,
                 "show_ml": show_ml,
@@ -1381,6 +1388,8 @@ def sales_list(request):
             "end_date": end_date_raw,
             "include_comun": include_comun,
             "include_ml": include_ml,
+            "ml_type_choices": ML_TYPE_FILTER_CHOICES,
+            "selected_ml_types": selected_ml_types,
             "show_history": show_history,
             "show_comun": show_comun,
             "show_ml": show_ml,
@@ -1444,8 +1453,8 @@ def sale_delete(request, sale_id: int):
                             variant.save(update_fields=["quantity"])
                             if comun_wh:
                                 _sync_common_with_variants(item.product, comun_wh)
-            for movement in sale.movements.select_for_update():
-                if not is_ml_sale and movement.movement_type == StockMovement.MovementType.EXIT and movement.from_warehouse:
+            for movement in sale.movements.select_for_update().select_related("from_warehouse"):
+                if _movement_restores_stock(movement):
                     stock, _ = Stock.objects.select_for_update().get_or_create(
                         product=movement.product,
                         warehouse=movement.from_warehouse,

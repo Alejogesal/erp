@@ -69,10 +69,11 @@
             <th>Comprobante</th>
             <th>Fecha</th>
             <th>Cliente</th>
-            <th>Depósito</th>
+            <th>Canal</th>
             <th>Total</th>
             <th>Comisión ML</th>
             <th>Impuestos ML</th>
+            <th>Envío</th>
             <th>Margen</th>
             <th>Acciones</th>
         </tr>
@@ -83,10 +84,11 @@
             <td>{{ sale.ml_order_id|default:sale.invoice_number }}{% if sale.is_cancelled %} <span style="background:#c0392b; color:#fff; font-size:10px; padding:1px 5px; border-radius:3px; white-space:nowrap;">CANCELADA</span>{% endif %}</td>
             <td>{{ sale.created_at|date:"d/m/Y H:i" }}</td>
             <td>{{ sale.customer|default:"Consumidor final" }}</td>
-            <td>{{ sale.warehouse.name }}</td>
+            <td><span class="pill" style="font-size:11px; padding:2px 7px;">{{ sale.ml_channel_label|default:"—" }}</span></td>
             <td>${{ sale.total|latam_number:2 }}</td>
             <td>${{ sale.ml_commission_total|latam_number:2 }}</td>
             <td>${{ sale.ml_tax_total|latam_number:2 }}</td>
+            <td>${{ sale.shipping_cost|latam_number:2 }}</td>
             <td>${{ sale.margin_total|latam_number:2 }}</td>
             <td>
                 <a class="pill" href="{% url 'inventory_sale_receipt' sale.id %}" style="font-size:12px; padding:4px 8px;">Ver</a>
@@ -96,10 +98,10 @@
             </td>
         </tr>
         {% empty %}
-        <tr class="empty-row"><td colspan="9">No hay ventas de MercadoLibre.</td></tr>
+        <tr class="empty-row"><td colspan="10">No hay ventas de MercadoLibre.</td></tr>
         {% endfor %}
         {% if sales_ml %}
-        <tr class="empty-row" style="display:none;"><td colspan="9">No hay ventas de MercadoLibre.</td></tr>
+        <tr class="empty-row" style="display:none;"><td colspan="10">No hay ventas de MercadoLibre.</td></tr>
         {% endif %}
     </tbody>
 </table>
@@ -108,13 +110,13 @@
 {% if show_history and page_obj and page_obj.paginator.num_pages > 1 %}
 <div style="margin-top:12px; display:flex; gap:8px; align-items:center; justify-content:flex-end;">
     {% if page_obj.has_previous %}
-    <a class="pill history-page-link" href="?q={{ search_query|urlencode }}{% if include_comun %}&wh_comun=1{% endif %}{% if include_ml %}&wh_ml=1{% endif %}&page={{ page_obj.previous_page_number }}#history">Anterior</a>
+    <a class="pill history-page-link" href="?q={{ search_query|urlencode }}{% if include_comun %}&wh_comun=1{% endif %}{% if include_ml %}&wh_ml=1{% endif %}{% for value in selected_ml_types %}&ml_type={{ value|urlencode }}{% endfor %}&page={{ page_obj.previous_page_number }}#history">Anterior</a>
     {% endif %}
     <span style="font-size:12px; color:var(--muted);">
         Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}
     </span>
     {% if page_obj.has_next %}
-    <a class="pill history-page-link" href="?q={{ search_query|urlencode }}{% if include_comun %}&wh_comun=1{% endif %}{% if include_ml %}&wh_ml=1{% endif %}&page={{ page_obj.next_page_number }}#history">Siguiente</a>
+    <a class="pill history-page-link" href="?q={{ search_query|urlencode }}{% if include_comun %}&wh_comun=1{% endif %}{% if include_ml %}&wh_ml=1{% endif %}{% for value in selected_ml_types %}&ml_type={{ value|urlencode }}{% endfor %}&page={{ page_obj.next_page_number }}#history">Siguiente</a>
     {% endif %}
 </div>
 {% endif %}

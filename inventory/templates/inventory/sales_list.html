@@ -101,6 +101,18 @@
                 </label>
             </div>
         </div>
+        <div style="margin-top:10px;">
+            <label style="display:block; margin-bottom:4px;">Canal de MercadoLibre</label>
+            <div id="ml-type-filters" style="display:flex; flex-wrap:wrap; gap:12px;">
+                {% for value, label in ml_type_choices %}
+                <label style="display:flex; gap:6px; align-items:center; font-size:13px;">
+                    <input type="checkbox" name="ml_type" value="{{ value }}" {% if value in selected_ml_types %}checked{% endif %}>
+                    {{ label }}
+                </label>
+                {% endfor %}
+            </div>
+            <p class="subtitle" style="margin:4px 0 0; font-size:12px;">Sin marcar nada se muestran todos los canales.</p>
+        </div>
     </form>
     <form method="post" action="{% url 'inventory_sales_list' %}">
         {% csrf_token %}
@@ -135,28 +147,31 @@
         // un header vacío que Django prioriza, rechazando el POST con 403.
         const getCookie = () => document.querySelector('input[name="csrfmiddlewaretoken"]')?.value || "";
 
-        const buildParams = (page) => {
+        const mlTypeInputs = form ? Array.from(form.querySelectorAll("input[name='ml_type']")) : [];
+
+        // Base común de los dos armados de query string: si se agrega un filtro
+        // hay que tocarlo en un solo lugar y no en dos que se desincronizan.
+        const baseParams = (page) => {
             const params = new URLSearchParams();
             if (queryInput?.value) params.set("q", queryInput.value);
             if (whComun?.checked) params.set("wh_comun", "1");
             if (whMl?.checked) params.set("wh_ml", "1");
+            mlTypeInputs.filter((el) => el.checked).forEach((el) => params.append("ml_type", el.value));
             if (startInput?.value) params.set("start_date", startInput.value);
             if (endInput?.value) params.set("end_date", endInput.value);
             if (page) params.set("page", String(page));
             if (historyEnabled) params.set("show_history", "1");
+            return params;
+        };
+
+        const buildParams = (page) => {
+            const params = baseParams(page);
             params.set("ajax", "1");
             return params;
         };
 
         const updateUrl = (page) => {
-            const params = new URLSearchParams();
-            if (queryInput?.value) params.set("q", queryInput.value);
-            if (whComun?.checked) params.set("wh_comun", "1");
-            if (whMl?.checked) params.set("wh_ml", "1");
-            if (startInput?.value) params.set("start_date", startInput.value);
-            if (endInput?.value) params.set("end_date", endInput.value);
-            if (page) params.set("page", String(page));
-            if (historyEnabled) params.set("show_history", "1");
+            const params = baseParams(page);
             const qs = params.toString();
             const url = qs ? `${location.pathname}?${qs}#history` : `${location.pathname}#history`;
             history.replaceState(null, "", url);
@@ -186,7 +201,7 @@
                 debounceId = setTimeout(() => fetchHistory(1), 250);
             });
         }
-        [whComun, whMl].forEach((checkbox) => {
+        [whComun, whMl, ...mlTypeInputs].forEach((checkbox) => {
             if (checkbox) checkbox.addEventListener("change", () => {
                 if (!historyEnabled) return;
                 fetchHistory(1);

@@ -439,6 +439,10 @@ class MercadoLibreItem(models.Model):
         default="",
         help_text="user_product_id de ML; compartido entre publicación tradicional y de catálogo del mismo producto (agrupa el stock Full)",
     )
+    has_flex = models.BooleanField(
+        default=False,
+        help_text="La publicación tiene Envíos Flex activo (tag self_service_in). Con logistic_type=fulfillment indica convivencia Full/Flex.",
+    )
     available_quantity = models.IntegerField(default=0)
     product = models.ForeignKey(Product, null=True, blank=True, on_delete=models.SET_NULL, related_name="ml_items")
     matched_name = models.CharField(max_length=255, blank=True, default="")
@@ -499,6 +503,37 @@ class PurchaseItem(models.Model):
         return f"{self.product.sku} x {self.quantity}"
 
 
+class MLLogisticType(models.TextChoices):
+    """Tipo logístico de MercadoLibre (ME2), tal como lo devuelve la API.
+
+    Los valores son los mismos strings que manda ML (`logistic.type` en el JSON
+    nuevo de /shipments, `logistic_type` en /items), así que se guardan crudos y
+    no hace falta traducirlos de ida y vuelta.
+    """
+
+    FULFILLMENT = "fulfillment", "Full"
+    SELF_SERVICE = "self_service", "Flex"
+    CROSS_DOCKING = "cross_docking", "Colecta"
+    XD_DROP_OFF = "xd_drop_off", "Places"
+    DROP_OFF = "drop_off", "Correo"
+    CUSTOM = "custom", "Envío propio"
+    NOT_SPECIFIED = "not_specified", "A convenir"
+
+
+# Tipos logísticos donde la mercadería sale del depósito del vendedor: el stock
+# lo maneja el ERP (depósito COMUN), no MercadoLibre. Full es la única excepción.
+ML_SELLER_FULFILLED_TYPES = frozenset(
+    {
+        MLLogisticType.SELF_SERVICE,
+        MLLogisticType.CROSS_DOCKING,
+        MLLogisticType.XD_DROP_OFF,
+        MLLogisticType.DROP_OFF,
+        MLLogisticType.CUSTOM,
+        MLLogisticType.NOT_SPECIFIED,
+    }
+)
+
+
 class Sale(models.Model):
     class DeliveryStatus(models.TextChoices):
         NOT_DELIVERED = "NOT_DELIVERED", "No entregado"
@@ -517,6 +552,14 @@ class Sale(models.Model):
     )
     reference = models.CharField(max_length=255, blank=True, default="")
     ml_order_id = models.CharField(max_length=50, blank=True, default="")
+    ml_logistic_type = models.CharField(
+        max_length=30,
+        choices=MLLogisticType.choices,
+        blank=True,
+        default="",
+        help_text="Tipo logístico de la venta ML (Full/Flex/Colecta/...). Vacío en ventas propias o ventas ML viejas sin resincronizar.",
+    )
+    ml_shipment_id = models.CharField(max_length=50, blank=True, default="")
     ml_commission_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     ml_tax_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     ml_fraud_risk = models.BooleanField(default=False)
@@ -532,7 +575,10 @@ class Sale(models.Model):
 
     class Meta:
         ordering = ["-created_at", "-id"]
-        indexes = [models.Index(fields=["created_at"], name="sale_created_idx")]
+        indexes = [
+            models.Index(fields=["created_at"], name="sale_created_idx"),
+            models.Index(fields=["ml_logistic_type"], name="sale_ml_logistic_idx"),
+        ]
 
     def __str__(self) -> str:
         return f"Sale #{self.pk}"
@@ -540,6 +586,18 @@ class Sale(models.Model):
     @property
     def invoice_number(self) -> str:
         return f"00001-{self.pk:08d}" if self.pk else ""
+
+    @property
+    def is_seller_fulfilled_ml(self) -> bool:
+        """La mercadería sale del depósito propio (Flex/Colecta/Places/Correo)."""
+        return self.ml_logistic_type in ML_SELLER_FULFILLED_TYPES
+
+    @property
+    def ml_channel_label(self) -> str:
+        """Etiqueta corta del canal, para las tablas de ventas."""
+        if self.ml_logistic_type:
+            return MLLogisticType(self.ml_logistic_type).label
+        return "Sin dato" if self.ml_order_id else ""
 
 
 class SaleItem(models.Model):
