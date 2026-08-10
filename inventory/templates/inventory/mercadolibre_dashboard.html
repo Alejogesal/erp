@@ -613,9 +613,11 @@
                 </td>
                 <td>
                     {% if item.erp_stock is not None %}
-                        {# El desfasaje solo tiene sentido contra lo que sale del depósito
-                           propio. Comparar el ERP contra el stock en Full marcaba en
-                           naranja diferencias que son normales. #}
+                        {% comment %}
+                        El desfasaje solo tiene sentido contra lo que sale del depósito
+                        propio. Comparar el ERP contra el stock en Full marcaba en
+                        naranja diferencias que son normales.
+                        {% endcomment %}
                         {% if item.sells_from_own_warehouse and item.erp_stock != item.flex_quantity %}
                         <span style="color:#f0ad4e; font-weight:600;" title="No coincide con lo publicado desde tu depósito">{{ item.erp_stock|floatformat:0 }}</span>
                         {% else %}
