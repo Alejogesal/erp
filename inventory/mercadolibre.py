@@ -881,6 +881,13 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
     # transferencias, y un push puede fallar (token vencido, error de red) sin
     # que nada lo corrija. Este barrido es la garantía de que la publicación
     # termina reflejando el depósito COMUN.
+    # Apagada por defecto: empujar COMUN a ML solo es correcto si COMUN ya está
+    # alineado con la realidad. Mientras haya productos donde el ERP quedó
+    # desactualizado (ventas Flex viejas que nunca descontaron) o donde varias
+    # publicaciones comparten un mismo producto, el barrido pisaría cantidades
+    # buenas con malas. Encender con ML_STOCK_RECONCILE=1 recién después de
+    # alinear. Ver el comando align_ml_stock.
+    reconcile_enabled = os.environ.get("ML_STOCK_RECONCILE", "0") == "1"
     comun_qty_cache: dict[int, int] = {}
     reconciled_user_products: set[str] = set()
     stock_pushed = 0
@@ -945,7 +952,7 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
                 full_by_product.setdefault(product.id, {})
             products_seen[product.id] = product
 
-            if comun_wh and status != "closed":
+            if reconcile_enabled and comun_wh and status != "closed":
                 comun_qty = comun_qty_cache.get(product.id)
                 if comun_qty is None:
                     comun_stock = Stock.objects.filter(product=product, warehouse=comun_wh).first()
