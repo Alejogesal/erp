@@ -43,6 +43,57 @@
         </form>
     </div>
     <div class="card">
+        <div class="card-title">Proveedor principal por marca</div>
+        <p class="subtitle" style="margin-top:0;">Elegí el proveedor principal de cada marca. Su precio se usa como costo de todos los productos de la marca (manda sobre el "más barato" automático). Es lo que aparece en la lista de precios.</p>
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="set_brand_supplier">
+            <p>
+                <label for="id_brand_group">Marca / Grupo</label>
+                <input id="id_brand_group" name="group" list="group-options-suppliers" required>
+            </p>
+            <p>
+                <label for="id_brand_supplier">Proveedor principal</label>
+                <select id="id_brand_supplier" name="supplier" required>
+                    <option value="">Seleccionar</option>
+                    {% for supplier in suppliers %}
+                    <option value="{{ supplier.id }}">{{ supplier.name }}</option>
+                    {% endfor %}
+                </select>
+            </p>
+            <button type="submit">Asignar proveedor a marca</button>
+        </form>
+        {% if brand_suppliers %}
+        <table style="width:100%; margin-top:12px; font-size:13px; border-collapse:collapse;">
+            <thead>
+                <tr style="text-align:left; border-bottom:1px solid #ccc;">
+                    <th style="padding:4px 6px;">Marca</th>
+                    <th style="padding:4px 6px;">Proveedor principal</th>
+                    <th style="padding:4px 6px;"></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for bs in brand_suppliers %}
+                <tr style="border-bottom:1px solid #eee;">
+                    <td style="padding:4px 6px;">{{ bs.group }}</td>
+                    <td style="padding:4px 6px;">{{ bs.supplier.name }}</td>
+                    <td style="padding:4px 6px; text-align:right;">
+                        <form method="post" style="display:inline;" onsubmit="return confirm('¿Quitar el proveedor principal fijo de esta marca? Vuelve a usar el más barato.');">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="remove_brand_supplier">
+                            <input type="hidden" name="group" value="{{ bs.group }}">
+                            <button type="submit" style="background:#c0392b; font-size:12px;">Quitar</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="subtitle" style="margin-top:12px;">Todavía no asignaste proveedor principal a ninguna marca (se usa el más barato).</p>
+        {% endif %}
+    </div>
+    <div class="card">
         <div class="card-title">Renombrar marca</div>
         <p class="subtitle" style="margin-top:0;">Cambia el nombre de la marca en todos los productos que la tengan. No borra ni desvincula nada.</p>
         <form method="post">

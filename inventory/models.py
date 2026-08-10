@@ -373,6 +373,25 @@ class SupplierProduct(models.Model):
         return (self.last_cost / factor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
+class BrandSupplier(models.Model):
+    """Proveedor principal ELEGIDO para una marca (Product.group).
+
+    Cuando existe, manda sobre la selección automática del más barato: el proveedor
+    principal (y por lo tanto el costo) de todos los productos de esa marca sale de
+    este proveedor. Si el proveedor elegido no tiene precio cargado para algún
+    producto, ese producto cae al más barato para no quedar sin costo.
+    """
+    group = models.CharField(max_length=100, unique=True, help_text="Marca / grupo")
+    supplier = models.ForeignKey(Supplier, on_delete=models.CASCADE, related_name="principal_brands")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["group"]
+
+    def __str__(self) -> str:
+        return f"{self.group} → {self.supplier.name}"
+
+
 class MercadoLibreNotification(models.Model):
     topic = models.CharField(max_length=100, blank=True, default="")
     resource = models.CharField(max_length=255, blank=True, default="")

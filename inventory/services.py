@@ -5,7 +5,7 @@ from django.db.models import Sum
 
 from django.utils import timezone
 
-from .models import Product, ProductVariant, Stock, StockMovement, SupplierProduct, Warehouse
+from .models import BrandSupplier, Product, ProductVariant, Stock, StockMovement, SupplierProduct, Warehouse
 
 
 class StockError(Exception):
@@ -81,15 +81,44 @@ def select_cheapest_supplier_link(product: Product) -> SupplierProduct | None:
     return min(candidates, key=lambda link: link.cost_net)
 
 
+def _brand_pinned_link(product: Product) -> SupplierProduct | None:
+    """Vínculo del proveedor principal ELEGIDO para la marca del producto.
+
+    Solo lo devuelve si esa marca tiene un proveedor asignado (BrandSupplier), el
+    producto está vinculado a ese proveedor y tiene precio cargado (>0). En cualquier
+    otro caso devuelve None para que el llamador caiga al más barato.
+    """
+    group = (product.group or "").strip()
+    if not group:
+        return None
+    bs = BrandSupplier.objects.filter(group__iexact=group).first()
+    if not bs:
+        return None
+    link = SupplierProduct.objects.filter(product=product, supplier_id=bs.supplier_id).first()
+    if link and link.cost_net and link.cost_net > Decimal("0.00"):
+        return link
+    return None
+
+
+def resolve_principal_link(product: Product) -> SupplierProduct | None:
+    """Vínculo que debe ser el proveedor principal del producto: el elegido para su
+    marca (si aplica) y, si no, el más barato."""
+    return _brand_pinned_link(product) or select_cheapest_supplier_link(product)
+
+
 def sync_principal_to_cheapest(product: Product) -> bool:
-    """Asigna como proveedor principal al vínculo más barato del producto y
-    sincroniza el costo desde ahí. Devuelve True si el principal cambió."""
-    cheapest = select_cheapest_supplier_link(product)
-    if cheapest is None:
+    """Asigna el proveedor principal del producto y sincroniza el costo desde ahí.
+
+    Si la marca del producto tiene un proveedor principal ELEGIDO (BrandSupplier) con
+    precio cargado, ese manda sobre el automático; si no, se usa el vínculo más barato.
+    Devuelve True si el proveedor principal cambió.
+    """
+    chosen = resolve_principal_link(product)
+    if chosen is None:
         return False
-    changed = product.default_supplier_id != cheapest.supplier_id
+    changed = product.default_supplier_id != chosen.supplier_id
     if changed:
-        product.default_supplier = cheapest.supplier
+        product.default_supplier = chosen.supplier
         product.save(update_fields=["default_supplier"])
     sync_product_cost_from_principal(product)
     return changed

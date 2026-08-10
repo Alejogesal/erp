@@ -300,6 +300,11 @@ class SupplierUnlinkGroupForm(forms.Form):
     group = forms.CharField(label="Marca / Grupo")
 
 
+class BrandSupplierForm(forms.Form):
+    group = forms.CharField(label="Marca / Grupo")
+    supplier = forms.ModelChoiceField(queryset=Supplier.objects.all(), label="Proveedor principal")
+
+
 class ProductVariantForm(forms.Form):
     name = forms.CharField(label="Variedad")
     quantity = forms.DecimalField(min_value=Decimal("0.00"), decimal_places=2, label="Stock")

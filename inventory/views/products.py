@@ -772,11 +772,14 @@ def product_prices_download(request, audience: str):
             products = products.filter(group__in=groups)
     products = list(products)
 
-    # Proveedor principal de cada marca = el default_supplier más frecuente entre
-    # los productos de esa marca (que es el más barato, del cual ya sale el costo).
+    # Proveedor principal de cada marca:
+    #  1) el ELEGIDO por el usuario (BrandSupplier), si la marca tiene uno; o
+    #  2) el default_supplier más frecuente entre los productos de esa marca
+    #     (el más barato, del cual sale el costo) como fallback.
     # Solo se listan los productos cuyo proveedor principal coincide con el de su
     # marca, para no repetir productos por proveedores secundarios/duplicados.
     from collections import Counter, defaultdict
+    from ..models import BrandSupplier
 
     brand_supplier_counts: dict[str, Counter] = defaultdict(Counter)
     for p in products:
@@ -786,6 +789,13 @@ def product_prices_download(request, audience: str):
         group: counts.most_common(1)[0][0]
         for group, counts in brand_supplier_counts.items()
     }
+    # La elección explícita del usuario manda sobre lo deducido (match case-insensitive).
+    explicit = {bs.group.casefold(): bs.supplier_id for bs in BrandSupplier.objects.all()}
+    if explicit:
+        for group in list(brand_principal.keys()):
+            chosen = explicit.get(group.casefold())
+            if chosen is not None:
+                brand_principal[group] = chosen
 
     def _include(p) -> bool:
         # Los kits son productos propios (sin proveedor): se incluyen siempre.

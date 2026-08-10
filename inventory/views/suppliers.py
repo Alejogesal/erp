@@ -12,6 +12,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from ..models import (
+    BrandSupplier,
     Product,
     Purchase,
     Supplier,
@@ -21,6 +22,7 @@ from ..models import (
 from ..services import sync_principal_to_cheapest
 from .common import _normalize_lookup_text
 from .forms import (
+    BrandSupplierForm,
     SupplierForm,
     SupplierGroupForm,
     SupplierPaymentForm,
@@ -258,6 +260,7 @@ def suppliers(request):
     link_form = SupplierProductForm()
     link_group_form = SupplierGroupForm()
     unlink_group_form = SupplierUnlinkGroupForm()
+    brand_supplier_form = BrandSupplierForm()
     suppliers_qs = Supplier.objects.prefetch_related("supplier_products__product")
 
     if request.method == "POST":
@@ -370,6 +373,58 @@ def suppliers(request):
                     ),
                 )
                 return redirect("inventory_suppliers")
+        elif action == "set_brand_supplier":
+            brand_supplier_form = BrandSupplierForm(request.POST)
+            if brand_supplier_form.is_valid():
+                supplier = brand_supplier_form.cleaned_data["supplier"]
+                group = (brand_supplier_form.cleaned_data["group"] or "").strip()
+                if not group:
+                    messages.error(request, "Elegí una marca / grupo.")
+                    return redirect("inventory_suppliers")
+                # Se guarda la marca con su casing real (el de los productos) si existe.
+                real_group = (
+                    Product.objects.filter(group__iexact=group)
+                    .values_list("group", flat=True)
+                    .first()
+                ) or group
+                BrandSupplier.objects.update_or_create(
+                    group=real_group, defaults={"supplier": supplier}
+                )
+                # Reasigna el proveedor principal (y el costo) de los productos de la
+                # marca al elegido. Los que no estén vinculados a ese proveedor con
+                # precio quedan en el más barato (fallback dentro de sync).
+                products = Product.objects.filter(group__iexact=group)
+                changed = sum(1 for p in products if sync_principal_to_cheapest(p))
+                not_linked = products.exclude(
+                    supplier_products__supplier=supplier
+                ).count()
+                msg = (
+                    f"Proveedor principal de la marca '{real_group}' asignado a "
+                    f"{supplier.name}. Productos reasignados: {changed}."
+                )
+                if not_linked:
+                    msg += (
+                        f" Ojo: {not_linked} producto(s) no están vinculados a {supplier.name} "
+                        f"(quedaron en el proveedor más barato). Usá 'Vincular proveedor a marca' "
+                        f"para traer sus precios."
+                    )
+                messages.success(request, msg)
+                return redirect("inventory_suppliers")
+        elif action == "remove_brand_supplier":
+            group = (request.POST.get("group") or "").strip()
+            deleted, _ = BrandSupplier.objects.filter(group__iexact=group).delete()
+            if deleted:
+                # Vuelven a resolverse al más barato.
+                for p in Product.objects.filter(group__iexact=group):
+                    sync_principal_to_cheapest(p)
+                messages.success(
+                    request,
+                    f"Se quitó el proveedor principal fijo de la marca '{group}'. "
+                    f"Sus productos vuelven a usar el proveedor más barato.",
+                )
+            else:
+                messages.warning(request, f"La marca '{group}' no tenía proveedor principal fijo.")
+            return redirect("inventory_suppliers")
         elif action == "import_price_list":
             supplier = Supplier.objects.filter(id=request.POST.get("price_supplier_id")).first()
             upload = request.FILES.get("price_file")
@@ -696,11 +751,16 @@ def suppliers(request):
         .distinct()
         .order_by("group")
     )
+    brand_suppliers = list(
+        BrandSupplier.objects.select_related("supplier").order_by("group")
+    )
     context = {
         "supplier_form": supplier_form,
         "link_form": link_form,
         "link_group_form": link_group_form,
         "unlink_group_form": unlink_group_form,
+        "brand_supplier_form": brand_supplier_form,
+        "brand_suppliers": brand_suppliers,
         "suppliers": suppliers_qs,
         "group_options": group_options,
         "price_import_created": request.session.pop("price_import_created", None),
