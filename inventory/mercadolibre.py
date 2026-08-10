@@ -365,6 +365,41 @@ def _flex_stock_from_locations(data: dict) -> tuple[int, bool]:
     return total, found
 
 
+def resolve_stock_breakdown(
+    connection: "MercadoLibreConnection",
+    item: dict,
+    access_token: str,
+    cache: dict | None = None,
+) -> tuple[int, str, int, int]:
+    """(available, user_product_id, en_full, en_deposito_propio) de una publicación.
+
+    Separar las dos ubicaciones importa porque significan cosas distintas:
+    `meli_facility` es mercadería que está físicamente en el depósito de ML, y
+    `selling_address` es la que está en el tuyo. Mostrarlas juntas en un solo
+    número hace que parezcan un desfasaje cosas que no lo son.
+
+    Para las publicaciones que no son Full no hace falta llamar a la API: todo
+    el stock publicado sale del depósito propio.
+    """
+    available, user_product_id = resolve_authoritative_stock(connection, item, access_token, cache=cache)
+    logistic_type = item_logistic_type(item)
+    if logistic_type != "fulfillment":
+        return available, user_product_id, 0, available
+    data = (cache or {}).get(user_product_id)
+    if data is None and user_product_id:
+        try:
+            data = _call_with_refresh(
+                connection, get_user_product_stock, user_product_id, access_token=access_token
+            )
+        except Exception:
+            data = {}
+        if cache is not None:
+            cache[user_product_id] = data
+    full_qty, _ = _full_stock_from_locations(data or {})
+    flex_qty, _ = _flex_stock_from_locations(data or {})
+    return available, user_product_id, full_qty, flex_qty
+
+
 def resolve_authoritative_stock(
     connection: "MercadoLibreConnection",
     item: dict,
@@ -919,7 +954,7 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
         # For Full items the /items available_quantity is unreliable (Full/Flex
         # coexistence); the user-products stock endpoint (meli_facility) is the
         # source of truth. Non-Full items keep using available_quantity directly.
-        available, user_product_id = resolve_authoritative_stock(
+        available, user_product_id, full_qty, flex_qty = resolve_stock_breakdown(
             connection, item, access_token, cache=fulfillment_cache
         )
         existing = MercadoLibreItem.objects.filter(item_id=item_id).first()
@@ -930,6 +965,8 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
             defaults={
                 "title": title,
                 "available_quantity": available,
+                "full_quantity": full_qty,
+                "flex_quantity": flex_qty,
                 "status": status,
                 "logistic_type": logistic_type,
                 "has_flex": has_flex,
@@ -966,12 +1003,12 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
                 if logistic_type == "fulfillment" and has_flex and user_product_id:
                     # Convivencia: solo se corrige la ubicación selling_address;
                     # el stock en el depósito de ML no se toca.
-                    published, found = _flex_stock_from_locations(
+                    _published, found = _flex_stock_from_locations(
                         fulfillment_cache.get(user_product_id) or {}
                     )
                     if (
                         found
-                        and published != comun_qty
+                        and flex_qty != comun_qty
                         and user_product_id not in reconciled_user_products
                     ):
                         reconciled_user_products.add(user_product_id)

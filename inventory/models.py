@@ -444,6 +444,14 @@ class MercadoLibreItem(models.Model):
         help_text="La publicación tiene Envíos Flex activo (tag self_service_in). Con logistic_type=fulfillment indica convivencia Full/Flex.",
     )
     available_quantity = models.IntegerField(default=0)
+    full_quantity = models.IntegerField(
+        default=0,
+        help_text="Unidades en el depósito de MercadoLibre (meli_facility). Solo aplica a publicaciones Full.",
+    )
+    flex_quantity = models.IntegerField(
+        default=0,
+        help_text="Unidades publicadas del depósito propio (selling_address). Es la que debe coincidir con el stock COMUN.",
+    )
     product = models.ForeignKey(Product, null=True, blank=True, on_delete=models.SET_NULL, related_name="ml_items")
     matched_name = models.CharField(max_length=255, blank=True, default="")
     last_sold_at = models.DateTimeField(null=True, blank=True)
@@ -455,6 +463,18 @@ class MercadoLibreItem(models.Model):
 
     def __str__(self) -> str:
         return f"{self.item_id} - {self.title}"
+
+    @property
+    def sells_from_own_warehouse(self) -> bool:
+        """La publicación vende (al menos en parte) desde el depósito propio.
+
+        Todo lo que no es Full sale de tu depósito; y una publicación Full con
+        Flex activo (convivencia) vende de los dos lados. Solo el Full puro
+        despacha exclusivamente desde el depósito de MercadoLibre.
+        """
+        if self.logistic_type != MLLogisticType.FULFILLMENT:
+            return True
+        return self.has_flex
 
 
 class Purchase(models.Model):

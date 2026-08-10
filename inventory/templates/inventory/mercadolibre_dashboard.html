@@ -537,7 +537,8 @@
             <tr>
                 <th>Item</th>
                 <th>Producto (match)</th>
-                <th title="Stock publicado en ML (se actualiza cada 5 min)">Stock ML</th>
+                <th title="Unidades en el depósito de MercadoLibre. Ese stock lo administra ML: no tiene por qué coincidir con el del ERP.">Full</th>
+                <th title="Unidades publicadas en ML que salen de tu depósito. Esta es la que debe coincidir con el stock del ERP.">Depósito ML</th>
                 <th title="Stock en depósito COMUN del ERP">Stock ERP</th>
                 <th title="Precio calculado: costo × margen del ERP">Precio ERP</th>
                 <th>Estado</th>
@@ -596,11 +597,27 @@
                         <button type="submit" style="margin-top:6px;">Guardar</button>
                     </form>
                 </td>
-                <td>{{ item.available_quantity }}</td>
+                <td>
+                    {% if item.logistic_type == "fulfillment" %}
+                    {{ item.full_quantity }}
+                    {% else %}
+                    <span style="color:var(--muted);" title="Esta publicación no usa Full">–</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if item.sells_from_own_warehouse %}
+                    {{ item.flex_quantity }}
+                    {% else %}
+                    <span style="color:var(--muted);" title="Solo Full: no se vende desde tu depósito">–</span>
+                    {% endif %}
+                </td>
                 <td>
                     {% if item.erp_stock is not None %}
-                        {% if item.erp_stock != item.available_quantity %}
-                        <span style="color:#f0ad4e; font-weight:600;">{{ item.erp_stock|floatformat:0 }}</span>
+                        {# El desfasaje solo tiene sentido contra lo que sale del depósito
+                           propio. Comparar el ERP contra el stock en Full marcaba en
+                           naranja diferencias que son normales. #}
+                        {% if item.sells_from_own_warehouse and item.erp_stock != item.flex_quantity %}
+                        <span style="color:#f0ad4e; font-weight:600;" title="No coincide con lo publicado desde tu depósito">{{ item.erp_stock|floatformat:0 }}</span>
                         {% else %}
                         {{ item.erp_stock|floatformat:0 }}
                         {% endif %}
@@ -645,7 +662,7 @@
                 </td>
             </tr>
             {% empty %}
-            <tr><td colspan="7">Aún no hay publicaciones sincronizadas.</td></tr>
+            <tr><td colspan="8">Aún no hay publicaciones sincronizadas.</td></tr>
             {% endfor %}
         </tbody>
     </table>

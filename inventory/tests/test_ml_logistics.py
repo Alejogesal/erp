@@ -517,6 +517,72 @@ class StockReconciliationTests(TestCase):
         push_flex.assert_not_called()
 
 
+class StockBreakdownTests(TestCase):
+    """Full y depósito propio son ubicaciones distintas y se muestran separadas.
+
+    Antes se mostraban sumadas en un solo "Stock ML", así que el panel marcaba
+    como desfasaje la diferencia entre el stock en Full y el del ERP, que es
+    normal que no coincidan.
+    """
+
+    def setUp(self):
+        _reset_current_user()
+        self.user = get_user_model().objects.create_user(username="brk", password="x")
+        self.connection = MercadoLibreConnection.objects.create(user=self.user, ml_user_id="777")
+
+    def _breakdown(self, item, stock_payload=None):
+        def dispatch(connection, func, *args, **kwargs):
+            if func is ml.get_user_product_stock:
+                return stock_payload or {}
+            raise AssertionError(f"llamada inesperada: {func}")
+
+        with patch.object(ml, "_call_with_refresh", side_effect=dispatch):
+            return ml.resolve_stock_breakdown(self.connection, item, "tok", cache={})
+
+    def test_non_full_publication_is_all_own_warehouse(self):
+        item = {"available_quantity": 9, "shipping": {"logistic_type": "self_service"}}
+        _avail, _up, full, flex = self._breakdown(item)
+        self.assertEqual((full, flex), (0, 9))
+
+    def test_pure_full_has_no_own_stock(self):
+        item = {
+            "available_quantity": 3,
+            "user_product_id": "MLAU1",
+            "shipping": {"logistic_type": "fulfillment"},
+        }
+        _avail, _up, full, flex = self._breakdown(
+            item, {"locations": [{"type": "meli_facility", "quantity": 3}]}
+        )
+        self.assertEqual((full, flex), (3, 0))
+
+    def test_coexistence_splits_both_locations(self):
+        item = {
+            "available_quantity": 19,
+            "user_product_id": "MLAU1",
+            "shipping": {"logistic_type": "fulfillment", "tags": ["self_service_in"]},
+        }
+        _avail, _up, full, flex = self._breakdown(
+            item,
+            {
+                "locations": [
+                    {"type": "meli_facility", "quantity": 3},
+                    {"type": "selling_address", "quantity": 16},
+                ]
+            },
+        )
+        self.assertEqual((full, flex), (3, 16))
+
+    def test_sells_from_own_warehouse_flag(self):
+        pure_full = MercadoLibreItem(logistic_type="fulfillment", has_flex=False)
+        coexist = MercadoLibreItem(logistic_type="fulfillment", has_flex=True)
+        flex = MercadoLibreItem(logistic_type="self_service")
+        places = MercadoLibreItem(logistic_type="xd_drop_off")
+        self.assertFalse(pure_full.sells_from_own_warehouse)
+        self.assertTrue(coexist.sells_from_own_warehouse)
+        self.assertTrue(flex.sells_from_own_warehouse)
+        self.assertTrue(places.sells_from_own_warehouse)
+
+
 class SalesChannelFilterTests(TestCase):
     def setUp(self):
         _reset_current_user()
