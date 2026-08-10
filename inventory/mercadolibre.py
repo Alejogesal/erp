@@ -816,6 +816,18 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
         raise
     order_status = order.get("status", "") or ""
     if order_status in {"cancelled", "expired"}:
+        # La orden está cancelada/expirada en ML: si ya existe la venta importada,
+        # se marca como cancelada (queda en el historial pero deja de contar en
+        # ventas y ganancias). No se borra.
+        existing = (
+            Sale.objects.filter(ml_order_id=str(order_id)).first()
+            or Sale.objects.filter(reference=f"ML ORDER {order_id}").first()
+        )
+        if existing and not existing.is_cancelled:
+            existing.is_cancelled = True
+            existing.cancelled_at = timezone.now()
+            existing.save(update_fields=["is_cancelled", "cancelled_at"])
+            return False, "cancelled_marked"
         return False, "ignored_status"
 
     order_date = _parse_ml_datetime(order.get("date_created"))

@@ -88,7 +88,7 @@ def iva_position(request):
     # ── Débito fiscal (ventas) ────────────────────────────────────────────────
     sale_items_qs = (
         SaleItem.objects
-        .filter(vat_percent__gt=0)
+        .filter(vat_percent__gt=0, sale__is_cancelled=False)
         .select_related("sale", "sale__warehouse", "product")
         .order_by("sale__created_at", "sale__id")
     )

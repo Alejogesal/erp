@@ -520,6 +520,11 @@ class Sale(models.Model):
     ml_commission_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     ml_tax_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     ml_fraud_risk = models.BooleanField(default=False)
+    is_cancelled = models.BooleanField(
+        default=False,
+        help_text="Venta cancelada/expirada: queda en el historial pero no cuenta en ventas ni ganancias.",
+    )
+    cancelled_at = models.DateTimeField(null=True, blank=True)
     shipping_cost = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

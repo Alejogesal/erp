@@ -22,8 +22,8 @@
     </thead>
     <tbody>
         {% for sale in sales_comun %}
-        <tr data-created="{{ sale.created_at|date:'c' }}">
-            <td>{{ sale.ml_order_id|default:sale.invoice_number }}</td>
+        <tr data-created="{{ sale.created_at|date:'c' }}"{% if sale.is_cancelled %} style="opacity:0.55;"{% endif %}>
+            <td>{{ sale.ml_order_id|default:sale.invoice_number }}{% if sale.is_cancelled %} <span style="background:#c0392b; color:#fff; font-size:10px; padding:1px 5px; border-radius:3px; white-space:nowrap;">CANCELADA</span>{% endif %}</td>
             <td>{{ sale.created_at|date:"d/m/Y H:i" }}</td>
             <td>{{ sale.customer|default:"Consumidor final" }}</td>
             <td>{{ sale.warehouse.name }}</td>
@@ -79,8 +79,8 @@
     </thead>
     <tbody>
         {% for sale in sales_ml %}
-        <tr data-created="{{ sale.created_at|date:'c' }}">
-            <td>{{ sale.ml_order_id|default:sale.invoice_number }}</td>
+        <tr data-created="{{ sale.created_at|date:'c' }}"{% if sale.is_cancelled %} style="opacity:0.55;"{% endif %}>
+            <td>{{ sale.ml_order_id|default:sale.invoice_number }}{% if sale.is_cancelled %} <span style="background:#c0392b; color:#fff; font-size:10px; padding:1px 5px; border-radius:3px; white-space:nowrap;">CANCELADA</span>{% endif %}</td>
             <td>{{ sale.created_at|date:"d/m/Y H:i" }}</td>
             <td>{{ sale.customer|default:"Consumidor final" }}</td>
             <td>{{ sale.warehouse.name }}</td>

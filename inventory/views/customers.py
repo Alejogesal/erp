@@ -134,7 +134,7 @@ def customers_view(request):
     customers = Customer.objects.prefetch_related("discounts__product", "group_discounts", "custom_prices__product").order_by("name")
     sales_totals = {
         row["customer_id"]: row["total"] or Decimal("0.00")
-        for row in Sale.objects.filter(customer__isnull=False)
+        for row in Sale.objects.filter(customer__isnull=False, is_cancelled=False)
         .values("customer_id")
         .annotate(total=Sum("total"))
     }

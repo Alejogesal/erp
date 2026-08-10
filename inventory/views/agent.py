@@ -36,8 +36,10 @@ inventory_sale
   id, customer_id (nullable), warehouse_id, audience (CONSUMER/BARBER/DISTRIBUTOR),
   total, discount_total, delivery_status (NOT_DELIVERED/IN_TRANSIT/DELIVERED),
   reference, ml_order_id, ml_commission_total, ml_tax_total,
-  created_at, updated_at, user_id
+  is_cancelled (bool), created_at, updated_at, user_id
   → Ventas ML tienen ml_order_id con valor y warehouse type='MERCADOLIBRE'
+  → IMPORTANTE: is_cancelled=1 son ventas CANCELADAS; NO cuentan en ventas ni
+    ganancias. Filtrá SIEMPRE s.is_cancelled = 0 (o FALSE) al sumar ventas/ganancias.
 
 inventory_saleitem
   id, sale_id, product_id, variant_id (nullable), quantity,
@@ -139,7 +141,8 @@ WITH item_costs AS (
   JOIN inventory_sale s ON s.id = si.sale_id
   JOIN inventory_warehouse w ON w.id = s.warehouse_id
   JOIN inventory_product p ON p.id = si.product_id
-  WHERE s.created_at AT TIME ZONE 'America/Argentina/Buenos_Aires' >= '[INICIO]'
+  WHERE s.is_cancelled = FALSE
+    AND s.created_at AT TIME ZONE 'America/Argentina/Buenos_Aires' >= '[INICIO]'
     AND s.created_at AT TIME ZONE 'America/Argentina/Buenos_Aires' < '[FIN]'
 ),
 sale_totals AS (
@@ -156,7 +159,7 @@ FROM item_costs ic
 JOIN sale_totals st ON st.sale_id = ic.sale_id;
 
 SALDO PROVEEDOR: SUM(purchase.total) - SUM(payments donde kind='PAYMENT') + SUM(payments donde kind='ADJUSTMENT')
-VENTAS TOTALES DEL PERÍODO: SUM(inventory_saleitem.line_total) filtrando por sale__created_at
+VENTAS TOTALES DEL PERÍODO: SUM(inventory_saleitem.line_total) filtrando por sale__created_at y s.is_cancelled = FALSE
 
 IVA EN COMPRAS:
   El IVA de cada ítem de compra = pi.quantity * pi.unit_cost * (pi.vat_percent / 100)

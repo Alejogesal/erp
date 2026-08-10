@@ -44,8 +44,13 @@ def dashboard(request):
             end_dt = None
 
     purchase_qs = Purchase.objects.all()
-    sale_item_qs = SaleItem.objects.all()
-    sales_qs = Sale.objects.select_related("warehouse").prefetch_related("items__product", "items__variant")
+    # Las ventas canceladas quedan en el historial pero NO cuentan en ventas ni ganancias.
+    sale_item_qs = SaleItem.objects.filter(sale__is_cancelled=False)
+    sales_qs = (
+        Sale.objects.filter(is_cancelled=False)
+        .select_related("warehouse")
+        .prefetch_related("items__product", "items__variant")
+    )
     tax_qs = TaxExpense.objects.all()
     if start_dt:
         purchase_qs = purchase_qs.filter(created_at__gte=start_dt)
@@ -175,7 +180,7 @@ def dashboard(request):
     # --- Chart data: daily revenue last 30 days ---
     chart_from = timezone.now() - timedelta(days=29)
     daily_qs = (
-        Sale.objects.filter(created_at__gte=chart_from)
+        Sale.objects.filter(is_cancelled=False, created_at__gte=chart_from)
         .annotate(day=TruncDate("created_at"))
         .values("day", "warehouse__type")
         .annotate(revenue=Sum("total"))
