@@ -344,6 +344,22 @@ def _full_stock_from_locations(data: dict) -> tuple[int, bool]:
     return total, found
 
 
+def _flex_stock_from_locations(data: dict) -> tuple[int, bool]:
+    """Cantidad publicada en el depósito propio (selling_address) de un user_product.
+
+    Es la contraparte de _full_stock_from_locations: en convivencia Full/Flex el
+    mismo user_product tiene las dos ubicaciones y hay que compararlas por
+    separado contra el depósito COMUN.
+    """
+    total = 0
+    found = False
+    for loc in (data or {}).get("locations") or []:
+        if loc.get("type") == "selling_address":
+            total += int(loc.get("quantity", 0) or 0)
+            found = True
+    return total, found
+
+
 def resolve_authoritative_stock(
     connection: "MercadoLibreConnection",
     item: dict,
@@ -858,7 +874,16 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
             return SyncResult(0, 0, 0, 0, {"error": "unauthorized"})
         raise
     ml_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.MERCADOLIBRE).first()
+    comun_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
     total = matched = unmatched = updated_stock = 0
+    # Reconciliación COMUN -> ML. El push inmediato después de cada venta no
+    # alcanza: el stock propio también cambia con compras, ajustes manuales y
+    # transferencias, y un push puede fallar (token vencido, error de red) sin
+    # que nada lo corrija. Este barrido es la garantía de que la publicación
+    # termina reflejando el depósito COMUN.
+    comun_qty_cache: dict[int, int] = {}
+    reconciled_user_products: set[str] = set()
+    stock_pushed = 0
     # Cache user-product stock per user_product_id so publications sharing the
     # same Full stock (catalog + traditional) don't trigger duplicate API calls.
     fulfillment_cache: dict[str, dict] = {}
@@ -919,6 +944,34 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
             else:
                 full_by_product.setdefault(product.id, {})
             products_seen[product.id] = product
+
+            if comun_wh and status != "closed":
+                comun_qty = comun_qty_cache.get(product.id)
+                if comun_qty is None:
+                    comun_stock = Stock.objects.filter(product=product, warehouse=comun_wh).first()
+                    comun_qty = max(0, int(comun_stock.quantity)) if comun_stock else 0
+                    comun_qty_cache[product.id] = comun_qty
+                if logistic_type == "fulfillment" and has_flex and user_product_id:
+                    # Convivencia: solo se corrige la ubicación selling_address;
+                    # el stock en el depósito de ML no se toca.
+                    published, found = _flex_stock_from_locations(
+                        fulfillment_cache.get(user_product_id) or {}
+                    )
+                    if (
+                        found
+                        and published != comun_qty
+                        and user_product_id not in reconciled_user_products
+                    ):
+                        reconciled_user_products.add(user_product_id)
+                        if push_selling_address_stock(user_product_id, comun_qty, access_token):
+                            stock_pushed += 1
+                elif logistic_type != "fulfillment" and int(available) != comun_qty:
+                    try:
+                        push_item_stock_and_price(item_id, comun_qty, None, access_token)
+                        stock_pushed += 1
+                    except Exception:
+                        # Una publicación con error no debe cortar el barrido.
+                        pass
         else:
             unmatched += 1
 
@@ -978,6 +1031,7 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
 
     if truncated:
         metrics = {**metrics, "truncated": True, "max_items": max_items}
+    metrics = {**metrics, "stock_pushed": stock_pushed}
     return SyncResult(total, matched, unmatched, updated_stock, metrics)
 
 

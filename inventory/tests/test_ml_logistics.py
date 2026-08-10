@@ -326,6 +326,141 @@ class DeleteFlexSaleRestoresStockTests(TestCase):
         )
 
 
+class StockReconciliationTests(TestCase):
+    """El sync periódico empuja COMUN a ML aunque no haya habido ninguna venta.
+
+    El stock propio también cambia con compras, ajustes y transferencias, que no
+    pasan por el push inmediato de la venta; y un push puede fallar. Sin esta
+    reconciliación la publicación queda desfasada hasta la próxima venta.
+    """
+
+    def setUp(self):
+        _reset_current_user()
+        self.user = get_user_model().objects.create_user(username="rec", password="x")
+        self.connection = MercadoLibreConnection.objects.create(
+            user=self.user, access_token="tok", ml_user_id="777"
+        )
+        self.comun_wh = Warehouse.objects.get(type=Warehouse.WarehouseType.COMUN)
+        self.product = Product.objects.create(name="Cera", sku="CE1")
+        Stock.objects.create(product=self.product, warehouse=self.comun_wh, quantity=Decimal("12"))
+
+    def _run_sync(self, item):
+        MercadoLibreItem.objects.update_or_create(
+            item_id=item["id"],
+            defaults={
+                "product": self.product,
+                "logistic_type": ml.item_logistic_type(item),
+            },
+        )
+
+        def dispatch(connection, func, *args, **kwargs):
+            if func is ml.get_item_ids:
+                return ([item["id"]], False)
+            if func is ml.get_item:
+                return item
+            if func is ml.get_orders_summary:
+                return {"item_sales": {}}
+            if func is ml.get_user_product_stock:
+                return self.user_product_stock
+            raise AssertionError(f"llamada inesperada: {func}")
+
+        with patch.object(ml, "get_valid_access_token", return_value="tok"), patch.object(
+            ml, "_call_with_refresh", side_effect=dispatch
+        ), patch.object(ml, "push_item_stock_and_price") as push_item, patch.object(
+            ml, "push_selling_address_stock", return_value=True
+        ) as push_flex:
+            result = ml.sync_items_and_stock(self.connection, self.user, ignore_env_limit=True)
+        return result, push_item, push_flex
+
+    def test_flex_publication_is_corrected_to_comun(self):
+        # ML publica 3, el depósito tiene 12: sin venta de por medio (una compra).
+        item = {
+            "id": "MLA1",
+            "title": "Cera",
+            "status": "active",
+            "available_quantity": 3,
+            "shipping": {"logistic_type": "self_service"},
+        }
+        result, push_item, _push_flex = self._run_sync(item)
+        push_item.assert_called_once_with("MLA1", 12, None, "tok")
+        self.assertEqual(result.metrics["stock_pushed"], 1)
+
+    def test_no_push_when_already_in_sync(self):
+        item = {
+            "id": "MLA1",
+            "title": "Cera",
+            "status": "active",
+            "available_quantity": 12,
+            "shipping": {"logistic_type": "self_service"},
+        }
+        _result, push_item, _push_flex = self._run_sync(item)
+        push_item.assert_not_called()
+
+    def test_closed_publication_is_left_alone(self):
+        item = {
+            "id": "MLA1",
+            "title": "Cera",
+            "status": "closed",
+            "available_quantity": 0,
+            "shipping": {"logistic_type": "self_service"},
+        }
+        _result, push_item, _push_flex = self._run_sync(item)
+        push_item.assert_not_called()
+
+    def test_pure_full_publication_is_never_pushed(self):
+        item = {
+            "id": "MLA1",
+            "title": "Cera",
+            "status": "active",
+            "available_quantity": 3,
+            "user_product_id": "MLAU1",
+            "shipping": {"logistic_type": "fulfillment"},
+        }
+        self.user_product_stock = {"locations": [{"type": "meli_facility", "quantity": 3}]}
+        _result, push_item, push_flex = self._run_sync(item)
+        # El stock de Full lo administra ML.
+        push_item.assert_not_called()
+        push_flex.assert_not_called()
+
+    def test_coexistence_corrects_only_selling_address(self):
+        item = {
+            "id": "MLA1",
+            "title": "Cera",
+            "status": "active",
+            "available_quantity": 9,
+            "user_product_id": "MLAU1",
+            "shipping": {"logistic_type": "fulfillment", "tags": ["self_service_in"]},
+        }
+        self.user_product_stock = {
+            "locations": [
+                {"type": "meli_facility", "quantity": 6},
+                {"type": "selling_address", "quantity": 2},
+            ]
+        }
+        _result, push_item, push_flex = self._run_sync(item)
+        # Se corrige la ubicación propia (2 -> 12) sin tocar las 6 de Full.
+        push_flex.assert_called_once_with("MLAU1", 12, "tok")
+        push_item.assert_not_called()
+
+    def test_coexistence_in_sync_is_left_alone(self):
+        item = {
+            "id": "MLA1",
+            "title": "Cera",
+            "status": "active",
+            "available_quantity": 18,
+            "user_product_id": "MLAU1",
+            "shipping": {"logistic_type": "fulfillment", "tags": ["self_service_in"]},
+        }
+        self.user_product_stock = {
+            "locations": [
+                {"type": "meli_facility", "quantity": 6},
+                {"type": "selling_address", "quantity": 12},
+            ]
+        }
+        _result, _push_item, push_flex = self._run_sync(item)
+        push_flex.assert_not_called()
+
+
 class SalesChannelFilterTests(TestCase):
     def setUp(self):
         _reset_current_user()
