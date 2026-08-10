@@ -425,46 +425,6 @@ def suppliers(request):
             else:
                 messages.warning(request, f"La marca '{group}' no tenía proveedor principal fijo.")
             return redirect("inventory_suppliers")
-        elif action == "bulk_set_brand_suppliers":
-            groups = request.POST.getlist("bg_group")
-            sup_ids = request.POST.getlist("bg_supplier")
-            current = {bs.group.casefold(): bs.supplier_id for bs in BrandSupplier.objects.all()}
-            assigned = removed = resynced = 0
-            for group, sup_raw in zip(groups, sup_ids):
-                group = (group or "").strip()
-                if not group:
-                    continue
-                new_sid = int(sup_raw) if sup_raw else None
-                cur_sid = current.get(group.casefold())
-                if new_sid == cur_sid:
-                    continue  # sin cambios en esta marca
-                if new_sid is None:
-                    BrandSupplier.objects.filter(group__iexact=group).delete()
-                    removed += 1
-                else:
-                    supplier = Supplier.objects.filter(id=new_sid).first()
-                    if not supplier:
-                        continue
-                    real_group = (
-                        Product.objects.filter(group__iexact=group)
-                        .values_list("group", flat=True)
-                        .first()
-                    ) or group
-                    BrandSupplier.objects.update_or_create(group=real_group, defaults={"supplier": supplier})
-                    assigned += 1
-                # Reasignar principal/costo de los productos de la marca que cambió.
-                for p in Product.objects.filter(group__iexact=group):
-                    if sync_principal_to_cheapest(p):
-                        resynced += 1
-            if assigned or removed:
-                messages.success(
-                    request,
-                    f"Marcas actualizadas: {assigned} asignadas, {removed} quitadas. "
-                    f"Productos reasignados: {resynced}.",
-                )
-            else:
-                messages.info(request, "No hubo cambios en las marcas.")
-            return redirect("inventory_suppliers")
         elif action == "import_price_list":
             supplier = Supplier.objects.filter(id=request.POST.get("price_supplier_id")).first()
             upload = request.FILES.get("price_file")
@@ -794,52 +754,6 @@ def suppliers(request):
     brand_suppliers = list(
         BrandSupplier.objects.select_related("supplier").order_by("group")
     )
-    # Filas para la asignación masiva: cada marca con su proveedor actual (o el
-    # sugerido = el más frecuente como principal) y los proveedores que realmente
-    # la proveen (con precio), para acotar el desplegable a lo relevante.
-    from collections import Counter as _Counter, defaultdict as _defaultdict
-
-    supplier_names = {s.id: s.name for s in suppliers_qs}
-    current_brand_map = {bs.group.casefold(): bs.supplier_id for bs in brand_suppliers}
-    group_product_count: _Counter = _Counter()
-    group_default_counts: dict = _defaultdict(_Counter)
-    for row in (
-        Product.objects.exclude(group="").exclude(group__isnull=True)
-        .values("group", "default_supplier")
-    ):
-        g = row["group"]
-        group_product_count[g] += 1
-        if row["default_supplier"]:
-            group_default_counts[g][row["default_supplier"]] += 1
-    # Proveedores que proveen cada marca (tienen SupplierProduct de un producto de la marca).
-    group_supplier_links: dict = _defaultdict(set)
-    for row in (
-        SupplierProduct.objects.exclude(product__group="")
-        .values("supplier_id", "product__group")
-        .distinct()
-    ):
-        group_supplier_links[row["product__group"]].add(row["supplier_id"])
-
-    brand_rows = []
-    for group in group_options:
-        cur_sid = current_brand_map.get(group.casefold())
-        suggested = None
-        if group_default_counts.get(group):
-            suggested = group_default_counts[group].most_common(1)[0][0]
-        selected_sid = cur_sid if cur_sid is not None else suggested
-        linked_ids = group_supplier_links.get(group, set()) | ({cur_sid} if cur_sid else set())
-        options = sorted(
-            ({"id": sid, "name": supplier_names.get(sid, "?")} for sid in linked_ids if sid in supplier_names),
-            key=lambda o: o["name"].casefold(),
-        )
-        brand_rows.append({
-            "group": group,
-            "product_count": group_product_count.get(group, 0),
-            "selected_sid": selected_sid,
-            "is_assigned": cur_sid is not None,
-            "options": options,
-        })
-
     context = {
         "supplier_form": supplier_form,
         "link_form": link_form,
@@ -847,7 +761,6 @@ def suppliers(request):
         "unlink_group_form": unlink_group_form,
         "brand_supplier_form": brand_supplier_form,
         "brand_suppliers": brand_suppliers,
-        "brand_rows": brand_rows,
         "suppliers": suppliers_qs,
         "group_options": group_options,
         "price_import_created": request.session.pop("price_import_created", None),
@@ -927,6 +840,105 @@ def suppliers(request):
     context["debtors"] = debtors
     context["total_debt"] = total_debt
     return render(request, "inventory/suppliers.html", context)
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def brand_suppliers_page(request):
+    """Página dedicada (liviana) para asignar el proveedor principal de todas las
+    marcas de una sola vez. Se separó de Proveedores para no inflar esa página."""
+    if request.method == "POST" and request.POST.get("action") == "bulk_set_brand_suppliers":
+        groups = request.POST.getlist("bg_group")
+        sup_ids = request.POST.getlist("bg_supplier")
+        current = {bs.group.casefold(): bs.supplier_id for bs in BrandSupplier.objects.all()}
+        assigned = removed = resynced = 0
+        for group, sup_raw in zip(groups, sup_ids):
+            group = (group or "").strip()
+            if not group:
+                continue
+            new_sid = int(sup_raw) if sup_raw else None
+            cur_sid = current.get(group.casefold())
+            if new_sid == cur_sid:
+                continue  # sin cambios en esta marca
+            if new_sid is None:
+                BrandSupplier.objects.filter(group__iexact=group).delete()
+                removed += 1
+            else:
+                supplier = Supplier.objects.filter(id=new_sid).first()
+                if not supplier:
+                    continue
+                real_group = (
+                    Product.objects.filter(group__iexact=group)
+                    .values_list("group", flat=True)
+                    .first()
+                ) or group
+                BrandSupplier.objects.update_or_create(group=real_group, defaults={"supplier": supplier})
+                assigned += 1
+            for p in Product.objects.filter(group__iexact=group):
+                if sync_principal_to_cheapest(p):
+                    resynced += 1
+        if assigned or removed:
+            messages.success(
+                request,
+                f"Marcas actualizadas: {assigned} asignadas, {removed} quitadas. "
+                f"Productos reasignados: {resynced}.",
+            )
+        else:
+            messages.info(request, "No hubo cambios en las marcas.")
+        return redirect("inventory_brand_suppliers")
+
+    from collections import Counter as _Counter, defaultdict as _defaultdict
+
+    suppliers_all = list(Supplier.objects.all())
+    supplier_names = {s.id: s.name for s in suppliers_all}
+    group_options = (
+        Product.objects.exclude(group="").exclude(group__isnull=True)
+        .values_list("group", flat=True)
+        .distinct()
+        .order_by("group")
+    )
+    brand_suppliers = list(BrandSupplier.objects.select_related("supplier"))
+    current_brand_map = {bs.group.casefold(): bs.supplier_id for bs in brand_suppliers}
+    group_product_count: _Counter = _Counter()
+    group_default_counts: dict = _defaultdict(_Counter)
+    for row in (
+        Product.objects.exclude(group="").exclude(group__isnull=True)
+        .values("group", "default_supplier")
+    ):
+        g = row["group"]
+        group_product_count[g] += 1
+        if row["default_supplier"]:
+            group_default_counts[g][row["default_supplier"]] += 1
+    group_supplier_links: dict = _defaultdict(set)
+    for row in (
+        SupplierProduct.objects.exclude(product__group="")
+        .values("supplier_id", "product__group")
+        .distinct()
+    ):
+        group_supplier_links[row["product__group"]].add(row["supplier_id"])
+
+    brand_rows = []
+    for group in group_options:
+        cur_sid = current_brand_map.get(group.casefold())
+        suggested = group_default_counts[group].most_common(1)[0][0] if group_default_counts.get(group) else None
+        selected_sid = cur_sid if cur_sid is not None else suggested
+        linked_ids = group_supplier_links.get(group, set()) | ({cur_sid} if cur_sid else set())
+        options = sorted(
+            ({"id": sid, "name": supplier_names.get(sid, "?")} for sid in linked_ids if sid in supplier_names),
+            key=lambda o: o["name"].casefold(),
+        )
+        brand_rows.append({
+            "group": group,
+            "product_count": group_product_count.get(group, 0),
+            "selected_sid": selected_sid,
+            "is_assigned": cur_sid is not None,
+            "options": options,
+        })
+    return render(
+        request,
+        "inventory/brand_suppliers.html",
+        {"brand_rows": brand_rows, "assigned_count": len(brand_suppliers)},
+    )
 
 
 @login_required

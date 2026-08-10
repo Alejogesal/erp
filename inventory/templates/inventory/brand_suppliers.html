@@ -1,0 +1,71 @@
+{% extends "inventory/base.html" %}
+{% block title %}Proveedor por marca{% endblock %}
+{% block content %}
+<h1>Proveedor principal por marca</h1>
+<p class="subtitle">
+    <a href="{% url 'inventory_suppliers' %}">← Volver a Proveedores</a>
+</p>
+
+<div class="card" style="max-width:760px;">
+    <div class="card-title">Asignar proveedor a todas las marcas</div>
+    <p class="subtitle" style="margin-top:0;">
+        Elegí el proveedor principal de cada marca. Su precio se usa como costo de los productos de la marca (manda sobre el "más barato" automático).
+        El desplegable muestra los proveedores que proveen esa marca, pre-seleccionado con lo que ya tiene (●) o lo más probable.
+        Dejá "— sin asignar" para usar el más barato. Guardás todo junto con el botón de abajo.
+        Marcas asignadas hoy: <strong>{{ assigned_count }}</strong>.
+    </p>
+    <input type="search" id="brand-filter" placeholder="🔍 Filtrar marca…" style="width:100%; margin-bottom:10px; padding:8px;">
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="bulk_set_brand_suppliers">
+        <div style="max-height:560px; overflow:auto; border:1px solid var(--border,#e0e0e0); border-radius:6px;">
+            <table style="width:100%; font-size:13px; border-collapse:collapse;">
+                <thead>
+                    <tr style="text-align:left; position:sticky; top:0; background:var(--card-bg,#f5f5f5);">
+                        <th style="padding:6px 8px;">Marca</th>
+                        <th style="padding:6px 8px;">Prod.</th>
+                        <th style="padding:6px 8px;">Proveedor principal</th>
+                    </tr>
+                </thead>
+                <tbody id="brand-rows">
+                    {% for row in brand_rows %}
+                    <tr class="brand-row" data-name="{{ row.group|lower }}" style="border-top:1px solid var(--border,#eee);">
+                        <td style="padding:6px 8px;">
+                            {{ row.group }}
+                            {% if row.is_assigned %}<span style="color:#1a6a9a; font-size:11px;" title="Asignada">●</span>{% endif %}
+                        </td>
+                        <td style="padding:6px 8px; color:var(--muted,#666);">{{ row.product_count }}</td>
+                        <td style="padding:6px 8px;">
+                            <input type="hidden" name="bg_group" value="{{ row.group }}">
+                            <select name="bg_supplier" style="min-width:220px; font-size:12px;">
+                                <option value="">— sin asignar (usar más barato)</option>
+                                {% for opt in row.options %}
+                                <option value="{{ opt.id }}" {% if row.selected_sid == opt.id %}selected{% endif %}>{{ opt.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="3" style="padding:8px; color:var(--muted,#666);">No hay marcas cargadas.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <button type="submit" style="margin-top:10px;">Guardar todas las marcas</button>
+    </form>
+</div>
+
+<script>
+    (function () {
+        const filter = document.getElementById("brand-filter");
+        if (!filter) return;
+        const rows = Array.from(document.querySelectorAll("#brand-rows .brand-row"));
+        filter.addEventListener("input", function () {
+            const q = this.value.trim().toLowerCase();
+            rows.forEach((row) => {
+                row.style.display = !q || row.dataset.name.includes(q) ? "" : "none";
+            });
+        });
+    })();
+</script>
+{% endblock %}

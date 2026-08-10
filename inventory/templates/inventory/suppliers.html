@@ -93,47 +93,10 @@
         <p class="subtitle" style="margin-top:12px;">Todavía no asignaste proveedor principal a ninguna marca (se usa el más barato).</p>
         {% endif %}
     </div>
-    <div class="card" style="grid-column:1 / -1;">
-        <div class="card-title">Asignar proveedor principal a TODAS las marcas</div>
-        <p class="subtitle" style="margin-top:0;">Elegí el proveedor principal de cada marca de una sola vez. El desplegable muestra los proveedores que proveen esa marca; viene pre-seleccionado con lo que ya tiene (o lo más probable). Dejá "— sin asignar" para usar el más barato automático. Guardás todo junto con el botón de abajo.</p>
-        <form method="post">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="bulk_set_brand_suppliers">
-            <div style="max-height:480px; overflow:auto; border:1px solid #e0e0e0; border-radius:6px;">
-                <table style="width:100%; font-size:13px; border-collapse:collapse;">
-                    <thead>
-                        <tr style="text-align:left; position:sticky; top:0; background:#f5f5f5;">
-                            <th style="padding:6px 8px;">Marca</th>
-                            <th style="padding:6px 8px;">Productos</th>
-                            <th style="padding:6px 8px;">Proveedor principal</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for row in brand_rows %}
-                        <tr style="border-top:1px solid #eee;">
-                            <td style="padding:6px 8px;">
-                                {{ row.group }}
-                                {% if row.is_assigned %}<span style="color:#1a6a9a; font-size:11px;">●</span>{% endif %}
-                            </td>
-                            <td style="padding:6px 8px; color:#666;">{{ row.product_count }}</td>
-                            <td style="padding:6px 8px;">
-                                <input type="hidden" name="bg_group" value="{{ row.group }}">
-                                <select name="bg_supplier" style="min-width:200px; font-size:12px;">
-                                    <option value="">— sin asignar (usar más barato)</option>
-                                    {% for opt in row.options %}
-                                    <option value="{{ opt.id }}" {% if row.selected_sid == opt.id %}selected{% endif %}>{{ opt.name }}</option>
-                                    {% endfor %}
-                                </select>
-                            </td>
-                        </tr>
-                        {% empty %}
-                        <tr><td colspan="3" style="padding:8px; color:#666;">No hay marcas cargadas.</td></tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            <button type="submit" style="margin-top:10px;">Guardar todas las marcas</button>
-        </form>
+    <div class="card">
+        <div class="card-title">Asignar proveedor a TODAS las marcas</div>
+        <p class="subtitle" style="margin-top:0;">Asigná el proveedor principal de todas las marcas de una sola vez, en una tabla aparte (más liviana).</p>
+        <a class="pill" href="{% url 'inventory_brand_suppliers' %}" style="display:inline-block; padding:8px 12px;">Abrir asignación masiva por marca →</a>
     </div>
     <div class="card">
         <div class="card-title">Renombrar marca</div>

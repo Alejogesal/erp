@@ -155,7 +155,7 @@ class BulkBrandSupplierTests(TestCase):
 
     def test_bulk_assigns_and_reassigns(self):
         # Asigna Marca1 -> B (manda sobre A), Marca2 -> sin asignar (vacío).
-        resp = self.client.post(reverse("inventory_suppliers"), {
+        resp = self.client.post(reverse("inventory_brand_suppliers"), {
             "action": "bulk_set_brand_suppliers",
             "bg_group": ["Marca1", "Marca2"],
             "bg_supplier": [str(self.b.id), ""],
@@ -170,7 +170,7 @@ class BulkBrandSupplierTests(TestCase):
     def test_bulk_removes_existing_when_emptied(self):
         BrandSupplier.objects.create(group="Marca1", supplier=self.b)
         services.sync_principal_to_cheapest(self.p1)  # B
-        resp = self.client.post(reverse("inventory_suppliers"), {
+        resp = self.client.post(reverse("inventory_brand_suppliers"), {
             "action": "bulk_set_brand_suppliers",
             "bg_group": ["Marca1"],
             "bg_supplier": [""],  # vaciar => quitar asignación
@@ -179,3 +179,9 @@ class BulkBrandSupplierTests(TestCase):
         self.assertFalse(BrandSupplier.objects.filter(group="Marca1").exists())
         self.p1.refresh_from_db()
         self.assertEqual(self.p1.default_supplier_id, self.a.id)  # vuelve al más barato
+
+    def test_brand_suppliers_page_loads(self):
+        resp = self.client.get(reverse("inventory_brand_suppliers"))
+        self.assertEqual(resp.status_code, 200)
+        # La marca aparece en la tabla.
+        self.assertContains(resp, "Marca1")
