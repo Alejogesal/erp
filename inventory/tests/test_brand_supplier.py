@@ -134,3 +134,48 @@ class BrandSupplierDownloadTests(TestCase):
         # Solo el producto cuyo principal es B (el elegido para la marca) aparece.
         self.assertIn("Dos", nombres)
         self.assertNotIn("Uno", nombres)
+
+
+class BulkBrandSupplierTests(TestCase):
+    def setUp(self):
+        _reset_current_user()
+        self.user = get_user_model().objects.create_user(username="b", password="x")
+        self.client.force_login(self.user)
+        self.a = Supplier.objects.create(name="Prov A")
+        self.b = Supplier.objects.create(name="Prov B")
+        # Marca1: dos productos vinculados a A y B; A más barato.
+        self.p1 = Product.objects.create(name="Uno", group="Marca1", margin_consumer=Decimal("0.00"))
+        SupplierProduct.objects.create(supplier=self.a, product=self.p1, last_cost=Decimal("50"))
+        SupplierProduct.objects.create(supplier=self.b, product=self.p1, last_cost=Decimal("80"))
+        services.sync_principal_to_cheapest(self.p1)  # A
+        # Marca2: un producto solo con A.
+        self.p2 = Product.objects.create(name="Dos", group="Marca2", margin_consumer=Decimal("0.00"))
+        SupplierProduct.objects.create(supplier=self.a, product=self.p2, last_cost=Decimal("30"))
+        services.sync_principal_to_cheapest(self.p2)
+
+    def test_bulk_assigns_and_reassigns(self):
+        # Asigna Marca1 -> B (manda sobre A), Marca2 -> sin asignar (vacío).
+        resp = self.client.post(reverse("inventory_suppliers"), {
+            "action": "bulk_set_brand_suppliers",
+            "bg_group": ["Marca1", "Marca2"],
+            "bg_supplier": [str(self.b.id), ""],
+        })
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(BrandSupplier.objects.filter(group="Marca1", supplier=self.b).exists())
+        self.assertFalse(BrandSupplier.objects.filter(group="Marca2").exists())
+        self.p1.refresh_from_db()
+        self.assertEqual(self.p1.default_supplier_id, self.b.id)  # reasignado a B
+        self.assertEqual(self.p1.avg_cost, Decimal("80.00"))
+
+    def test_bulk_removes_existing_when_emptied(self):
+        BrandSupplier.objects.create(group="Marca1", supplier=self.b)
+        services.sync_principal_to_cheapest(self.p1)  # B
+        resp = self.client.post(reverse("inventory_suppliers"), {
+            "action": "bulk_set_brand_suppliers",
+            "bg_group": ["Marca1"],
+            "bg_supplier": [""],  # vaciar => quitar asignación
+        })
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(BrandSupplier.objects.filter(group="Marca1").exists())
+        self.p1.refresh_from_db()
+        self.assertEqual(self.p1.default_supplier_id, self.a.id)  # vuelve al más barato
