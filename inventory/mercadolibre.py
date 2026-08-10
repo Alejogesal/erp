@@ -29,6 +29,11 @@ from .models import (
 ML_BASE_URL = "https://api.mercadolibre.com"
 ML_AUTH_URL = "https://auth.mercadolibre.com.ar/authorization"
 
+# Antigüedad máxima de una venta ML para que se le descuente stock del depósito
+# propio. Ver _apply_ml_stock_exit: protege contra el descuento retroactivo de
+# ventas viejas cuando sync_ml_orders re-sincroniza su ventana de 90 días.
+ML_STOCK_EXIT_MAX_AGE_DAYS = 3
+
 
 @dataclass
 class SyncResult:
@@ -1159,8 +1164,17 @@ def _apply_ml_stock_exit(sale: Sale, matched_items, user) -> None:
     Idempotente: si la venta ya tiene movimientos de salida asociados no hace
     nada, así un re-sync de la misma orden (que ocurre en cada notificación de
     ML) nunca descuenta dos veces.
+
+    Solo se descuentan ventas RECIENTES. sync_ml_orders re-sincroniza hasta 90
+    días hacia atrás, y las ventas anteriores a esta funcionalidad ya están
+    reflejadas en el stock: descontarlas ahora sería contarlas dos veces (fue
+    exactamente lo que pasó en producción, con productos que quedaron en
+    negativo). La ventana igual cubre el caso legítimo de una venta importada
+    antes de que ML creara el envío, que se resuelve en horas.
     """
     if StockMovement.objects.filter(sale=sale, movement_type=StockMovement.MovementType.EXIT).exists():
+        return
+    if sale.created_at and sale.created_at < timezone.now() - timedelta(days=ML_STOCK_EXIT_MAX_AGE_DAYS):
         return
     comun_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
     if not comun_wh:

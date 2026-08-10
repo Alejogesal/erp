@@ -7,11 +7,13 @@ publicaciones para que ML quede alineado.
 """
 
 import os
+from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.utils import timezone
 from django.urls import reverse
 
 from inventory import mercadolibre as ml
@@ -181,6 +183,45 @@ class SyncOrderLogisticsTests(TestCase):
         # La mercadería nunca salió: vuelve al depósito.
         self.assertEqual(
             Stock.objects.get(product=self.product, warehouse=self.comun_wh).quantity, Decimal("10.00")
+        )
+
+    def test_old_sale_is_not_discounted_retroactively(self):
+        # sync_ml_orders re-sincroniza hasta 90 días atrás. Una venta anterior a
+        # esta funcionalidad ya está reflejada en el stock: volver a descontarla
+        # la contaría dos veces (pasó en producción, con stock en negativo).
+        shipment = {"status": "delivered", "logistic": {"mode": "me2", "type": "self_service"}}
+        vieja = Sale.objects.create(
+            warehouse=self.ml_wh, user=self.user, total=Decimal("500"),
+            ml_order_id="ORD1", reference="ML ORDER ORD1",
+        )
+        Sale.objects.filter(pk=vieja.pk).update(
+            created_at=timezone.now() - timedelta(days=30)
+        )
+        self._sync(self._order(), shipment)
+        self.assertEqual(
+            Stock.objects.get(product=self.product, warehouse=self.comun_wh).quantity, Decimal("10.00")
+        )
+        self.assertFalse(
+            StockMovement.objects.filter(
+                sale=vieja, movement_type=StockMovement.MovementType.EXIT
+            ).exists()
+        )
+
+    def test_recent_sale_missing_channel_is_discounted_on_resync(self):
+        # Caso legítimo: la venta se importó sin envío creado y el canal se
+        # resuelve en el sync siguiente, dentro de la ventana.
+        reciente = Sale.objects.create(
+            warehouse=self.ml_wh, user=self.user, total=Decimal("500"),
+            ml_order_id="ORD1", reference="ML ORDER ORD1",
+        )
+        self._sync(
+            self._order(),
+            {"status": "ready_to_ship", "logistic": {"mode": "me2", "type": "self_service"}},
+        )
+        reciente.refresh_from_db()
+        self.assertEqual(reciente.ml_logistic_type, "self_service")
+        self.assertEqual(
+            Stock.objects.get(product=self.product, warehouse=self.comun_wh).quantity, Decimal("8.00")
         )
 
     def test_falls_back_to_publication_type_without_shipment(self):
