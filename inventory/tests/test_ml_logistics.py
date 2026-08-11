@@ -22,6 +22,7 @@ from inventory.models import (
     MercadoLibreConnection,
     MercadoLibreItem,
     Product,
+    ProductVariant,
     Sale,
     SaleItem,
     Stock,
@@ -791,3 +792,73 @@ class SalesChannelFilterTests(TestCase):
         self.assertEqual(
             self._ids(resp), {self.flex.id, self.full.id, self.legacy.id, self.comun.id}
         )
+
+
+class VariantStockConsistencyTests(TestCase):
+    """En productos con variedades, el stock COMUN es la suma de sus variedades.
+
+    El recálculo desde las variedades se hacía ANTES de registrar la salida, así
+    que COMUN se descontaba dos veces (la variedad una). Importa especialmente
+    ahora: COMUN es el número que se le empuja a MercadoLibre, así que el
+    desfasaje se propagaba a las publicaciones.
+    """
+
+    def setUp(self):
+        _reset_current_user()
+        self.user = get_user_model().objects.create_user(username="var", password="x")
+        self.client.force_login(self.user)
+        self.comun = Warehouse.objects.get(type=Warehouse.WarehouseType.COMUN)
+        self.product = Product.objects.create(
+            name="Con variedades", sku="V1", price_consumer=Decimal("100")
+        )
+        self.variant = ProductVariant.objects.create(
+            product=self.product, name="100ml", quantity=Decimal("20")
+        )
+        Stock.objects.create(product=self.product, warehouse=self.comun, quantity=Decimal("20"))
+
+    def _sell(self, qty):
+        return self.client.post(
+            reverse("inventory_sales_list"),
+            {
+                "warehouse": str(self.comun.id),
+                "audiencia": "CONSUMER",
+                "descuento_total": "0",
+                "costo_envio": "0",
+                "delivery_status": "NOT_DELIVERED",
+                "form-TOTAL_FORMS": "1",
+                "form-INITIAL_FORMS": "0",
+                "form-MIN_NUM_FORMS": "0",
+                "form-MAX_NUM_FORMS": "1000",
+                "form-0-product": str(self.product.id),
+                "form-0-quantity": str(qty),
+                "form-0-discount_percent": "0",
+                "form-0-vat_percent": "0",
+                "form-0-variant_id": str(self.variant.id),
+            },
+        )
+
+    def _estado(self):
+        self.variant.refresh_from_db()
+        return (
+            self.variant.quantity,
+            Stock.objects.get(product=self.product, warehouse=self.comun).quantity,
+        )
+
+    def test_sale_decrements_variant_and_comun_by_the_same(self):
+        self._sell(3)
+        self.assertEqual(self._estado(), (Decimal("17.00"), Decimal("17.00")))
+
+    def test_delete_restores_variant_and_comun_by_the_same(self):
+        self._sell(3)
+        sale = Sale.objects.latest("id")
+        self.client.post(reverse("inventory_sale_delete", args=[sale.id]))
+        self.assertEqual(self._estado(), (Decimal("20.00"), Decimal("20.00")))
+
+    def test_bulk_delete_restores_variant_and_comun_by_the_same(self):
+        self._sell(3)
+        sale = Sale.objects.latest("id")
+        self.client.post(
+            reverse("inventory_sales_list"),
+            {"action": "bulk_delete_selected", "sale_ids": [str(sale.id)]},
+        )
+        self.assertEqual(self._estado(), (Decimal("20.00"), Decimal("20.00")))

@@ -312,6 +312,7 @@ def sale_edit(request, sale_id: int):
                 audience = customer.audience
             try:
                 with transaction.atomic():
+                    variant_products = set()
                     # Ver el comentario en sales_list: en una venta de ML la
                     # mercadería no sale del depósito ML, sale de COMUN salvo
                     # que el canal sea Full.
@@ -410,8 +411,7 @@ def sale_edit(request, sale_id: int):
                             if variant:
                                 variant.quantity = (variant.quantity - qty).quantize(Decimal("0.01"))
                                 variant.save(update_fields=["quantity"])
-                                if comun_wh:
-                                    _sync_common_with_variants(data["product"], comun_wh)
+                                variant_products.add(data["product"])
                         default_cost = data["product"].cost_with_vat()
                         manual_cost = data.get("cost_unit_override")
                         cost_unit = (
@@ -459,6 +459,15 @@ def sale_edit(request, sale_id: int):
                                     sale=sale,
                                     allow_negative=True,
                                 )
+                    # Los productos con variedades se recalculan al final: el
+                    # stock COMUN es la suma de sus variedades, y ese recálculo
+                    # tiene que ser la última palabra. Hacerlo antes de
+                    # register_exit descontaba dos veces (la variedad bajaba una
+                    # vez y COMUN dos), y lo que se le empuja a MercadoLibre sale
+                    # justamente de COMUN.
+                    if comun_wh:
+                        for prod in variant_products:
+                            _sync_common_with_variants(prod, comun_wh)
                     gross_total = (
                         total_venta
                         if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE and total_venta is not None
@@ -1008,6 +1017,7 @@ def sales_list(request):
         with transaction.atomic():
             for sale in sales:
                 comun_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
+                variant_products = set()
                 if sale.warehouse.type == Warehouse.WarehouseType.COMUN:
                     for item in sale.items.select_related("variant", "product"):
                         if item.variant_id:
@@ -1019,8 +1029,7 @@ def sales_list(request):
                             if variant:
                                 variant.quantity = (variant.quantity + item.quantity).quantize(Decimal("0.01"))
                                 variant.save(update_fields=["quantity"])
-                                if comun_wh:
-                                    _sync_common_with_variants(item.product, comun_wh)
+                                variant_products.add(item.product)
                 for movement in sale.movements.select_for_update():
                     if _movement_restores_stock(movement):
                         stock, _ = Stock.objects.select_for_update().get_or_create(
@@ -1031,6 +1040,13 @@ def sales_list(request):
                         stock.quantity = (stock.quantity + movement.quantity).quantize(Decimal("0.01"))
                         stock.save(update_fields=["quantity"])
                     movement.delete()
+                # Mismo criterio que al vender: en productos con variedades el
+                # stock COMUN es la suma de las variedades, y ese recálculo va
+                # último. Antes se reponía dos veces (la variedad y el
+                # movimiento).
+                if comun_wh:
+                    for prod in variant_products:
+                        _sync_common_with_variants(prod, comun_wh)
                 sale.delete()
                 deleted += 1
         messages.success(request, f"Ventas eliminadas: {deleted}.")
@@ -1123,6 +1139,7 @@ def sales_list(request):
             else:
                 try:
                     with transaction.atomic():
+                        variant_products = set()
                         comun_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
                         # Depósito del que sale físicamente la mercadería. En una
                         # venta de MercadoLibre eso NO es el depósito ML: Full lo
@@ -1188,8 +1205,7 @@ def sales_list(request):
                                 if variant:
                                     variant.quantity = (variant.quantity - qty).quantize(Decimal("0.01"))
                                     variant.save(update_fields=["quantity"])
-                                    if comun_wh:
-                                        _sync_common_with_variants(data["product"], comun_wh)
+                                    variant_products.add(data["product"])
                             default_cost = data["product"].cost_with_vat()
                             manual_cost = data.get("cost_unit_override")
                             cost_unit = (
@@ -1237,6 +1253,15 @@ def sales_list(request):
                                         sale=sale,
                                         allow_negative=True,
                                     )
+                        # Los productos con variedades se recalculan al final: el
+                        # stock COMUN es la suma de sus variedades, y ese recálculo
+                        # tiene que ser la última palabra. Hacerlo antes de
+                        # register_exit descontaba dos veces (la variedad bajaba una
+                        # vez y COMUN dos), y lo que se le empuja a MercadoLibre sale
+                        # justamente de COMUN.
+                        if comun_wh:
+                            for prod in variant_products:
+                                _sync_common_with_variants(prod, comun_wh)
                         gross_total = (
                             total_venta
                             if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE and total_venta is not None
@@ -1472,6 +1497,7 @@ def sale_delete(request, sale_id: int):
         with transaction.atomic():
             is_ml_sale = sale.ml_order_id or sale.reference.startswith("ML ORDER") or sale.reference.startswith("GS ORDER")
             comun_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
+            variant_products = set()
             if sale.warehouse.type == Warehouse.WarehouseType.COMUN:
                 for item in sale.items.select_related("variant", "product"):
                     if item.variant_id:
@@ -1483,8 +1509,7 @@ def sale_delete(request, sale_id: int):
                         if variant:
                             variant.quantity = (variant.quantity + item.quantity).quantize(Decimal("0.01"))
                             variant.save(update_fields=["quantity"])
-                            if comun_wh:
-                                _sync_common_with_variants(item.product, comun_wh)
+                            variant_products.add(item.product)
             for movement in sale.movements.select_for_update():
                 if _movement_restores_stock(movement):
                     stock, _ = Stock.objects.select_for_update().get_or_create(
@@ -1495,6 +1520,10 @@ def sale_delete(request, sale_id: int):
                     stock.quantity = (stock.quantity + movement.quantity).quantize(Decimal("0.01"))
                     stock.save(update_fields=["quantity"])
                 movement.delete()
+            # Ver el borrado masivo: el recálculo desde las variedades va último.
+            if comun_wh:
+                for prod in variant_products:
+                    _sync_common_with_variants(prod, comun_wh)
             sale.delete()
         if is_ml_sale:
             messages.success(request, "Venta eliminada.")
