@@ -435,6 +435,15 @@
 
 <div class="card table-card" id="publicaciones">
     <div class="card-title">Publicaciones</div>
+    {% if pending_variant_count %}
+    <div style="margin:6px 0 2px; padding:9px 12px; border-radius:10px; font-size:13px;
+        color:#f0ad4e; background:rgba(240,173,78,0.10); border:1px solid rgba(240,173,78,0.35);">
+        ⚠ {{ pending_variant_count }} publicación{{ pending_variant_count|pluralize:"es" }} de productos con variedades
+        todavía no tiene{{ pending_variant_count|pluralize:"n" }} la variedad elegida. El stock del ERP
+        <strong>no</strong> se les sincroniza hasta enlazarlas: el total del producto es la suma de todas las
+        variedades y publicarlo mostraría unidades que esa variedad no tiene.
+    </div>
+    {% endif %}
     <form method="get" style="margin: 8px 0 12px; display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">
         <div>
             <label for="ml-search" style="font-size: 12px; color: var(--muted); display:block; margin-bottom:4px;">
@@ -467,8 +476,29 @@
             background: #0b111a;
             border: 1px solid #1e2733;
         }
-        .ml-match-search.is-hidden {
+        .ml-match-search.is-hidden,
+        .ml-match-select.is-hidden {
             display: none;
+        }
+        .ml-variant-tag {
+            display: inline-block;
+            margin-top: 3px;
+            padding: 1px 7px;
+            border-radius: 999px;
+            font-size: 11px;
+            color: #9fd0ff;
+            background: rgba(52, 122, 199, 0.16);
+            border: 1px solid rgba(82, 152, 224, 0.4);
+        }
+        .ml-variant-warn {
+            display: inline-block;
+            margin-top: 3px;
+            padding: 1px 7px;
+            border-radius: 999px;
+            font-size: 11px;
+            color: #f0ad4e;
+            background: rgba(240, 173, 78, 0.12);
+            border: 1px solid rgba(240, 173, 78, 0.4);
         }
         .ml-match-search input,
         .ml-match-select select {
@@ -567,6 +597,15 @@
                         <div style="font-weight: 600;">
                             {{ item.product.name }}{% if item.product.group %} ({{ item.product.group }}){% endif %}
                         </div>
+                        {% if item.variant %}
+                        <div class="ml-variant-tag" title="Variedad publicada: el stock que se sincroniza es el de esta variedad">
+                            {{ item.variant.name }}
+                        </div>
+                        {% elif item.needs_variant %}
+                        <div class="ml-variant-warn" title="El producto tiene variedades. Hasta que elijas cuál se publica acá, esta publicación no recibe stock del ERP.">
+                            ⚠ Falta variedad — sin sincronizar
+                        </div>
+                        {% endif %}
                     {% else %}
                         <div style="color: var(--muted);">Sin match</div>
                     {% endif %}
@@ -593,6 +632,20 @@
                                 </datalist>
                             </div>
                             <input type="hidden" name="product_id" class="ml-product-id" value="{% if item.product %}{{ item.product.id }}{% endif %}">
+                            {% comment %}
+                            Solo se muestra cuando el producto matcheado tiene variedades.
+                            El JS la muestra/oculta y recarga las opciones al cambiar el producto.
+                            {% endcomment %}
+                            <div class="ml-match-select ml-variant-field{% if not item.product_variants %} is-hidden{% endif %}">
+                                <select name="variant_id" class="ml-variant-select">
+                                    <option value="">— Elegí la variedad —</option>
+                                    {% for variant in item.product_variants %}
+                                    <option value="{{ variant.id }}"{% if variant.id == item.variant_id %} selected{% endif %}>
+                                        {{ variant.name }} ({{ variant.quantity|floatformat:0 }} u.)
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
                         </div>
                         <button type="submit" style="margin-top:6px;">Guardar</button>
                     </form>
@@ -705,21 +758,53 @@
         salesFilter?.addEventListener("change", applyFilters);
     })();
 </script>
+{{ all_variants|json_script:"ml-variants-data" }}
 <script>
     (function() {
+        let variantsByProduct = {};
+        try {
+            variantsByProduct = JSON.parse(document.getElementById("ml-variants-data").textContent) || {};
+        } catch (err) {
+            variantsByProduct = {};
+        }
         document.querySelectorAll(".ml-product-typeahead").forEach((input) => {
             const field = input.closest(".ml-match-field");
             const hidden = field ? field.querySelector(".ml-product-id") : null;
+            const variantField = field ? field.querySelector(".ml-variant-field") : null;
+            const variantSelect = variantField ? variantField.querySelector(".ml-variant-select") : null;
             const listId = input.getAttribute("list");
             const datalist = listId ? document.getElementById(listId) : null;
             const options = datalist ? Array.from(datalist.options) : [];
             if (!hidden || !datalist) {
                 return;
             }
+            let lastProductId = hidden.value;
+            // El selector de variedad depende del producto elegido: se rearma
+            // solo si el producto cambió, para no perder la variedad ya guardada.
+            const syncVariants = () => {
+                if (!variantField || !variantSelect || hidden.value === lastProductId) {
+                    return;
+                }
+                lastProductId = hidden.value;
+                const variants = variantsByProduct[hidden.value] || [];
+                variantSelect.innerHTML = "";
+                const blank = document.createElement("option");
+                blank.value = "";
+                blank.textContent = "— Elegí la variedad —";
+                variantSelect.appendChild(blank);
+                variants.forEach((variant) => {
+                    const opt = document.createElement("option");
+                    opt.value = variant.id;
+                    opt.textContent = variant.name + " (" + variant.quantity + " u.)";
+                    variantSelect.appendChild(opt);
+                });
+                variantField.classList.toggle("is-hidden", variants.length === 0);
+            };
             const syncHidden = () => {
                 const value = input.value.trim();
                 const match = options.find((opt) => opt.value === value);
                 hidden.value = match ? match.dataset.id : "";
+                syncVariants();
             };
             input.addEventListener("input", syncHidden);
             input.addEventListener("blur", syncHidden);

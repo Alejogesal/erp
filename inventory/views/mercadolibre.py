@@ -100,7 +100,7 @@ def mercadolibre_dashboard(request):
     missing_credentials = not settings.ML_CLIENT_ID or not settings.ML_CLIENT_SECRET or not settings.ML_REDIRECT_URI
     try:
         connection = MercadoLibreConnection.objects.filter(user=request.user).first()
-        items_qs = MercadoLibreItem.objects.select_related("product")
+        items_qs = MercadoLibreItem.objects.select_related("product", "variant")
     except OperationalError:
         messages.error(request, "Faltan tablas de MercadoLibre. Ejecutá migrate y recargá.")
         connection = None
@@ -359,6 +359,7 @@ def mercadolibre_dashboard(request):
         elif action == "link_item":
             item_id = request.POST.get("item_id")
             product_id = request.POST.get("product_id")
+            variant_id = (request.POST.get("variant_id") or "").strip()
             ml_item = MercadoLibreItem.objects.filter(id=item_id).first()
             if not ml_item:
                 messages.error(request, "No se encontró la publicación.")
@@ -368,14 +369,51 @@ def mercadolibre_dashboard(request):
                     if not product:
                         messages.error(request, "Producto no encontrado.")
                     else:
-                        ml_item.product = product
-                        ml_item.matched_name = product.name
-                        ml_item.save(update_fields=["product", "matched_name"])
-                        messages.success(request, "Match actualizado.")
+                        # El stock de un producto con variedades vive en cada
+                        # variedad: sin elegir cuál es, la publicación quedaría
+                        # ofreciendo la suma de todas. Se guarda el match igual
+                        # (sirve para las ventas) pero no se le empuja stock.
+                        has_variants = ProductVariant.objects.filter(product=product).exists()
+                        variant = None
+                        variant_error = False
+                        if has_variants and variant_id:
+                            variant = ProductVariant.objects.filter(id=variant_id, product=product).first()
+                            if not variant:
+                                variant_error = True
+                        if variant_error:
+                            messages.error(request, "La variedad elegida no pertenece a ese producto.")
+                        else:
+                            ml_item.product = product
+                            ml_item.variant = variant
+                            ml_item.matched_name = product.name
+                            ml_item.save(update_fields=["product", "variant", "matched_name"])
+                            if has_variants and not variant:
+                                messages.warning(
+                                    request,
+                                    f"Match guardado, pero «{product.name}» tiene variedades: elegí cuál se "
+                                    "publica acá. Hasta entonces esta publicación no recibe stock del ERP.",
+                                )
+                            else:
+                                qty_label = (
+                                    f"{variant.name}: {variant.quantity:.0f} u."
+                                    if variant
+                                    else "stock COMUN del producto"
+                                )
+                                pushed = 0
+                                try:
+                                    pushed = ml.push_comun_stock_to_ml([product], connection=connection)
+                                except Exception as exc:
+                                    messages.error(request, f"Match guardado, pero falló el push a ML: {exc}")
+                                messages.success(
+                                    request,
+                                    f"Match actualizado ({qty_label}). "
+                                    f"Publicaciones actualizadas en ML: {pushed}.",
+                                )
                 else:
                     ml_item.product = None
+                    ml_item.variant = None
                     ml_item.matched_name = ""
-                    ml_item.save(update_fields=["product", "matched_name"])
+                    ml_item.save(update_fields=["product", "variant", "matched_name"])
                     messages.success(request, "Match eliminado.")
         elif action == "delete_duplicate_sales":
             ids_to_delete = request.POST.getlist("delete_ids")
@@ -650,14 +688,31 @@ def mercadolibre_dashboard(request):
         pid: variant_stock[pid] if pid in variant_stock else direct_stock.get(pid, _Dec("0"))
         for pid in product_ids
     }
+    # Variedades de los productos de esta página: alimentan el selector de la
+    # columna de match y el stock que se muestra por publicación.
+    variants_by_product: dict[int, list] = {}
+    for variant in ProductVariant.objects.filter(product_id__in=product_ids).order_by("name", "id"):
+        variants_by_product.setdefault(variant.product_id, []).append(variant)
     for item in items:
         if item.product:
-            item.erp_stock = erp_stocks.get(item.product_id, _Dec("0"))
+            item.product_variants = variants_by_product.get(item.product_id, [])
+            # Con variedades, el stock de la publicación es el de SU variedad:
+            # el total del producto está repartido entre todas.
+            if item.variant_id:
+                item.erp_stock = next(
+                    (v.quantity for v in item.product_variants if v.id == item.variant_id),
+                    _Dec("0"),
+                )
+            else:
+                item.erp_stock = erp_stocks.get(item.product_id, _Dec("0"))
+            item.needs_variant = bool(item.product_variants) and not item.variant_id
             cost = item.product.avg_cost or _Dec("0")
             margin = item.product.margin_consumer or _Dec("0")
             item.erp_price = (cost * (1 + margin / 100)).quantize(_Dec("0.01"))
             item.min_stock = item.product.min_stock
         else:
+            item.product_variants = []
+            item.needs_variant = False
             item.erp_stock = None
             item.erp_price = None
             item.min_stock = None
@@ -670,6 +725,24 @@ def mercadolibre_dashboard(request):
         item.calc_buffer = buf
 
     products = Product.objects.order_by("name")
+    # Variedades de TODOS los productos: el selector de variedad se rearma en el
+    # navegador cuando se cambia el producto del match, sin recargar.
+    all_variants: dict[str, list] = {}
+    for variant in ProductVariant.objects.order_by("name", "id"):
+        all_variants.setdefault(str(variant.product_id), []).append(
+            {"id": variant.id, "name": variant.name, "quantity": f"{variant.quantity:.0f}"}
+        )
+    # Publicaciones matcheadas a un producto con variedades pero sin variedad
+    # elegida: son las que quedan sin sincronizar stock hasta que se enlacen.
+    pending_variant_count = (
+        MercadoLibreItem.objects.filter(
+            variant__isnull=True,
+            product__variants__isnull=False,
+        )
+        .exclude(status="closed")
+        .distinct()
+        .count()
+    )
     recent_cutoff = timezone.now() - timedelta(days=30)
     sync_age_minutes = None
     if connection and connection.last_sync_at:
@@ -740,6 +813,8 @@ def mercadolibre_dashboard(request):
             "search_query": search_query,
             "recent_cutoff": recent_cutoff,
             "products": products,
+            "all_variants": all_variants,
+            "pending_variant_count": pending_variant_count,
             "duplicate_sales": duplicate_sales,
             "sync_age_minutes": sync_age_minutes,
             "db_metrics": db_metrics,

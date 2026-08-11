@@ -885,3 +885,300 @@ class VariantStockConsistencyTests(TestCase):
             {"action": "bulk_delete_selected", "sale_ids": [str(sale.id)]},
         )
         self.assertEqual(self._estado(), (Decimal("20.00"), Decimal("20.00")))
+
+
+class VariantAwareStockPushTests(TestCase):
+    """El stock que se publica sale de la variedad, no del total del producto.
+
+    Un producto con variedades reparte su stock entre ellas y el COMUN es solo
+    la suma. Publicar esa suma en cada publicación (que en esta cuenta es una
+    variedad distinta) ofrecía unidades que esa variedad no tiene.
+    """
+
+    def setUp(self):
+        _reset_current_user()
+        self.user = get_user_model().objects.create_user(username="varpush", password="x")
+        self.connection = MercadoLibreConnection.objects.create(
+            user=self.user, access_token="tok", ml_user_id="777"
+        )
+        self.comun_wh = Warehouse.objects.get(type=Warehouse.WarehouseType.COMUN)
+        self.product = Product.objects.create(name="Mascara", sku="MK1")
+        self.cachos = ProductVariant.objects.create(
+            product=self.product, name="Mais Cachos", quantity=Decimal("2")
+        )
+        self.bomba = ProductVariant.objects.create(
+            product=self.product, name="Bomba", quantity=Decimal("5")
+        )
+        # COMUN = suma de las dos variedades: es el número que se publicaba antes.
+        Stock.objects.create(product=self.product, warehouse=self.comun_wh, quantity=Decimal("7"))
+
+    def _push(self):
+        with patch.object(ml, "get_valid_access_token", return_value="tok"), patch.object(
+            ml, "push_item_stock_and_price"
+        ) as push_item, patch.object(
+            ml, "push_selling_address_stock", return_value=True
+        ) as push_flex:
+            ml.push_comun_stock_to_ml([self.product])
+        return push_item, push_flex
+
+    def test_each_publication_gets_its_own_variant_stock(self):
+        MercadoLibreItem.objects.create(
+            item_id="MLA1", product=self.product, variant=self.cachos, logistic_type="self_service"
+        )
+        MercadoLibreItem.objects.create(
+            item_id="MLA2", product=self.product, variant=self.bomba, logistic_type="self_service"
+        )
+        push_item, _push_flex = self._push()
+        pushed = {call.args[0]: call.args[1] for call in push_item.call_args_list}
+        self.assertEqual(pushed, {"MLA1": 2, "MLA2": 5})
+
+    def test_publication_without_variant_is_not_pushed(self):
+        # Sin saber qué variedad se vende ahí, cualquier número es inventado.
+        MercadoLibreItem.objects.create(
+            item_id="MLA3", product=self.product, logistic_type="self_service"
+        )
+        push_item, push_flex = self._push()
+        push_item.assert_not_called()
+        push_flex.assert_not_called()
+
+    def test_product_without_variants_still_uses_comun(self):
+        simple = Product.objects.create(name="Simple", sku="S1")
+        Stock.objects.create(product=simple, warehouse=self.comun_wh, quantity=Decimal("4"))
+        MercadoLibreItem.objects.create(item_id="MLA4", product=simple, logistic_type="self_service")
+        with patch.object(ml, "get_valid_access_token", return_value="tok"), patch.object(
+            ml, "push_item_stock_and_price"
+        ) as push_item, patch.object(ml, "push_selling_address_stock", return_value=True):
+            ml.push_comun_stock_to_ml([simple])
+        push_item.assert_called_once_with("MLA4", 4, None, "tok")
+
+    def test_coexistence_publication_uses_variant_stock(self):
+        MercadoLibreItem.objects.create(
+            item_id="MLA5",
+            product=self.product,
+            variant=self.cachos,
+            logistic_type="fulfillment",
+            has_flex=True,
+            user_product_id="MLAU1",
+        )
+        _push_item, push_flex = self._push()
+        push_flex.assert_called_once_with("MLAU1", 2, "tok")
+
+    def test_publishable_stock_helper(self):
+        linked = MercadoLibreItem.objects.create(
+            item_id="MLA6", product=self.product, variant=self.bomba, logistic_type="self_service"
+        )
+        unlinked = MercadoLibreItem.objects.create(
+            item_id="MLA7", product=self.product, logistic_type="self_service"
+        )
+        self.assertEqual(ml.ml_item_publishable_stock(linked, 7), 5)
+        self.assertIsNone(ml.ml_item_publishable_stock(unlinked, 7))
+
+
+class VariantAwareReconcileTests(TestCase):
+    """El barrido de reconciliación empuja lo mismo que el push de la venta."""
+
+    def setUp(self):
+        _reset_current_user()
+        self.user = get_user_model().objects.create_user(username="varrec", password="x")
+        self.connection = MercadoLibreConnection.objects.create(
+            user=self.user, access_token="tok", ml_user_id="777"
+        )
+        self.comun_wh = Warehouse.objects.get(type=Warehouse.WarehouseType.COMUN)
+        self.product = Product.objects.create(name="Mascara", sku="MK2")
+        self.variant = ProductVariant.objects.create(
+            product=self.product, name="Mais Cachos", quantity=Decimal("2")
+        )
+        ProductVariant.objects.create(product=self.product, name="Bomba", quantity=Decimal("5"))
+        Stock.objects.create(product=self.product, warehouse=self.comun_wh, quantity=Decimal("7"))
+        self.item = {
+            "id": "MLA1",
+            "title": "Mascara Mais Cachos",
+            "status": "active",
+            "available_quantity": 7,
+            "shipping": {"logistic_type": "self_service"},
+        }
+
+    def _run_sync(self, variant):
+        MercadoLibreItem.objects.update_or_create(
+            item_id="MLA1",
+            defaults={
+                "product": self.product,
+                "variant": variant,
+                "logistic_type": "self_service",
+            },
+        )
+
+        def dispatch(connection, func, *args, **kwargs):
+            if func is ml.get_item_ids:
+                return (["MLA1"], False)
+            if func is ml.get_item:
+                return self.item
+            if func is ml.get_orders_summary:
+                return {"item_sales": {}}
+            raise AssertionError(f"llamada inesperada: {func}")
+
+        with patch.dict(os.environ, {"ML_STOCK_RECONCILE": "1"}), patch.object(
+            ml, "get_valid_access_token", return_value="tok"
+        ), patch.object(ml, "_call_with_refresh", side_effect=dispatch), patch.object(
+            ml, "push_item_stock_and_price"
+        ) as push_item:
+            result = ml.sync_items_and_stock(self.connection, self.user, ignore_env_limit=True)
+        return result, push_item
+
+    def test_linked_publication_is_corrected_to_variant_stock(self):
+        _result, push_item = self._run_sync(self.variant)
+        push_item.assert_called_once_with("MLA1", 2, None, "tok")
+
+    def test_unlinked_publication_is_left_alone_and_reported(self):
+        result, push_item = self._run_sync(None)
+        push_item.assert_not_called()
+        self.assertEqual(result.metrics["unlinked_variant_items"], 1)
+
+
+class MlSaleDiscountsVariantTests(TestCase):
+    """Una venta ML de una publicación enlazada baja esa variedad.
+
+    Si solo bajaba COMUN, el próximo recálculo desde las variedades revivía las
+    unidades vendidas y la publicación volvía a ofrecer stock inexistente.
+    """
+
+    def setUp(self):
+        _reset_current_user()
+        self.user = get_user_model().objects.create_user(username="varsale", password="x")
+        self.connection = MercadoLibreConnection.objects.create(user=self.user, ml_user_id="777")
+        self.comun_wh = Warehouse.objects.get(type=Warehouse.WarehouseType.COMUN)
+        self.product = Product.objects.create(name="Mascara", sku="MK3")
+        self.cachos = ProductVariant.objects.create(
+            product=self.product, name="Mais Cachos", quantity=Decimal("6")
+        )
+        ProductVariant.objects.create(product=self.product, name="Bomba", quantity=Decimal("4"))
+        Stock.objects.create(product=self.product, warehouse=self.comun_wh, quantity=Decimal("10"))
+        MercadoLibreItem.objects.create(
+            item_id="MLA1", product=self.product, variant=self.cachos, logistic_type="self_service"
+        )
+
+    def _sync_order(self):
+        order = {
+            "id": "ORD9",
+            "status": "paid",
+            "tags": [],
+            "total_amount": 1000,
+            "date_created": "2026-08-01T10:00:00.000-03:00",
+            "shipping": {"id": "SHIP1"},
+            "seller": {"id": 777},
+            "order_items": [{"item": {"id": "MLA1"}, "quantity": 2, "unit_price": 500}],
+            "fee_details": [{"type": "sale_fee", "amount": 100}],
+        }
+        shipment = {"status": "ready_to_ship", "logistic": {"mode": "me2", "type": "self_service"}}
+
+        def dispatch(connection, func, *args, **kwargs):
+            if func is ml.get_order:
+                return order
+            if func is ml.get_shipment:
+                return shipment
+            if func is ml.get_shipment_costs:
+                return {}
+            raise AssertionError(f"llamada inesperada: {func}")
+
+        with patch.object(ml, "get_valid_access_token", return_value="tok"), patch.object(
+            ml, "_call_with_refresh", side_effect=dispatch
+        ), patch.object(ml, "push_comun_stock_to_ml", return_value=0):
+            return ml.sync_order(self.connection, "ORD9", self.user)
+
+    def _estado(self):
+        self.cachos.refresh_from_db()
+        return (
+            self.cachos.quantity,
+            Stock.objects.get(product=self.product, warehouse=self.comun_wh).quantity,
+        )
+
+    def test_sale_discounts_the_linked_variant_once(self):
+        ok, _reason = self._sync_order()
+        self.assertTrue(ok)
+        # 6 - 2 en la variedad, y COMUN = 4 + 4 (la otra variedad intacta).
+        self.assertEqual(self._estado(), (Decimal("4.00"), Decimal("8.00")))
+        self.assertEqual(SaleItem.objects.get(sale__ml_order_id="ORD9").variant, self.cachos)
+
+    def test_resync_does_not_discount_twice(self):
+        self._sync_order()
+        self._sync_order()
+        self.assertEqual(self._estado(), (Decimal("4.00"), Decimal("8.00")))
+
+
+class LinkVariantFromPanelTests(TestCase):
+    """El panel enlaza la publicación a la variedad y empuja ese stock."""
+
+    def setUp(self):
+        _reset_current_user()
+        self.user = get_user_model().objects.create_user(
+            username="panel", password="x", is_superuser=True, is_staff=True
+        )
+        self.client.force_login(self.user)
+        # Sin access_token: el panel no sale a la API de ML durante el test.
+        MercadoLibreConnection.objects.create(user=self.user, ml_user_id="777")
+        self.comun_wh = Warehouse.objects.get(type=Warehouse.WarehouseType.COMUN)
+        self.product = Product.objects.create(name="Mascara", sku="MK4")
+        self.cachos = ProductVariant.objects.create(
+            product=self.product, name="Mais Cachos", quantity=Decimal("2")
+        )
+        self.otro = Product.objects.create(name="Otro", sku="OT1")
+        Stock.objects.create(product=self.product, warehouse=self.comun_wh, quantity=Decimal("7"))
+        self.item = MercadoLibreItem.objects.create(
+            item_id="MLA1", title="Skala Mais Cachos 1kg", product=self.product,
+            logistic_type="self_service", flex_quantity=7,
+        )
+
+    def _post(self, **extra):
+        data = {"action": "link_item", "item_id": str(self.item.id), "product_id": str(self.product.id)}
+        data.update(extra)
+        with patch.object(ml, "push_comun_stock_to_ml", return_value=1) as push:
+            response = self.client.post(reverse("inventory_mercadolibre_dashboard"), data)
+        return response, push
+
+    def test_link_saves_variant_and_pushes(self):
+        _response, push = self._post(variant_id=str(self.cachos.id))
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.variant, self.cachos)
+        push.assert_called_once()
+
+    def test_link_without_variant_saves_match_but_does_not_push(self):
+        _response, push = self._post()
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.product, self.product)
+        self.assertIsNone(self.item.variant)
+        push.assert_not_called()
+
+    def test_variant_of_another_product_is_rejected(self):
+        ajena = ProductVariant.objects.create(product=self.otro, name="X", quantity=Decimal("1"))
+        self.item.variant = self.cachos
+        self.item.save(update_fields=["variant"])
+        self._post(variant_id=str(ajena.id))
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.variant, self.cachos)
+
+    def test_unlinking_the_product_clears_the_variant(self):
+        self.item.variant = self.cachos
+        self.item.save(update_fields=["variant"])
+        self.client.post(
+            reverse("inventory_mercadolibre_dashboard"),
+            {"action": "link_item", "item_id": str(self.item.id), "product_id": ""},
+        )
+        self.item.refresh_from_db()
+        self.assertIsNone(self.item.product)
+        self.assertIsNone(self.item.variant)
+
+    def test_panel_shows_variant_stock_not_product_total(self):
+        self.item.variant = self.cachos
+        self.item.save(update_fields=["variant"])
+        response = self.client.get(reverse("inventory_mercadolibre_dashboard"))
+        self.assertEqual(response.status_code, 200)
+        row = [i for i in response.context["items"] if i.item_id == "MLA1"][0]
+        self.assertEqual(row.erp_stock, Decimal("2.00"))
+        self.assertFalse(row.needs_variant)
+
+    def test_panel_flags_publication_without_variant(self):
+        response = self.client.get(reverse("inventory_mercadolibre_dashboard"))
+        row = [i for i in response.context["items"] if i.item_id == "MLA1"][0]
+        self.assertTrue(row.needs_variant)
+        self.assertEqual(response.context["pending_variant_count"], 1)
+        self.assertContains(response, "Falta variedad")

@@ -453,6 +453,17 @@ class MercadoLibreItem(models.Model):
         help_text="Unidades publicadas del depósito propio (selling_address). Es la que debe coincidir con el stock COMUN.",
     )
     product = models.ForeignKey(Product, null=True, blank=True, on_delete=models.SET_NULL, related_name="ml_items")
+    variant = models.ForeignKey(
+        "ProductVariant",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ml_items",
+        help_text=(
+            "Variedad publicada. Solo para productos con variedades: el stock que se "
+            "publica es el de esta variedad, no el total del producto."
+        ),
+    )
     matched_name = models.CharField(max_length=255, blank=True, default="")
     last_sold_at = models.DateTimeField(null=True, blank=True)
     units_sold_30d = models.IntegerField(default=0)

@@ -9,6 +9,7 @@ from urllib.error import HTTPError
 import os
 
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 
 from . import services
@@ -929,8 +930,14 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
     # alinear. Ver el comando align_ml_stock.
     reconcile_enabled = os.environ.get("ML_STOCK_RECONCILE", "0") == "1"
     comun_qty_cache: dict[int, int] = {}
-    reconciled_user_products: set[str] = set()
+    reconciled_user_products: set[tuple[str, int | None]] = set()
     stock_pushed = 0
+    # Productos con variedades (resueltos a medida que aparecen) y publicaciones
+    # de esos productos que todavía no tienen variedad enlazada: a esas no se
+    # les empuja stock y el panel las marca para que se enlacen.
+    variant_products: set[int] = set()
+    variant_checked: set[int] = set()
+    unlinked_variant_items = 0
     # Cache user-product stock per user_product_id so publications sharing the
     # same Full stock (catalog + traditional) don't trigger duplicate API calls.
     fulfillment_cache: dict[str, dict] = {}
@@ -960,7 +967,7 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
         existing = MercadoLibreItem.objects.filter(item_id=item_id).first()
         product = existing.product if existing else None
         matched_name = existing.matched_name if existing else ""
-        MercadoLibreItem.objects.update_or_create(
+        ml_item, _created = MercadoLibreItem.objects.update_or_create(
             item_id=item_id,
             defaults={
                 "title": title,
@@ -1000,7 +1007,17 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
                     comun_stock = Stock.objects.filter(product=product, warehouse=comun_wh).first()
                     comun_qty = max(0, int(comun_stock.quantity)) if comun_stock else 0
                     comun_qty_cache[product.id] = comun_qty
-                if logistic_type == "fulfillment" and has_flex and user_product_id:
+                # Con variedades el COMUN es la suma de todas: lo que se publica
+                # es el stock de la variedad enlazada, y si no hay enlace la
+                # publicación no se toca.
+                if product.id not in variant_checked:
+                    variant_checked.add(product.id)
+                    if ProductVariant.objects.filter(product_id=product.id).exists():
+                        variant_products.add(product.id)
+                desired_qty = ml_item_publishable_stock(ml_item, comun_qty, variant_products)
+                if desired_qty is None:
+                    unlinked_variant_items += 1
+                elif logistic_type == "fulfillment" and has_flex and user_product_id:
                     # Convivencia: solo se corrige la ubicación selling_address;
                     # el stock en el depósito de ML no se toca.
                     # No se exige que ML haya devuelto la ubicación: cuando está
@@ -1008,13 +1025,14 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
                     # más hay que corregir (publicación sin stock propio y
                     # depósito con unidades). has_flex ya confirma que la
                     # publicación admite el PUT.
-                    if flex_qty != comun_qty and user_product_id not in reconciled_user_products:
-                        reconciled_user_products.add(user_product_id)
-                        if push_selling_address_stock(user_product_id, comun_qty, access_token):
+                    up_key = (user_product_id, ml_item.variant_id)
+                    if flex_qty != desired_qty and up_key not in reconciled_user_products:
+                        reconciled_user_products.add(up_key)
+                        if push_selling_address_stock(user_product_id, desired_qty, access_token):
                             stock_pushed += 1
-                elif logistic_type != "fulfillment" and flex_qty != comun_qty:
+                elif logistic_type != "fulfillment" and flex_qty != desired_qty:
                     try:
-                        push_item_stock_and_price(item_id, comun_qty, None, access_token)
+                        push_item_stock_and_price(item_id, desired_qty, None, access_token)
                         stock_pushed += 1
                     except Exception:
                         # Una publicación con error no debe cortar el barrido.
@@ -1079,6 +1097,8 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
     if truncated:
         metrics = {**metrics, "truncated": True, "max_items": max_items}
     metrics = {**metrics, "stock_pushed": stock_pushed}
+    if unlinked_variant_items:
+        metrics = {**metrics, "unlinked_variant_items": unlinked_variant_items}
     return SyncResult(total, matched, unmatched, updated_stock, metrics)
 
 
@@ -1094,13 +1114,50 @@ def _default_connection() -> "MercadoLibreConnection | None":
     )
 
 
+def products_with_variants(product_ids) -> set[int]:
+    """IDs (de los recibidos) que tienen al menos una variedad cargada."""
+    return set(
+        ProductVariant.objects.filter(product_id__in=list(product_ids))
+        .values_list("product_id", flat=True)
+        .distinct()
+    )
+
+
+def ml_item_publishable_stock(ml_item, comun_qty: int, variant_products: set[int] | None = None) -> int | None:
+    """Unidades que corresponden a UNA publicación desde el depósito propio.
+
+    Un producto con variedades reparte su stock entre ellas y el COMUN es solo
+    la suma: publicar esa suma en cada publicación muestra unidades que para esa
+    variedad no existen. Entonces:
+
+      - publicación enlazada a una variedad → el stock de esa variedad;
+      - producto con variedades y publicación sin enlazar → None (no se toca la
+        publicación: no hay forma de saber cuántas unidades son suyas);
+      - producto sin variedades → el COMUN de siempre.
+    """
+    if ml_item.variant_id:
+        variant = ProductVariant.objects.filter(
+            id=ml_item.variant_id, product_id=ml_item.product_id
+        ).first()
+        if variant:
+            return max(0, int(variant.quantity))
+        return None
+    if variant_products is None:
+        variant_products = products_with_variants([ml_item.product_id])
+    if ml_item.product_id in variant_products:
+        return None
+    return comun_qty
+
+
 def push_comun_stock_to_ml(products, connection=None) -> int:
     """Empujar el stock del depósito COMUN a las publicaciones de ML.
 
     COMUN es la fuente de verdad para todo lo que no sea Full: da igual si la
     venta entró por MercadoLibre (Flex/Colecta/Correo) o por fuera, el stock
     publicado se recalcula desde el mismo número. Como se manda el valor
-    absoluto y no un delta, repetir el push es inofensivo.
+    absoluto y no un delta, repetir el push es inofensivo. En los productos con
+    variedades el número sale de la variedad enlazada a cada publicación (ver
+    ml_item_publishable_stock).
 
     Tres casos por publicación:
       - Full puro          → no se toca (el stock lo administra ML).
@@ -1123,7 +1180,8 @@ def push_comun_stock_to_ml(products, connection=None) -> int:
 
     pushed = 0
     seen_products: set[int] = set()
-    seen_user_products: set[str] = set()
+    seen_user_products: set[tuple[str, int | None]] = set()
+    variant_products = products_with_variants({p.id for p in products})
     for product in products:
         if product.id in seen_products:
             continue
@@ -1132,14 +1190,23 @@ def push_comun_stock_to_ml(products, connection=None) -> int:
         if not ml_items:
             continue
         stock = Stock.objects.filter(product=product, warehouse=comun_wh).first()
-        qty = max(0, int(stock.quantity)) if stock else 0
+        comun_qty = max(0, int(stock.quantity)) if stock else 0
         for ml_item in ml_items:
             is_full = ml_item.logistic_type == "fulfillment"
+            qty = ml_item_publishable_stock(ml_item, comun_qty, variant_products)
+            if qty is None:
+                # Publicación de un producto con variedades todavía sin enlazar:
+                # se deja como está hasta que alguien elija la variedad.
+                continue
             try:
                 if is_full and ml_item.has_flex and ml_item.user_product_id:
-                    if ml_item.user_product_id in seen_user_products:
+                    # La clave incluye la variedad: dos publicaciones del mismo
+                    # user_product pero de variedades distintas empujan números
+                    # distintos y no se deben deduplicar entre sí.
+                    up_key = (ml_item.user_product_id, ml_item.variant_id)
+                    if up_key in seen_user_products:
                         continue
-                    seen_user_products.add(ml_item.user_product_id)
+                    seen_user_products.add(up_key)
                     if push_selling_address_stock(ml_item.user_product_id, qty, access_token):
                         pushed += 1
                         # Reflejar el valor recién empujado en la copia local: es
@@ -1149,7 +1216,8 @@ def push_comun_stock_to_ml(products, connection=None) -> int:
                         # publicaciones que comparten el user_product comparten
                         # el stock, así que se actualizan juntas.
                         MercadoLibreItem.objects.filter(
-                            user_product_id=ml_item.user_product_id
+                            user_product_id=ml_item.user_product_id,
+                            variant_id=ml_item.variant_id,
                         ).update(flex_quantity=qty)
                 elif is_full:
                     continue
@@ -1226,7 +1294,8 @@ def _apply_ml_stock_exit(sale: Sale, matched_items, user) -> None:
     comun_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
     if not comun_wh:
         return
-    for product, quantity, unit_price, vat_percent, _variant, _item_id in matched_items:
+    variant_products = []
+    for product, quantity, unit_price, vat_percent, variant, _item_id in matched_items:
         components = (
             [(kc.component, quantity * kc.quantity) for kc in product.kit_components.select_related("component")]
             if product.is_kit
@@ -1244,6 +1313,21 @@ def _apply_ml_stock_exit(sale: Sale, matched_items, user) -> None:
                 sale=sale,
                 allow_negative=True,
             )
+        # En un producto con variedades el COMUN es la suma de las variedades:
+        # hay que bajar la variedad vendida, si no el próximo recálculo (o una
+        # edición de variedades) revive las unidades ya vendidas — y la
+        # publicación de esa variedad seguiría ofreciendo stock que no está.
+        if variant and not product.is_kit:
+            with transaction.atomic():
+                locked = ProductVariant.objects.select_for_update().filter(id=variant.id, product=product).first()
+                if locked:
+                    locked.quantity = (locked.quantity - quantity).quantize(Decimal("0.01"))
+                    locked.save(update_fields=["quantity"])
+                    variant_products.append(product)
+    for product in variant_products:
+        # Deja el COMUN igual a la suma de variedades (ya descontadas): pisa el
+        # descuento que hizo register_exit en vez de sumarse a él.
+        services.sync_comun_from_variants(product)
 
 
 def _revert_ml_stock_exit(sale: Sale, user) -> None:
@@ -1266,6 +1350,25 @@ def _revert_ml_stock_exit(sale: Sale, user) -> None:
             reference=f"Reversa venta ML cancelada {sale.ml_order_id or sale.id}",
             allow_negative=True,
         )
+    # La salida bajó la variedad vendida (ver _apply_ml_stock_exit): la reversa
+    # se la devuelve y recalcula el COMUN desde las variedades, que ya incluye
+    # las unidades devueltas.
+    reverted_variant_products = []
+    for item in sale.items.select_related("variant", "product").filter(variant__isnull=False):
+        if item.product.is_kit:
+            continue
+        with transaction.atomic():
+            locked = (
+                ProductVariant.objects.select_for_update()
+                .filter(id=item.variant_id, product=item.product)
+                .first()
+            )
+            if locked:
+                locked.quantity = (locked.quantity + item.quantity).quantize(Decimal("0.01"))
+                locked.save(update_fields=["quantity"])
+                reverted_variant_products.append(item.product)
+    for product in reverted_variant_products:
+        services.sync_comun_from_variants(product)
     # Los movimientos de salida originales se dejan como están: el ajuste de
     # reversa ya deja el rastro completo en el historial. Además solo se llega
     # acá en la transición a cancelada (después la orden sale por
@@ -1338,10 +1441,12 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
         if quantity <= 0:
             continue
         product = None
+        linked_variant = None
         if item_id:
-            ml_item = MercadoLibreItem.objects.select_related("product").filter(item_id=item_id).first()
+            ml_item = MercadoLibreItem.objects.select_related("product", "variant").filter(item_id=item_id).first()
             if ml_item and ml_item.product:
                 product = ml_item.product
+                linked_variant = ml_item.variant
         if not product and item_id:
             try:
                 item_detail = _call_with_refresh(connection, get_item, item_id, access_token=access_token)
@@ -1367,7 +1472,13 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
         if not product:
             continue
         vat_percent = product.vat_percent or Decimal("0.00")
-        variant = _resolve_variant_for_order_item(product, order_item, item_id, access_token, connection=connection)
+        # Cuando cada variedad es una publicación aparte (lo habitual acá) la
+        # orden no trae variation_attributes: la variedad es la enlazada a la
+        # publicación. Las variaciones propias de ML, si las hay, mandan.
+        variant = (
+            _resolve_variant_for_order_item(product, order_item, item_id, access_token, connection=connection)
+            or linked_variant
+        )
         matched_items.append((product, quantity, unit_price, vat_percent, variant, item_id))
 
     if not matched_items:

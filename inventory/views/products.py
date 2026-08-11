@@ -90,6 +90,21 @@ def edit_product(request, pk: int):
     return render(request, "inventory/product_form.html", {"form": form, "title": "Editar producto"})
 
 
+def _push_variant_stock_to_ml(product) -> None:
+    """Reflejar en ML el stock de las variedades recién editadas.
+
+    Cada publicación recibe el stock de SU variedad (las que todavía no tienen
+    variedad elegida se saltean). Un fallo de red o de token no puede voltear la
+    edición: el barrido de reconciliación lo corrige después.
+    """
+    from .. import mercadolibre as ml
+
+    try:
+        ml.push_comun_stock_to_ml([product])
+    except Exception:
+        pass
+
+
 @login_required
 def product_variants(request, product_id: int):
     product = get_object_or_404(Product, pk=product_id)
@@ -105,6 +120,7 @@ def product_variants(request, product_id: int):
                     quantity=add_form.cleaned_data["quantity"],
                 )
                 services.sync_comun_from_variants(product)
+                _push_variant_stock_to_ml(product)
                 messages.success(request, "Variedad agregada.")
                 return redirect("inventory_product_variants", product_id=product.id)
             messages.error(request, "Revisá los datos de la variedad.")
@@ -123,6 +139,7 @@ def product_variants(request, product_id: int):
                     variant.quantity = form.cleaned_data["quantity"]
                     variant.save(update_fields=["name", "quantity"])
                 services.sync_comun_from_variants(product)
+                _push_variant_stock_to_ml(product)
                 messages.success(request, "Variedades actualizadas.")
                 return redirect("inventory_product_variants", product_id=product.id)
             messages.error(request, "Revisá los datos de las variedades.")
