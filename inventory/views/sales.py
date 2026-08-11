@@ -21,6 +21,7 @@ from django.views.decorators.http import require_http_methods
 from .. import services
 from .. import mercadolibre as ml
 from ..models import (
+    ML_SELLER_FULFILLED_TYPES,
     Customer,
     KitComponent,
     MLLogisticType,
@@ -301,6 +302,7 @@ def sale_edit(request, sale_id: int):
             comision_ml = header_form.cleaned_data.get("comision_ml") or Decimal("0.00")
             impuestos_ml = header_form.cleaned_data.get("impuestos_ml") or Decimal("0.00")
             costo_envio = header_form.cleaned_data.get("costo_envio") or Decimal("0.00")
+            canal_ml = header_form.cleaned_data.get("canal_ml") or MLLogisticType.FULFILLMENT
             delivery_status = header_form.cleaned_data.get("delivery_status") or Sale.DeliveryStatus.NOT_DELIVERED
             if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE:
                 customer = None
@@ -310,6 +312,13 @@ def sale_edit(request, sale_id: int):
                 audience = customer.audience
             try:
                 with transaction.atomic():
+                    # Ver el comentario en sales_list: en una venta de ML la
+                    # mercadería no sale del depósito ML, sale de COMUN salvo
+                    # que el canal sea Full.
+                    if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE:
+                        stock_wh = comun_wh if canal_ml in ML_SELLER_FULFILLED_TYPES else None
+                    else:
+                        stock_wh = warehouse
                     previous_items = list(sale.items.select_related("variant", "product"))
                     if sale.warehouse.type == Warehouse.WarehouseType.COMUN:
                         for prev_item in previous_items:
@@ -324,7 +333,7 @@ def sale_edit(request, sale_id: int):
                                     variant.save(update_fields=["quantity"])
                                     if comun_wh:
                                         _sync_common_with_variants(prev_item.product, comun_wh)
-                    for movement in sale.movements.select_for_update().select_related("from_warehouse"):
+                    for movement in sale.movements.select_for_update():
                         if _movement_restores_stock(movement):
                             stock, _ = Stock.objects.select_for_update().get_or_create(
                                 product=movement.product,
@@ -346,6 +355,9 @@ def sale_edit(request, sale_id: int):
                     sale.ml_tax_total = (
                         impuestos_ml if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE else Decimal("0.00")
                     )
+                    sale.ml_logistic_type = (
+                        canal_ml if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE else ""
+                    )
                     sale.shipping_cost = costo_envio
                     update_fields = [
                         "customer",
@@ -354,6 +366,7 @@ def sale_edit(request, sale_id: int):
                         "delivery_status",
                         "ml_commission_total",
                         "ml_tax_total",
+                        "ml_logistic_type",
                         "shipping_cost",
                     ]
                     if sale_date:
@@ -420,12 +433,12 @@ def sale_edit(request, sale_id: int):
                         )
                         total += line_total
                         discount_total += discount_amount
-                        if warehouse.type != Warehouse.WarehouseType.MERCADOLIBRE:
+                        if stock_wh:
                             if data["product"].is_kit:
                                 for component in KitComponent.objects.select_related("component").filter(kit=data["product"]):
                                     services.register_exit(
                                         product=component.component,
-                                        warehouse=warehouse,
+                                        warehouse=stock_wh,
                                         quantity=(qty * component.quantity),
                                         user=request.user,
                                         reference=f"Venta kit {audience} #{sale.id}",
@@ -437,7 +450,7 @@ def sale_edit(request, sale_id: int):
                             else:
                                 services.register_exit(
                                     product=data["product"],
-                                    warehouse=warehouse,
+                                    warehouse=stock_wh,
                                     quantity=data["quantity"],
                                     user=request.user,
                                     reference=f"Venta {audience} #{sale.id}",
@@ -457,6 +470,11 @@ def sale_edit(request, sale_id: int):
                     sale.discount_total = (discount_total + extra_discount_amount).quantize(Decimal("0.01"))
                     sale.save(update_fields=["total", "discount_total"])
                 messages.success(request, "Venta actualizada.")
+                if stock_wh and stock_wh.type == Warehouse.WarehouseType.COMUN:
+                    try:
+                        ml.push_comun_stock_to_ml([data["product"] for data in items])
+                    except Exception:
+                        pass
                 if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE:
                     return redirect("inventory_sales_list")
                 return redirect("inventory_sale_receipt", sale_id=sale.id)
@@ -1003,7 +1021,7 @@ def sales_list(request):
                                 variant.save(update_fields=["quantity"])
                                 if comun_wh:
                                     _sync_common_with_variants(item.product, comun_wh)
-                for movement in sale.movements.select_for_update().select_related("from_warehouse"):
+                for movement in sale.movements.select_for_update():
                     if _movement_restores_stock(movement):
                         stock, _ = Stock.objects.select_for_update().get_or_create(
                             product=movement.product,
@@ -1073,6 +1091,7 @@ def sales_list(request):
             comision_ml = header_form.cleaned_data.get("comision_ml") or Decimal("0.00")
             impuestos_ml = header_form.cleaned_data.get("impuestos_ml") or Decimal("0.00")
             costo_envio = header_form.cleaned_data.get("costo_envio") or Decimal("0.00")
+            canal_ml = header_form.cleaned_data.get("canal_ml") or MLLogisticType.FULFILLMENT
             delivery_status = header_form.cleaned_data.get("delivery_status") or Sale.DeliveryStatus.NOT_DELIVERED
             if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE:
                 customer = None
@@ -1105,6 +1124,15 @@ def sales_list(request):
                 try:
                     with transaction.atomic():
                         comun_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
+                        # Depósito del que sale físicamente la mercadería. En una
+                        # venta de MercadoLibre eso NO es el depósito ML: Full lo
+                        # despacha MercadoLibre desde el suyo (no se descuenta
+                        # nada) y el resto de los canales sale del depósito
+                        # propio, igual que una venta mostrador.
+                        if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE:
+                            stock_wh = comun_wh if canal_ml in ML_SELLER_FULFILLED_TYPES else None
+                        else:
+                            stock_wh = warehouse
                         sale = Sale.objects.create(
                             customer=customer,
                             warehouse=warehouse,
@@ -1114,6 +1142,7 @@ def sales_list(request):
                             user=request.user,
                             ml_commission_total=comision_ml if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE else Decimal("0.00"),
                             ml_tax_total=impuestos_ml if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE else Decimal("0.00"),
+                            ml_logistic_type=canal_ml if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE else "",
                             shipping_cost=costo_envio,
                         )
                         if sale_date:
@@ -1182,12 +1211,12 @@ def sales_list(request):
                             )
                             total += line_total
                             discount_total += discount_amount
-                            if warehouse.type != Warehouse.WarehouseType.MERCADOLIBRE:
+                            if stock_wh:
                                 if data["product"].is_kit:
                                     for component in KitComponent.objects.select_related("component").filter(kit=data["product"]):
                                         services.register_exit(
                                             product=component.component,
-                                            warehouse=warehouse,
+                                            warehouse=stock_wh,
                                             quantity=(qty * component.quantity),
                                             user=request.user,
                                             reference=f"Venta kit {audience} #{sale.id}",
@@ -1199,7 +1228,7 @@ def sales_list(request):
                                 else:
                                     services.register_exit(
                                         product=data["product"],
-                                        warehouse=warehouse,
+                                        warehouse=stock_wh,
                                         quantity=data["quantity"],
                                         user=request.user,
                                         reference=f"Venta {audience} #{sale.id}",
@@ -1219,8 +1248,11 @@ def sales_list(request):
                         sale.discount_total = (discount_total + extra_discount_amount).quantize(Decimal("0.01"))
                         sale.save(update_fields=["total", "discount_total"])
                     messages.success(request, "Venta registrada.")
-                    # After transaction commits, push updated stock to ML (non-blocking)
-                    if warehouse.type == Warehouse.WarehouseType.COMUN:
+                    # Ya commiteada la transacción, reflejar el nuevo COMUN en las
+                    # publicaciones. Aplica a cualquier venta que haya descontado
+                    # de COMUN, sea mostrador o de un canal ML que despacha desde
+                    # el depósito propio.
+                    if stock_wh and stock_wh.type == Warehouse.WarehouseType.COMUN:
                         try:
                             ml.push_comun_stock_to_ml([data["product"] for data in items])
                         except Exception:
@@ -1453,7 +1485,7 @@ def sale_delete(request, sale_id: int):
                             variant.save(update_fields=["quantity"])
                             if comun_wh:
                                 _sync_common_with_variants(item.product, comun_wh)
-            for movement in sale.movements.select_for_update().select_related("from_warehouse"):
+            for movement in sale.movements.select_for_update():
                 if _movement_restores_stock(movement):
                     stock, _ = Stock.objects.select_for_update().get_or_create(
                         product=movement.product,

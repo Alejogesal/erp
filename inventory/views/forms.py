@@ -11,6 +11,7 @@ from ..models import (
     CustomerProductPrice,
     CustomerPayment,
     IVAPayment,
+    MLLogisticType,
     Product,
     Purchase,
     Sale,
@@ -193,6 +194,13 @@ class SaleHeaderForm(forms.Form):
         decimal_places=2,
         required=False,
         initial=Decimal("0.00"),
+    )
+    canal_ml = forms.ChoiceField(
+        choices=MLLogisticType.choices,
+        label="Canal ML",
+        initial=MLLogisticType.FULFILLMENT,
+        required=False,
+        help_text="Full lo despacha MercadoLibre y no descuenta stock. El resto sale de tu depósito.",
     )
     comision_ml = forms.DecimalField(
         label="Comisión ML",

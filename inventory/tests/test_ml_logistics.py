@@ -23,6 +23,7 @@ from inventory.models import (
     MercadoLibreItem,
     Product,
     Sale,
+    SaleItem,
     Stock,
     StockMovement,
     Warehouse,
@@ -597,6 +598,129 @@ class StockBreakdownTests(TestCase):
         self.assertTrue(coexist.sells_from_own_warehouse)
         self.assertTrue(flex.sells_from_own_warehouse)
         self.assertTrue(places.sells_from_own_warehouse)
+
+
+class ManualMlSaleTests(TestCase):
+    """Venta cargada a mano en el depósito MercadoLibre.
+
+    Antes no había forma de decir por qué canal salió, y el código salteaba el
+    stock para cualquier venta del depósito ML: una venta Flex manual no
+    descontaba nada. Ahora el formulario tiene canal y la mercadería sale de
+    COMUN salvo que sea Full.
+    """
+
+    def setUp(self):
+        _reset_current_user()
+        self.user = get_user_model().objects.create_user(username="man", password="x")
+        self.client.force_login(self.user)
+        self.ml_wh = Warehouse.objects.get(type=Warehouse.WarehouseType.MERCADOLIBRE)
+        self.comun_wh = Warehouse.objects.get(type=Warehouse.WarehouseType.COMUN)
+        self.product = Product.objects.create(name="Aceite", sku="AC1", price_consumer=Decimal("100"))
+        Stock.objects.create(product=self.product, warehouse=self.comun_wh, quantity=Decimal("20"))
+
+    def _post_sale(self, canal):
+        return self.client.post(
+            reverse("inventory_sales_list"),
+            {
+                "warehouse": str(self.ml_wh.id),
+                "audiencia": "CONSUMER",
+                "canal_ml": canal,
+                "total_venta": "300",
+                "descuento_total": "0",
+                "comision_ml": "0",
+                "impuestos_ml": "0",
+                "costo_envio": "0",
+                "delivery_status": "NOT_DELIVERED",
+                "form-TOTAL_FORMS": "1",
+                "form-INITIAL_FORMS": "0",
+                "form-MIN_NUM_FORMS": "0",
+                "form-MAX_NUM_FORMS": "1000",
+                "form-0-product": str(self.product.id),
+                "form-0-quantity": "3",
+                "form-0-discount_percent": "0",
+                "form-0-vat_percent": "0",
+            },
+        )
+
+    def _comun(self):
+        return Stock.objects.get(product=self.product, warehouse=self.comun_wh).quantity
+
+    def test_flex_sale_discounts_comun(self):
+        with patch.object(ml, "push_comun_stock_to_ml") as push:
+            self._post_sale("self_service")
+        sale = Sale.objects.get(warehouse=self.ml_wh)
+        self.assertEqual(sale.ml_logistic_type, "self_service")
+        self.assertEqual(self._comun(), Decimal("17.00"))
+        push.assert_called_once()
+
+    def test_full_sale_leaves_stock_alone(self):
+        with patch.object(ml, "push_comun_stock_to_ml") as push:
+            self._post_sale("fulfillment")
+        sale = Sale.objects.get(warehouse=self.ml_wh)
+        self.assertEqual(sale.ml_logistic_type, "fulfillment")
+        # Full lo despacha ML desde su depósito.
+        self.assertEqual(self._comun(), Decimal("20.00"))
+        push.assert_not_called()
+
+    def test_places_sale_discounts_comun(self):
+        with patch.object(ml, "push_comun_stock_to_ml"):
+            self._post_sale("xd_drop_off")
+        self.assertEqual(self._comun(), Decimal("17.00"))
+
+
+class SaleEditRegressionTests(TestCase):
+    """select_for_update() sobre un select_related de una FK nullable genera un
+    LEFT JOIN que Postgres no deja bloquear ("FOR UPDATE cannot be applied to
+    the nullable side of an outer join"), y rompía editar y borrar ventas."""
+
+    def setUp(self):
+        _reset_current_user()
+        self.user = get_user_model().objects.create_user(username="edit", password="x")
+        self.client.force_login(self.user)
+        self.comun_wh = Warehouse.objects.get(type=Warehouse.WarehouseType.COMUN)
+        self.product = Product.objects.create(name="Balm", sku="BA1", price_consumer=Decimal("50"))
+        Stock.objects.create(product=self.product, warehouse=self.comun_wh, quantity=Decimal("10"))
+        self.sale = Sale.objects.create(
+            warehouse=self.comun_wh, user=self.user, total=Decimal("100")
+        )
+        SaleItem.objects.create(
+            sale=self.sale, product=self.product, quantity=Decimal("2"),
+            unit_price=Decimal("50"), final_unit_price=Decimal("50"),
+            line_total=Decimal("100"), cost_unit=Decimal("10"),
+        )
+        StockMovement.objects.create(
+            product=self.product, sale=self.sale,
+            movement_type=StockMovement.MovementType.EXIT,
+            from_warehouse=self.comun_wh, quantity=Decimal("2"), user=self.user,
+        )
+
+    def test_sale_edit_does_not_error(self):
+        resp = self.client.post(
+            reverse("inventory_sale_edit", args=[self.sale.id]),
+            {
+                "warehouse": str(self.comun_wh.id),
+                "audiencia": "CONSUMER",
+                "descuento_total": "0",
+                "costo_envio": "0",
+                "delivery_status": "NOT_DELIVERED",
+                "form-TOTAL_FORMS": "1",
+                "form-INITIAL_FORMS": "0",
+                "form-MIN_NUM_FORMS": "0",
+                "form-MAX_NUM_FORMS": "1000",
+                "form-0-product": str(self.product.id),
+                "form-0-quantity": "4",
+                "form-0-discount_percent": "0",
+                "form-0-vat_percent": "0",
+            },
+            follow=True,
+        )
+        self.assertEqual(resp.status_code, 200)
+        textos = [m.message for m in resp.context["messages"]]
+        self.assertFalse(
+            [t for t in textos if "No se pudo actualizar" in t], textos
+        )
+        self.sale.refresh_from_db()
+        self.assertEqual(self.sale.items.first().quantity, Decimal("4.00"))
 
 
 class SalesChannelFilterTests(TestCase):

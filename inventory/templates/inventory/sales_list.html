@@ -292,6 +292,7 @@
         const totalVenta = document.getElementById("id_total_venta");
         const comisionMl = document.getElementById("id_comision_ml");
         const impuestosMl = document.getElementById("id_impuestos_ml");
+        const canalMl = document.getElementById("id_canal_ml");
         const descuentoTotal = document.getElementById("id_descuento_total");
         const deliveryStatus = document.getElementById("id_delivery_status");
         const audiences = JSON.parse(document.getElementById("customer-audiences").textContent || "{}");
@@ -315,7 +316,7 @@
         const syncMlFields = () => {
             if (!warehouseSelect) return;
             const isMl = warehouseSelect.options[warehouseSelect.selectedIndex]?.textContent?.toLowerCase().includes("mercadolibre");
-            [totalVenta, comisionMl, impuestosMl].forEach((field) => {
+            [totalVenta, comisionMl, impuestosMl, canalMl].forEach((field) => {
                 if (!field) return;
                 const wrapper = field.closest("p") || field.parentElement;
                 if (wrapper) wrapper.style.display = isMl ? "" : "none";
@@ -350,7 +351,7 @@
             syncMlFields();
         }
         if (clearSaleForm) {
-            [totalVenta, comisionMl, impuestosMl].forEach((field) => {
+            [totalVenta, comisionMl, impuestosMl, canalMl].forEach((field) => {
                 if (field) field.value = "";
             });
         }
