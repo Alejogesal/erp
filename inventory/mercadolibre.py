@@ -1003,18 +1003,16 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
                 if logistic_type == "fulfillment" and has_flex and user_product_id:
                     # Convivencia: solo se corrige la ubicación selling_address;
                     # el stock en el depósito de ML no se toca.
-                    _published, found = _flex_stock_from_locations(
-                        fulfillment_cache.get(user_product_id) or {}
-                    )
-                    if (
-                        found
-                        and flex_qty != comun_qty
-                        and user_product_id not in reconciled_user_products
-                    ):
+                    # No se exige que ML haya devuelto la ubicación: cuando está
+                    # en 0 la omite de la respuesta, y ese es justo el caso que
+                    # más hay que corregir (publicación sin stock propio y
+                    # depósito con unidades). has_flex ya confirma que la
+                    # publicación admite el PUT.
+                    if flex_qty != comun_qty and user_product_id not in reconciled_user_products:
                         reconciled_user_products.add(user_product_id)
                         if push_selling_address_stock(user_product_id, comun_qty, access_token):
                             stock_pushed += 1
-                elif logistic_type != "fulfillment" and int(available) != comun_qty:
+                elif logistic_type != "fulfillment" and flex_qty != comun_qty:
                     try:
                         push_item_stock_and_price(item_id, comun_qty, None, access_token)
                         stock_pushed += 1

@@ -498,6 +498,22 @@ class StockReconciliationTests(TestCase):
         push_flex.assert_called_once_with("MLAU1", 12, "tok")
         push_item.assert_not_called()
 
+    def test_coexistence_without_selling_address_is_still_pushed(self):
+        # ML omite la ubicación selling_address cuando está en 0. Es justo el
+        # caso que más hay que corregir: publicación sin stock propio y depósito
+        # con unidades.
+        item = {
+            "id": "MLA1",
+            "title": "Cera",
+            "status": "active",
+            "available_quantity": 6,
+            "user_product_id": "MLAU1",
+            "shipping": {"logistic_type": "fulfillment", "tags": ["self_service_in"]},
+        }
+        self.user_product_stock = {"locations": [{"type": "meli_facility", "quantity": 6}]}
+        _result, _push_item, push_flex = self._run_sync(item)
+        push_flex.assert_called_once_with("MLAU1", 12, "tok")
+
     def test_coexistence_in_sync_is_left_alone(self):
         item = {
             "id": "MLA1",
