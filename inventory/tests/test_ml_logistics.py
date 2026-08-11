@@ -281,6 +281,29 @@ class PushComunStockTests(TestCase):
         push_item.assert_not_called()
         push_flex.assert_called_once_with("MLAU1", 7, "tok")
 
+    def test_push_updates_local_mirror(self):
+        # El panel lee flex_quantity de la base. Si no se actualiza al empujar,
+        # queda con el número viejo hasta el próximo sync y parece que el push
+        # no funcionó.
+        item = MercadoLibreItem.objects.create(
+            item_id="MLA9", product=self.product, logistic_type="self_service",
+            available_quantity=99, flex_quantity=99,
+        )
+        self._push()
+        item.refresh_from_db()
+        self.assertEqual(item.flex_quantity, 7)
+        self.assertEqual(item.available_quantity, 7)
+
+    def test_push_updates_mirror_of_every_shared_publication(self):
+        for item_id in ("MLA10", "MLA11"):
+            MercadoLibreItem.objects.create(
+                item_id=item_id, product=self.product, logistic_type="fulfillment",
+                has_flex=True, user_product_id="MLAU9", flex_quantity=99,
+            )
+        self._push()
+        for item in MercadoLibreItem.objects.filter(user_product_id="MLAU9"):
+            self.assertEqual(item.flex_quantity, 7)
+
     def test_coexistence_user_product_pushed_once(self):
         # Catálogo + tradicional comparten el user_product_id y el mismo stock.
         for item_id in ("MLA4", "MLA5"):

@@ -1142,11 +1142,23 @@ def push_comun_stock_to_ml(products, connection=None) -> int:
                     seen_user_products.add(ml_item.user_product_id)
                     if push_selling_address_stock(ml_item.user_product_id, qty, access_token):
                         pushed += 1
+                        # Reflejar el valor recién empujado en la copia local: es
+                        # lo que muestra el panel, y si no se actualiza acá queda
+                        # con el número viejo hasta el próximo sync (15 min) y
+                        # parece que el push no funcionó. Todas las
+                        # publicaciones que comparten el user_product comparten
+                        # el stock, así que se actualizan juntas.
+                        MercadoLibreItem.objects.filter(
+                            user_product_id=ml_item.user_product_id
+                        ).update(flex_quantity=qty)
                 elif is_full:
                     continue
                 else:
                     push_item_stock_and_price(ml_item.item_id, qty, None, access_token)
                     pushed += 1
+                    MercadoLibreItem.objects.filter(item_id=ml_item.item_id).update(
+                        available_quantity=qty, flex_quantity=qty
+                    )
             except Exception:
                 # Un ítem cerrado o con error no debe frenar el resto.
                 continue
