@@ -1,4 +1,5 @@
 import json
+import logging
 import unicodedata
 from dataclasses import dataclass
 from datetime import timedelta, datetime
@@ -26,6 +27,8 @@ from .models import (
     StockMovement,
     Warehouse,
 )
+
+logger = logging.getLogger(__name__)
 
 ML_BASE_URL = "https://api.mercadolibre.com"
 ML_AUTH_URL = "https://auth.mercadolibre.com.ar/authorization"
@@ -93,6 +96,29 @@ def _request(
     if with_headers:
         return payload, resp_headers
     return payload
+
+
+def error_detail(exc: Exception) -> str:
+    """Motivo legible de un error de la API de ML.
+
+    El body de un 4xx trae el `message` de ML ("Item can not be modified",
+    "invalid quantity"…), que es lo único que explica por qué no se publicó el
+    stock. urlopen lo deja en el propio HTTPError y se pierde si no se lee.
+    """
+    if not isinstance(exc, HTTPError):
+        return str(exc)
+    detail = ""
+    try:
+        payload = json.loads(exc.read().decode("utf-8") or "{}")
+        detail = payload.get("message") or payload.get("error") or ""
+        causes = payload.get("cause") or []
+        if causes:
+            texts = [str(c.get("message") or c.get("code") or c) for c in causes if c]
+            if texts:
+                detail = f"{detail} ({'; '.join(texts)})" if detail else "; ".join(texts)
+    except Exception:
+        detail = ""
+    return f"HTTP {exc.code}: {detail}" if detail else f"HTTP {exc.code}"
 
 
 # El JSON nuevo de /shipments requiere este header. ML lo volvió obligatorio en
@@ -574,10 +600,18 @@ def push_selling_address_stock(user_product_id: str, quantity: int, access_token
                 access_token=access_token,
                 with_headers=True,
             )
-        except HTTPError:
+        except HTTPError as exc:
+            logger.warning(
+                "ML: no se pudo leer el stock del user_product %s — %s",
+                user_product_id, error_detail(exc),
+            )
             return False
         version = headers.get("x-version") or headers.get("X-Version")
         if not version:
+            logger.warning(
+                "ML: el user_product %s no devolvió x-version; no se puede fijar el stock propio",
+                user_product_id,
+            )
             return False
         try:
             _request(
@@ -592,7 +626,15 @@ def push_selling_address_stock(user_product_id: str, quantity: int, access_token
             if exc.code == 409:
                 # Versión desactualizada: releer y reintentar una vez.
                 continue
+            logger.warning(
+                "ML: rechazó el stock %s del user_product %s — %s",
+                quantity, user_product_id, error_detail(exc),
+            )
             return False
+    logger.warning(
+        "ML: conflicto de versión (409) repetido al fijar el stock del user_product %s",
+        user_product_id,
+    )
     return False
 
 
@@ -1149,22 +1191,127 @@ def ml_item_publishable_stock(ml_item, comun_qty: int, variant_products: set[int
     return comun_qty
 
 
+# Acciones posibles sobre una publicación (ver stock_alignment_rows).
+ALIGN_SKIP = "skip"
+ALIGN_ITEM = "item"
+ALIGN_SELLING_ADDRESS = "selling_address"
+
+
+def stock_alignment_rows(ml_items, comun_wh=None) -> list[dict]:
+    """Qué stock le corresponde a cada publicación y por qué.
+
+    Devuelve una fila por publicación con el número del ERP, el que ML tiene
+    publicado y la acción que corresponde. Separar la decisión del push permite
+    mostrarla antes de tocar nada (dry-run) y explicar cada salteo, que es lo
+    que faltaba cuando el stock "no se sincronizaba" sin decir por qué.
+    """
+    ml_items = list(ml_items)
+    comun_wh = comun_wh or Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
+    product_ids = {item.product_id for item in ml_items if item.product_id}
+    variant_products = products_with_variants(product_ids)
+    comun_by_product: dict[int, int] = {}
+    if comun_wh:
+        comun_by_product = {
+            stock.product_id: max(0, int(stock.quantity))
+            for stock in Stock.objects.filter(product_id__in=product_ids, warehouse=comun_wh)
+        }
+
+    rows: list[dict] = []
+    seen_user_products: set[tuple[str, int | None]] = set()
+    for item in ml_items:
+        row = {
+            "item": item,
+            "item_id": item.item_id,
+            "title": item.title,
+            "ml_qty": item.flex_quantity,
+            "erp_qty": None,
+            "action": ALIGN_SKIP,
+            "reason": "",
+            "result": "",
+            "error": "",
+        }
+        rows.append(row)
+        if not comun_wh:
+            row["reason"] = "no hay depósito COMUN configurado"
+            continue
+        if not item.product_id:
+            row["reason"] = "sin producto matcheado"
+            continue
+        if item.status == "closed":
+            row["reason"] = "publicación cerrada"
+            continue
+        qty = ml_item_publishable_stock(item, comun_by_product.get(item.product_id, 0), variant_products)
+        if qty is None:
+            row["reason"] = "falta elegir la variedad"
+            continue
+        row["erp_qty"] = qty
+        is_full = item.logistic_type == "fulfillment"
+        if is_full and item.has_flex and item.user_product_id:
+            key = (item.user_product_id, item.variant_id)
+            if key in seen_user_products:
+                row["reason"] = "stock compartido con otra publicación, se empuja una sola vez"
+                continue
+            seen_user_products.add(key)
+            row["action"] = ALIGN_SELLING_ADDRESS
+        elif is_full:
+            row["reason"] = "Full puro: el stock lo administra ML"
+        else:
+            row["action"] = ALIGN_ITEM
+    return rows
+
+
+def apply_stock_alignment(rows, access_token, only_diff: bool = False) -> tuple[int, int]:
+    """Empujar a ML las filas accionables. Devuelve (empujadas, fallidas).
+
+    Cada fila queda con `result`/`error` cargados: un fallo de una publicación
+    no frena al resto, pero deja de ser invisible.
+    """
+    pushed = failed = 0
+    for row in rows:
+        if row["action"] == ALIGN_SKIP:
+            continue
+        item = row["item"]
+        qty = row["erp_qty"]
+        if only_diff and qty == row["ml_qty"]:
+            row["action"] = ALIGN_SKIP
+            row["reason"] = "ya coincide con lo publicado"
+            continue
+        try:
+            if row["action"] == ALIGN_SELLING_ADDRESS:
+                if not push_selling_address_stock(item.user_product_id, qty, access_token):
+                    raise RuntimeError(
+                        "MercadoLibre rechazó el stock del depósito propio (detalle en los logs)"
+                    )
+                MercadoLibreItem.objects.filter(
+                    user_product_id=item.user_product_id, variant_id=item.variant_id
+                ).update(flex_quantity=qty)
+            else:
+                push_item_stock_and_price(item.item_id, qty, None, access_token)
+                MercadoLibreItem.objects.filter(item_id=item.item_id).update(
+                    available_quantity=qty, flex_quantity=qty
+                )
+            row["result"] = "ok"
+            pushed += 1
+        except Exception as exc:
+            row["error"] = error_detail(exc)
+            failed += 1
+            logger.warning(
+                "ML: no se pudo publicar stock %s en %s — %s", qty, item.item_id, row["error"]
+            )
+    return pushed, failed
+
+
 def push_comun_stock_to_ml(products, connection=None) -> int:
-    """Empujar el stock del depósito COMUN a las publicaciones de ML.
+    """Empujar el stock del depósito propio a las publicaciones de esos productos.
 
     COMUN es la fuente de verdad para todo lo que no sea Full: da igual si la
     venta entró por MercadoLibre (Flex/Colecta/Correo) o por fuera, el stock
     publicado se recalcula desde el mismo número. Como se manda el valor
     absoluto y no un delta, repetir el push es inofensivo. En los productos con
-    variedades el número sale de la variedad enlazada a cada publicación (ver
-    ml_item_publishable_stock).
+    variedades el número sale de la variedad enlazada a cada publicación.
 
-    Tres casos por publicación:
-      - Full puro          → no se toca (el stock lo administra ML).
-      - convivencia Full+Flex → PUT selling_address del user_product: es el único
-        camino que separa el stock propio del que está en el depósito de ML.
-        Un PUT /items pisaría los dos juntos.
-      - resto (Flex puro, Colecta, Correo, custom) → PUT /items available_quantity.
+    Qué se hace con cada publicación lo decide stock_alignment_rows; acá solo se
+    juntan las publicaciones de los productos recibidos.
 
     Devuelve la cantidad de publicaciones actualizadas.
     """
@@ -1174,62 +1321,14 @@ def push_comun_stock_to_ml(products, connection=None) -> int:
     access_token = get_valid_access_token(connection)
     if not access_token:
         return 0
-    comun_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
-    if not comun_wh:
+    product_ids = {product.id for product in products}
+    if not product_ids:
         return 0
-
-    pushed = 0
-    seen_products: set[int] = set()
-    seen_user_products: set[tuple[str, int | None]] = set()
-    variant_products = products_with_variants({p.id for p in products})
-    for product in products:
-        if product.id in seen_products:
-            continue
-        seen_products.add(product.id)
-        ml_items = list(MercadoLibreItem.objects.filter(product=product))
-        if not ml_items:
-            continue
-        stock = Stock.objects.filter(product=product, warehouse=comun_wh).first()
-        comun_qty = max(0, int(stock.quantity)) if stock else 0
-        for ml_item in ml_items:
-            is_full = ml_item.logistic_type == "fulfillment"
-            qty = ml_item_publishable_stock(ml_item, comun_qty, variant_products)
-            if qty is None:
-                # Publicación de un producto con variedades todavía sin enlazar:
-                # se deja como está hasta que alguien elija la variedad.
-                continue
-            try:
-                if is_full and ml_item.has_flex and ml_item.user_product_id:
-                    # La clave incluye la variedad: dos publicaciones del mismo
-                    # user_product pero de variedades distintas empujan números
-                    # distintos y no se deben deduplicar entre sí.
-                    up_key = (ml_item.user_product_id, ml_item.variant_id)
-                    if up_key in seen_user_products:
-                        continue
-                    seen_user_products.add(up_key)
-                    if push_selling_address_stock(ml_item.user_product_id, qty, access_token):
-                        pushed += 1
-                        # Reflejar el valor recién empujado en la copia local: es
-                        # lo que muestra el panel, y si no se actualiza acá queda
-                        # con el número viejo hasta el próximo sync (15 min) y
-                        # parece que el push no funcionó. Todas las
-                        # publicaciones que comparten el user_product comparten
-                        # el stock, así que se actualizan juntas.
-                        MercadoLibreItem.objects.filter(
-                            user_product_id=ml_item.user_product_id,
-                            variant_id=ml_item.variant_id,
-                        ).update(flex_quantity=qty)
-                elif is_full:
-                    continue
-                else:
-                    push_item_stock_and_price(ml_item.item_id, qty, None, access_token)
-                    pushed += 1
-                    MercadoLibreItem.objects.filter(item_id=ml_item.item_id).update(
-                        available_quantity=qty, flex_quantity=qty
-                    )
-            except Exception:
-                # Un ítem cerrado o con error no debe frenar el resto.
-                continue
+    ml_items = list(MercadoLibreItem.objects.filter(product_id__in=product_ids))
+    if not ml_items:
+        return 0
+    rows = stock_alignment_rows(ml_items)
+    pushed, _failed = apply_stock_alignment(rows, access_token)
     return pushed
 
 

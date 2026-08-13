@@ -1182,3 +1182,144 @@ class LinkVariantFromPanelTests(TestCase):
         self.assertTrue(row.needs_variant)
         self.assertEqual(response.context["pending_variant_count"], 1)
         self.assertContains(response, "Falta variedad")
+
+
+class StockAlignmentReportTests(TestCase):
+    """El alineado explica publicación por publicación qué hace y qué falla.
+
+    Antes los errores de ML se descartaban con un `except: continue`, así que
+    una publicación que ML rechazaba quedaba desfasada para siempre y sin rastro.
+    """
+
+    def setUp(self):
+        _reset_current_user()
+        self.user = get_user_model().objects.create_user(username="align", password="x")
+        MercadoLibreConnection.objects.create(user=self.user, access_token="tok", ml_user_id="777")
+        self.comun_wh = Warehouse.objects.get(type=Warehouse.WarehouseType.COMUN)
+        self.product = Product.objects.create(name="Aurill", sku="AU1")
+        Stock.objects.create(product=self.product, warehouse=self.comun_wh, quantity=Decimal("12"))
+
+    def _rows(self):
+        return ml.stock_alignment_rows(MercadoLibreItem.objects.all())
+
+    def test_row_reports_erp_and_ml_quantities(self):
+        MercadoLibreItem.objects.create(
+            item_id="MLA1", title="Aurill", product=self.product,
+            logistic_type="self_service", flex_quantity=72,
+        )
+        row = self._rows()[0]
+        self.assertEqual((row["erp_qty"], row["ml_qty"]), (12, 72))
+        self.assertEqual(row["action"], ml.ALIGN_ITEM)
+
+    def test_unmatched_and_closed_publications_explain_the_skip(self):
+        MercadoLibreItem.objects.create(item_id="MLA2", title="Sin match")
+        MercadoLibreItem.objects.create(
+            item_id="MLA3", title="Cerrada", product=self.product, status="closed"
+        )
+        reasons = {row["item_id"]: row["reason"] for row in self._rows()}
+        self.assertEqual(reasons["MLA2"], "sin producto matcheado")
+        self.assertEqual(reasons["MLA3"], "publicación cerrada")
+
+    def test_missing_variant_link_is_reported(self):
+        ProductVariant.objects.create(product=self.product, name="375cm3", quantity=Decimal("5"))
+        MercadoLibreItem.objects.create(
+            item_id="MLA4", title="Aurill", product=self.product, logistic_type="self_service"
+        )
+        row = self._rows()[0]
+        self.assertEqual(row["action"], ml.ALIGN_SKIP)
+        self.assertEqual(row["reason"], "falta elegir la variedad")
+
+    def test_rejected_push_keeps_the_reason(self):
+        MercadoLibreItem.objects.create(
+            item_id="MLA5", title="Aurill", product=self.product,
+            logistic_type="self_service", flex_quantity=72,
+        )
+        rows = self._rows()
+        with patch.object(ml, "push_item_stock_and_price", side_effect=RuntimeError("item cerrado")):
+            pushed, failed = ml.apply_stock_alignment(rows, "tok")
+        self.assertEqual((pushed, failed), (0, 1))
+        self.assertEqual(rows[0]["error"], "item cerrado")
+        # El número local no se toca si ML no aceptó el cambio.
+        self.assertEqual(MercadoLibreItem.objects.get(item_id="MLA5").flex_quantity, 72)
+
+    def test_only_diff_skips_publications_already_in_sync(self):
+        MercadoLibreItem.objects.create(
+            item_id="MLA6", title="Aurill", product=self.product,
+            logistic_type="self_service", flex_quantity=12,
+        )
+        rows = self._rows()
+        with patch.object(ml, "push_item_stock_and_price") as push_item:
+            pushed, _failed = ml.apply_stock_alignment(rows, "tok", only_diff=True)
+        push_item.assert_not_called()
+        self.assertEqual(pushed, 0)
+        self.assertEqual(rows[0]["reason"], "ya coincide con lo publicado")
+
+    def test_command_dry_run_does_not_push(self):
+        from io import StringIO
+        from django.core.management import call_command
+
+        MercadoLibreItem.objects.create(
+            item_id="MLA7", title="Aurill", product=self.product,
+            logistic_type="self_service", flex_quantity=72,
+        )
+        out = StringIO()
+        with patch.object(ml, "get_valid_access_token", return_value="tok"), patch.object(
+            ml, "push_item_stock_and_price"
+        ) as push_item:
+            call_command("align_ml_stock", stdout=out)
+        push_item.assert_not_called()
+        self.assertIn("MLA7", out.getvalue())
+        self.assertIn("publicaría 12", out.getvalue())
+
+    def test_command_apply_pushes(self):
+        from io import StringIO
+        from django.core.management import call_command
+
+        MercadoLibreItem.objects.create(
+            item_id="MLA8", title="Aurill", product=self.product,
+            logistic_type="self_service", flex_quantity=72,
+        )
+        out = StringIO()
+        with patch.object(ml, "get_valid_access_token", return_value="tok"), patch.object(
+            ml, "push_item_stock_and_price"
+        ) as push_item:
+            call_command("align_ml_stock", "--apply", stdout=out)
+        push_item.assert_called_once_with("MLA8", 12, None, "tok")
+        self.assertEqual(MercadoLibreItem.objects.get(item_id="MLA8").flex_quantity, 12)
+
+
+class AlignStockButtonTests(TestCase):
+    """El botón del panel empuja todo y muestra el motivo de cada rechazo."""
+
+    def setUp(self):
+        _reset_current_user()
+        self.user = get_user_model().objects.create_user(
+            username="alignbtn", password="x", is_superuser=True, is_staff=True
+        )
+        self.client.force_login(self.user)
+        MercadoLibreConnection.objects.create(user=self.user, access_token="tok", ml_user_id="777")
+        self.comun_wh = Warehouse.objects.get(type=Warehouse.WarehouseType.COMUN)
+        self.product = Product.objects.create(name="Aurill", sku="AU2")
+        Stock.objects.create(product=self.product, warehouse=self.comun_wh, quantity=Decimal("12"))
+        MercadoLibreItem.objects.create(
+            item_id="MLA1", title="Aurill", product=self.product,
+            logistic_type="self_service", flex_quantity=72,
+        )
+
+    def _post(self, **patches):
+        with patch.object(ml, "get_valid_access_token", return_value="tok"), patch.object(
+            ml, "push_item_stock_and_price", **patches
+        ) as push_item:
+            response = self.client.post(
+                reverse("inventory_mercadolibre_dashboard"), {"action": "align_stock"}, follow=True
+            )
+        return response, push_item
+
+    def test_button_pushes_erp_stock(self):
+        response, push_item = self._post()
+        push_item.assert_called_once_with("MLA1", 12, None, "tok")
+        self.assertContains(response, "1 publicación(es) actualizadas")
+
+    def test_button_surfaces_the_ml_error(self):
+        response, _push_item = self._post(side_effect=RuntimeError("Item can not be modified"))
+        self.assertContains(response, "Item can not be modified")

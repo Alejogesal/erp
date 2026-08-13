@@ -63,6 +63,22 @@
                 <button type="submit" style="background:var(--accent,#2d7ff9); color:#fff; font-weight:600;">↻ Sincronizar todo (ventas + stock)</button>
             </form>
             <p style="color:var(--muted); font-size:11px; margin-top:6px;">Trae las ventas recientes y el stock de todas las publicaciones. El sync automático igual corre solo cada pocos minutos.</p>
+            <form method="post" style="margin-top:10px;" onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='Empujando…';">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="align_stock">
+                <button type="submit">↑ Empujar stock del ERP a ML</button>
+            </form>
+            <p style="color:var(--muted); font-size:11px; margin-top:6px;">
+                Publica en cada publicación el stock del ERP (el de su variedad, si tiene) y muestra el
+                motivo cuando ML rechaza alguna.
+                {% if reconcile_enabled %}
+                La corrección automática en cada sync está <strong style="color:var(--positive);">activa</strong>.
+                {% else %}
+                La corrección automática en cada sync está <strong style="color:#f0ad4e;">apagada</strong>
+                (<code>ML_STOCK_RECONCILE=1</code> para activarla): sin ella el stock solo se empuja tras una
+                venta o al guardar un match.
+                {% endif %}
+            </p>
         {% else %}
             <p style="color:var(--muted);">Cuenta no conectada.</p>
             {% if not missing_credentials %}
