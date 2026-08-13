@@ -31,7 +31,20 @@ class Command(BaseCommand):
                 f"[{ts}] sync_ml_stock FALLÓ: token inválido o expirado — se requiere reautorizar con MercadoLibre."
             )
             return
+        metrics = result.metrics or {}
         self.stdout.write(
             f"[{ts}] Sync OK. Items: {result.total_items}, Matcheados: {result.matched}, "
-            f"Sin match: {result.unmatched}, Stock actualizado: {result.updated_stock}."
+            f"Sin match: {result.unmatched}, Stock actualizado: {result.updated_stock}, "
+            f"Publicaciones corregidas en ML: {metrics.get('stock_pushed', 0)}."
         )
+        # El detalle de lo que ML rechazó es lo único que permite arreglarlo, y
+        # este comando corre desatendido: si no queda en el log, se pierde.
+        for err in metrics.get("stock_errors") or []:
+            self.stderr.write(
+                f"[{ts}] ML rechazó {err['item_id']} ({err['title']}): {err['error']}"
+            )
+        if metrics.get("stock_unlinked_variant"):
+            self.stdout.write(
+                f"[{ts}] {metrics['stock_unlinked_variant']} publicación(es) sin variedad elegida: "
+                "no reciben stock hasta enlazarlas en el panel."
+            )

@@ -349,41 +349,6 @@ def mercadolibre_dashboard(request):
                         messages.error(request, f"No se pudo sincronizar: HTTP {exc.code}")
                 except Exception as exc:
                     messages.error(request, f"No se pudo sincronizar: {exc}")
-        elif action == "align_stock":
-            # Empuje manual de TODAS las publicaciones. El automático depende de
-            # que haya una venta o de ML_STOCK_RECONCILE; cuando algo quedó
-            # desfasado, este botón lo corrige y muestra qué pasó con cada una.
-            if not connection or not connection.access_token:
-                messages.error(request, "Primero conectá la cuenta de MercadoLibre.")
-            else:
-                access_token_align = ml.get_valid_access_token(connection)
-                if not access_token_align:
-                    messages.error(
-                        request, "Token inválido o expirado: volvé a conectar la cuenta."
-                    )
-                else:
-                    rows = ml.stock_alignment_rows(
-                        MercadoLibreItem.objects.select_related("product", "variant")
-                    )
-                    pushed, failed = ml.apply_stock_alignment(rows, access_token_align)
-                    sin_variedad = sum(1 for r in rows if r["reason"] == "falta elegir la variedad")
-                    messages.success(
-                        request,
-                        f"Stock empujado a ML: {pushed} publicación(es) actualizadas, "
-                        f"{failed} con error.",
-                    )
-                    if sin_variedad:
-                        messages.warning(
-                            request,
-                            f"{sin_variedad} publicación(es) quedaron afuera porque falta elegirles "
-                            "la variedad.",
-                        )
-                    # El motivo exacto del rechazo de ML es lo único que permite
-                    # arreglarlo: se muestran los primeros, el resto va al log.
-                    for row in [r for r in rows if r["error"]][:5]:
-                        messages.error(
-                            request, f"{row['item_id']} ({row['title'][:40]}): {row['error']}"
-                        )
         elif action == "delete_ml_item":
             ml_item_db_id = request.POST.get("ml_item_db_id")
             deleted, _ = MercadoLibreItem.objects.filter(id=ml_item_db_id).delete()

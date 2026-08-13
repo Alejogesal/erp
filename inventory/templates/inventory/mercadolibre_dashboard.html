@@ -63,22 +63,33 @@
                 <button type="submit" style="background:var(--accent,#2d7ff9); color:#fff; font-weight:600;">↻ Sincronizar todo (ventas + stock)</button>
             </form>
             <p style="color:var(--muted); font-size:11px; margin-top:6px;">Trae las ventas recientes y el stock de todas las publicaciones. El sync automático igual corre solo cada pocos minutos.</p>
-            <form method="post" style="margin-top:10px;" onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='Empujando…';">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="align_stock">
-                <button type="submit">↑ Empujar stock del ERP a ML</button>
-            </form>
-            <p style="color:var(--muted); font-size:11px; margin-top:6px;">
-                Publica en cada publicación el stock del ERP (el de su variedad, si tiene) y muestra el
-                motivo cuando ML rechaza alguna.
-                {% if reconcile_enabled %}
-                La corrección automática en cada sync está <strong style="color:var(--positive);">activa</strong>.
-                {% else %}
-                La corrección automática en cada sync está <strong style="color:#f0ad4e;">apagada</strong>
-                (<code>ML_STOCK_RECONCILE=1</code> para activarla): sin ella el stock solo se empuja tras una
-                venta o al guardar un match.
-                {% endif %}
+            {% if reconcile_enabled %}
+            <p style="color:var(--muted); font-size:11px; margin-top:8px;">
+                &#10003; El stock del ERP se publica solo en cada sync (cada publicación recibe el de su
+                variedad). No hace falta apretar nada.
             </p>
+            {% else %}
+            <p style="color:#f0ad4e; font-size:11px; margin-top:8px;">
+                &#9888; La publicación automática de stock está apagada (<code>ML_STOCK_RECONCILE=0</code>):
+                el stock solo se empuja después de una venta o al guardar un match.
+            </p>
+            {% endif %}
+            {% if metrics.stock_pushed %}
+            <p style="color:var(--positive); font-size:11px; margin-top:6px;">
+                Último sync: {{ metrics.stock_pushed }} publicación{{ metrics.stock_pushed|pluralize:"es" }} corregida{{ metrics.stock_pushed|pluralize:"s" }} en ML.
+            </p>
+            {% endif %}
+            {% if metrics.stock_errors %}
+            <div style="margin-top:8px; padding:8px 10px; border-radius:8px; font-size:11px;
+                color:var(--negative); background:rgba(231,76,60,0.10); border:1px solid rgba(231,76,60,0.35);">
+                <strong>&#10007; MercadoLibre rechazó {{ metrics.stock_failed }} publicación{{ metrics.stock_failed|pluralize:"es" }} en el último sync:</strong>
+                <ul style="margin:6px 0 0 14px; padding:0;">
+                    {% for err in metrics.stock_errors %}
+                    <li>{{ err.title }} ({{ err.item_id }}): {{ err.error }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
         {% else %}
             <p style="color:var(--muted);">Cuenta no conectada.</p>
             {% if not missing_credentials %}

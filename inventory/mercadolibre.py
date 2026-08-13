@@ -296,10 +296,21 @@ def get_valid_access_token(connection: MercadoLibreConnection) -> str:
     )
     if needs_refresh:
         if not connection.refresh_token:
+            logger.warning(
+                "ML: la cuenta %s no tiene refresh token; hay que reautorizar para seguir sincronizando",
+                connection.nickname or connection.ml_user_id,
+            )
             return connection.access_token or ""
         refreshed = refresh_access_token(connection.refresh_token)
         new_token = (refreshed.get("access_token") or "").strip()
         if not new_token:
+            # Sin esto la sincronización se corta en silencio: el barrido sale
+            # sin token y nada explica por qué dejó de publicarse el stock.
+            logger.error(
+                "ML: no se pudo renovar el token de %s — %s. Reautorizá la cuenta.",
+                connection.nickname or connection.ml_user_id,
+                refreshed.get("error_description") or refreshed.get("error") or "sin detalle",
+            )
             return connection.access_token or ""
         connection.access_token = new_token
         # ML rotates refresh tokens (single-use); persist the new one if present.
@@ -959,27 +970,17 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
     ml_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.MERCADOLIBRE).first()
     comun_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
     total = matched = unmatched = updated_stock = 0
-    # Reconciliación COMUN -> ML. El push inmediato después de cada venta no
-    # alcanza: el stock propio también cambia con compras, ajustes manuales y
-    # transferencias, y un push puede fallar (token vencido, error de red) sin
-    # que nada lo corrija. Este barrido es la garantía de que la publicación
-    # termina reflejando el depósito COMUN.
-    # Apagada por defecto: empujar COMUN a ML solo es correcto si COMUN ya está
-    # alineado con la realidad. Mientras haya productos donde el ERP quedó
-    # desactualizado (ventas Flex viejas que nunca descontaron) o donde varias
-    # publicaciones comparten un mismo producto, el barrido pisaría cantidades
-    # buenas con malas. Encender con ML_STOCK_RECONCILE=1 recién después de
-    # alinear. Ver el comando align_ml_stock.
-    reconcile_enabled = os.environ.get("ML_STOCK_RECONCILE", "0") == "1"
-    comun_qty_cache: dict[int, int] = {}
-    reconciled_user_products: set[tuple[str, int | None]] = set()
+    # Reconciliación ERP -> ML, al final del barrido (ver reconcile_stock_to_ml).
+    # El push inmediato después de cada venta no alcanza: el stock propio también
+    # cambia con compras, ajustes manuales y transferencias, y un push puede
+    # fallar (token vencido, error de red) sin que nada lo corrija.
+    # Viene ENCENDIDA: es lo que mantiene la publicación al día sola, sin que
+    # nadie apriete nada. Antes estaba apagada porque el push mandaba el total
+    # del producto a cada publicación y pisaba cantidades buenas con malas; ahora
+    # cada una recibe el stock de SU variedad y las que no tienen variedad
+    # elegida no se tocan. Se apaga con ML_STOCK_RECONCILE=0.
+    reconcile_enabled = os.environ.get("ML_STOCK_RECONCILE", "1") != "0"
     stock_pushed = 0
-    # Productos con variedades (resueltos a medida que aparecen) y publicaciones
-    # de esos productos que todavía no tienen variedad enlazada: a esas no se
-    # les empuja stock y el panel las marca para que se enlacen.
-    variant_products: set[int] = set()
-    variant_checked: set[int] = set()
-    unlinked_variant_items = 0
     # Cache user-product stock per user_product_id so publications sharing the
     # same Full stock (catalog + traditional) don't trigger duplicate API calls.
     fulfillment_cache: dict[str, dict] = {}
@@ -1042,43 +1043,6 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
             else:
                 full_by_product.setdefault(product.id, {})
             products_seen[product.id] = product
-
-            if reconcile_enabled and comun_wh and status != "closed":
-                comun_qty = comun_qty_cache.get(product.id)
-                if comun_qty is None:
-                    comun_stock = Stock.objects.filter(product=product, warehouse=comun_wh).first()
-                    comun_qty = max(0, int(comun_stock.quantity)) if comun_stock else 0
-                    comun_qty_cache[product.id] = comun_qty
-                # Con variedades el COMUN es la suma de todas: lo que se publica
-                # es el stock de la variedad enlazada, y si no hay enlace la
-                # publicación no se toca.
-                if product.id not in variant_checked:
-                    variant_checked.add(product.id)
-                    if ProductVariant.objects.filter(product_id=product.id).exists():
-                        variant_products.add(product.id)
-                desired_qty = ml_item_publishable_stock(ml_item, comun_qty, variant_products)
-                if desired_qty is None:
-                    unlinked_variant_items += 1
-                elif logistic_type == "fulfillment" and has_flex and user_product_id:
-                    # Convivencia: solo se corrige la ubicación selling_address;
-                    # el stock en el depósito de ML no se toca.
-                    # No se exige que ML haya devuelto la ubicación: cuando está
-                    # en 0 la omite de la respuesta, y ese es justo el caso que
-                    # más hay que corregir (publicación sin stock propio y
-                    # depósito con unidades). has_flex ya confirma que la
-                    # publicación admite el PUT.
-                    up_key = (user_product_id, ml_item.variant_id)
-                    if flex_qty != desired_qty and up_key not in reconciled_user_products:
-                        reconciled_user_products.add(up_key)
-                        if push_selling_address_stock(user_product_id, desired_qty, access_token):
-                            stock_pushed += 1
-                elif logistic_type != "fulfillment" and flex_qty != desired_qty:
-                    try:
-                        push_item_stock_and_price(item_id, desired_qty, None, access_token)
-                        stock_pushed += 1
-                    except Exception:
-                        # Una publicación con error no debe cortar el barrido.
-                        pass
         else:
             unmatched += 1
 
@@ -1131,16 +1095,25 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
     else:
         orphaned_count = 0
 
+    # Recién ahora, con la copia local ya al día (incluidas las que se acaban de
+    # cerrar), se corrige lo que ML tenga distinto del ERP. Solo sobre las
+    # publicaciones que se vieron en esta pasada: con el barrido truncado el
+    # resto tiene datos viejos y empujarlos sería a ciegas.
+    stock_report: dict = {}
+    if reconcile_enabled:
+        stock_report = reconcile_stock_to_ml(
+            MercadoLibreItem.objects.filter(item_id__in=item_ids), access_token
+        )
+        stock_pushed = stock_report.get("pushed", 0)
+
     connection.last_sync_at = timezone.now()
-    connection.last_metrics = json.dumps(metrics)
+    connection.last_metrics = json.dumps({**metrics, **stock_report})
     connection.last_metrics_at = timezone.now()
     connection.save(update_fields=["last_sync_at", "last_metrics", "last_metrics_at"])
 
     if truncated:
         metrics = {**metrics, "truncated": True, "max_items": max_items}
-    metrics = {**metrics, "stock_pushed": stock_pushed}
-    if unlinked_variant_items:
-        metrics = {**metrics, "unlinked_variant_items": unlinked_variant_items}
+    metrics = {**metrics, "stock_pushed": stock_pushed, **stock_report}
     return SyncResult(total, matched, unmatched, updated_stock, metrics)
 
 
@@ -1299,6 +1272,36 @@ def apply_stock_alignment(rows, access_token, only_diff: bool = False) -> tuple[
                 "ML: no se pudo publicar stock %s en %s — %s", qty, item.item_id, row["error"]
             )
     return pushed, failed
+
+
+def reconcile_stock_to_ml(ml_items, access_token) -> dict:
+    """Dejar publicado en ML el stock del ERP y contar qué pasó.
+
+    Corre en cada sync automático: es lo que mantiene las publicaciones al día
+    sin que nadie apriete nada. Solo toca las que difieren, así una cuenta ya
+    alineada no gasta una sola llamada a la API.
+
+    El resumen que devuelve se guarda con las métricas de la conexión para que
+    el panel pueda mostrar, sin botones de por medio, cuántas se corrigieron y
+    cuáles rechazó ML.
+    """
+    rows = stock_alignment_rows(ml_items)
+    pushed, failed = apply_stock_alignment(rows, access_token, only_diff=True)
+    report: dict = {
+        "stock_pushed": pushed,
+        "stock_failed": failed,
+        "stock_unlinked_variant": sum(
+            1 for row in rows if row["reason"] == "falta elegir la variedad"
+        ),
+    }
+    errors = [
+        {"item_id": row["item_id"], "title": row["title"][:60], "error": row["error"]}
+        for row in rows
+        if row["error"]
+    ]
+    if errors:
+        report["stock_errors"] = errors[:20]
+    return report
 
 
 def push_comun_stock_to_ml(products, connection=None) -> int:

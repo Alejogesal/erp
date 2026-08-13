@@ -441,7 +441,7 @@ class StockReconciliationTests(TestCase):
             result = ml.sync_items_and_stock(self.connection, self.user, ignore_env_limit=True)
         return result, push_item, push_flex
 
-    def test_reconciliation_is_off_unless_enabled(self):
+    def test_reconciliation_can_be_turned_off(self):
         item = {
             "id": "MLA1",
             "title": "Cera",
@@ -450,8 +450,40 @@ class StockReconciliationTests(TestCase):
             "shipping": {"logistic_type": "self_service"},
         }
         _result, push_item, _push_flex = self._run_sync(item, reconcile="0")
-        # Sin el interruptor no se toca ninguna publicación, aunque difiera.
+        # Con el interruptor apagado no se toca ninguna publicación, aunque difiera.
         push_item.assert_not_called()
+
+    def test_reconciliation_runs_by_default(self):
+        # Sin variable de entorno el barrido corrige solo: es lo que mantiene la
+        # publicación al día sin que nadie apriete un botón.
+        item = {
+            "id": "MLA1",
+            "title": "Cera",
+            "status": "active",
+            "available_quantity": 3,
+            "shipping": {"logistic_type": "self_service"},
+        }
+        MercadoLibreItem.objects.update_or_create(
+            item_id="MLA1", defaults={"product": self.product, "logistic_type": "self_service"}
+        )
+
+        def dispatch(connection, func, *args, **kwargs):
+            if func is ml.get_item_ids:
+                return (["MLA1"], False)
+            if func is ml.get_item:
+                return item
+            if func is ml.get_orders_summary:
+                return {"item_sales": {}}
+            raise AssertionError(f"llamada inesperada: {func}")
+
+        env = {k: v for k, v in os.environ.items() if k != "ML_STOCK_RECONCILE"}
+        with patch.dict(os.environ, env, clear=True), patch.object(
+            ml, "get_valid_access_token", return_value="tok"
+        ), patch.object(ml, "_call_with_refresh", side_effect=dispatch), patch.object(
+            ml, "push_item_stock_and_price"
+        ) as push_item:
+            ml.sync_items_and_stock(self.connection, self.user, ignore_env_limit=True)
+        push_item.assert_called_once_with("MLA1", 12, None, "tok")
 
     def test_flex_publication_is_corrected_to_comun(self):
         # ML publica 3, el depósito tiene 12: sin venta de por medio (una compra).
@@ -1032,7 +1064,7 @@ class VariantAwareReconcileTests(TestCase):
     def test_unlinked_publication_is_left_alone_and_reported(self):
         result, push_item = self._run_sync(None)
         push_item.assert_not_called()
-        self.assertEqual(result.metrics["unlinked_variant_items"], 1)
+        self.assertEqual(result.metrics["stock_unlinked_variant"], 1)
 
 
 class MlSaleDiscountsVariantTests(TestCase):
@@ -1288,38 +1320,61 @@ class StockAlignmentReportTests(TestCase):
         self.assertEqual(MercadoLibreItem.objects.get(item_id="MLA8").flex_quantity, 12)
 
 
-class AlignStockButtonTests(TestCase):
-    """El botón del panel empuja todo y muestra el motivo de cada rechazo."""
+class SyncReportsStockOutcomeTests(TestCase):
+    """El sync automático deja registrado qué publicó y qué le rechazaron.
+
+    Es lo que reemplaza al botón: nadie tiene que apretar nada, pero si ML
+    rechaza una publicación el panel lo muestra en vez de quedar en silencio.
+    """
 
     def setUp(self):
         _reset_current_user()
-        self.user = get_user_model().objects.create_user(
-            username="alignbtn", password="x", is_superuser=True, is_staff=True
+        self.user = get_user_model().objects.create_user(username="rep", password="x")
+        self.connection = MercadoLibreConnection.objects.create(
+            user=self.user, access_token="tok", ml_user_id="777"
         )
-        self.client.force_login(self.user)
-        MercadoLibreConnection.objects.create(user=self.user, access_token="tok", ml_user_id="777")
         self.comun_wh = Warehouse.objects.get(type=Warehouse.WarehouseType.COMUN)
-        self.product = Product.objects.create(name="Aurill", sku="AU2")
+        self.product = Product.objects.create(name="Cera", sku="CE9")
         Stock.objects.create(product=self.product, warehouse=self.comun_wh, quantity=Decimal("12"))
         MercadoLibreItem.objects.create(
-            item_id="MLA1", title="Aurill", product=self.product,
-            logistic_type="self_service", flex_quantity=72,
+            item_id="MLA1", title="Cera", product=self.product,
+            logistic_type="self_service", flex_quantity=3,
         )
+        self.item = {
+            "id": "MLA1",
+            "title": "Cera",
+            "status": "active",
+            "available_quantity": 3,
+            "shipping": {"logistic_type": "self_service"},
+        }
 
-    def _post(self, **patches):
+    def _sync(self, **push_kwargs):
+        def dispatch(connection, func, *args, **kwargs):
+            if func is ml.get_item_ids:
+                return (["MLA1"], False)
+            if func is ml.get_item:
+                return self.item
+            if func is ml.get_orders_summary:
+                return {"item_sales": {}}
+            raise AssertionError(f"llamada inesperada: {func}")
+
         with patch.object(ml, "get_valid_access_token", return_value="tok"), patch.object(
-            ml, "push_item_stock_and_price", **patches
-        ) as push_item:
-            response = self.client.post(
-                reverse("inventory_mercadolibre_dashboard"), {"action": "align_stock"}, follow=True
-            )
-        return response, push_item
+            ml, "_call_with_refresh", side_effect=dispatch
+        ), patch.object(ml, "push_item_stock_and_price", **push_kwargs):
+            return ml.sync_items_and_stock(self.connection, self.user, ignore_env_limit=True)
 
-    def test_button_pushes_erp_stock(self):
-        response, push_item = self._post()
-        push_item.assert_called_once_with("MLA1", 12, None, "tok")
-        self.assertContains(response, "1 publicación(es) actualizadas")
+    def test_successful_push_is_counted(self):
+        result = self._sync()
+        self.assertEqual(result.metrics["stock_pushed"], 1)
+        self.assertEqual(result.metrics["stock_failed"], 0)
+        self.assertNotIn("stock_errors", result.metrics)
 
-    def test_button_surfaces_the_ml_error(self):
-        response, _push_item = self._post(side_effect=RuntimeError("Item can not be modified"))
-        self.assertContains(response, "Item can not be modified")
+    def test_rejected_push_is_stored_in_the_connection_metrics(self):
+        result = self._sync(side_effect=RuntimeError("Item can not be modified"))
+        self.assertEqual(result.metrics["stock_failed"], 1)
+        self.assertEqual(result.metrics["stock_errors"][0]["item_id"], "MLA1")
+        # El panel lee last_metrics de la conexión, no el retorno del sync.
+        import json as _json
+        self.connection.refresh_from_db()
+        stored = _json.loads(self.connection.last_metrics)
+        self.assertEqual(stored["stock_errors"][0]["error"], "Item can not be modified")
