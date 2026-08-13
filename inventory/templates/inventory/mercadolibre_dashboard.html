@@ -40,9 +40,18 @@
                     </p>
                 {% else %}
                     <p style="color: var(--negative); font-weight:600; margin-top:8px;">
-                        &#10007; Sin sync hace {{ sync_age_minutes }} min — el sync automático no está corriendo
+                        &#10007; Sin sync hace {{ sync_age_minutes }} min
                     </p>
-                    {% if not missing_credentials %}
+                    <p style="color:var(--muted); font-size:11px; margin-top:4px;">
+                        {% if token_health and not token_health.healthy %}
+                        La conexión perdió el refresh token: hay que reautorizar.
+                        {% else %}
+                        El token se renueva solo con el refresh token, así que esto no se arregla
+                        reautorizando: el proceso que sincroniza no está corriendo. Al entrar acá se dispara
+                        uno en segundo plano — recargá en un minuto.
+                        {% endif %}
+                    </p>
+                    {% if not missing_credentials and token_health and not token_health.healthy %}
                     <a href="{% url 'inventory_mercadolibre_connect' %}" style="display:inline-block; margin-top:8px; font-size:13px; color:var(--accent);">Reautorizar con MercadoLibre</a>
                     {% endif %}
                 {% endif %}
@@ -65,8 +74,9 @@
             <p style="color:var(--muted); font-size:11px; margin-top:6px;">Trae las ventas recientes y el stock de todas las publicaciones. El sync automático igual corre solo cada pocos minutos.</p>
             {% if reconcile_enabled %}
             <p style="color:var(--muted); font-size:11px; margin-top:8px;">
-                &#10003; El stock del ERP se publica solo en cada sync (cada publicación recibe el de su
-                variedad). No hace falta apretar nada.
+                &#10003; Sincronización sola cada {{ sync_interval_minutes }} min: se renueva el token con el
+                refresh token, se traen las ventas y se publica el stock del ERP (cada publicación recibe el
+                de su variedad). El botón es solo para no esperar.
             </p>
             {% else %}
             <p style="color:#f0ad4e; font-size:11px; margin-top:8px;">

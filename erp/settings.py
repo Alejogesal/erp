@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 
 from pathlib import Path
 import os
+import sys
 import dj_database_url
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -62,6 +63,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'inventory.middleware.AuditMiddleware',
+    'inventory.middleware.MercadoLibreAutoSyncMiddleware',
 ]
 
 ROOT_URLCONF = 'erp.urls'
@@ -102,6 +104,10 @@ else:
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
             "NAME": SQLITE_PATH,
+            # El sync de ML escribe desde un hilo aparte mientras la app sirve
+            # requests: con el timeout por defecto (5 s) una escritura larga hace
+            # fallar a la otra con "database is locked".
+            "OPTIONS": {"timeout": 30},
         }
     }
 
@@ -149,3 +155,6 @@ ML_CLIENT_ID = os.environ.get("ML_CLIENT_ID", "")
 ML_CLIENT_SECRET = os.environ.get("ML_CLIENT_SECRET", "")
 ML_REDIRECT_URI = os.environ.get("ML_REDIRECT_URI", "")
 ML_SITE_ID = os.environ.get("ML_SITE_ID", "MLA")
+# Sync automático disparado por el uso del ERP (ver MercadoLibreAutoSyncMiddleware).
+# Apagado durante los tests: nunca deben salir a la API de MercadoLibre.
+ML_AUTO_SYNC = os.environ.get("ML_AUTO_SYNC", "1") != "0" and "test" not in sys.argv

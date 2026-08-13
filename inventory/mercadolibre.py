@@ -1,5 +1,7 @@
 import json
 import logging
+import threading
+import time
 import unicodedata
 from dataclasses import dataclass
 from datetime import timedelta, datetime
@@ -96,6 +98,22 @@ def _request(
     if with_headers:
         return payload, resp_headers
     return payload
+
+
+def reconcile_enabled() -> bool:
+    """¿El sync publica el stock del ERP en ML?
+
+    Encendido salvo que se pida lo contrario. Vive acá para que el motor y el
+    panel lean lo mismo: cuando cada uno tenía su default, el cartel decía
+    "apagada" mientras el barrido empujaba igual.
+    """
+    return os.environ.get("ML_STOCK_RECONCILE", "1") != "0"
+
+
+def sync_interval_minutes() -> int:
+    """Cada cuánto se sincroniza con ML. Por defecto, 15 minutos."""
+    raw = os.environ.get("ML_SYNC_EVERY_MINUTES", "")
+    return int(raw) if raw.isdigit() and int(raw) > 0 else 15
 
 
 def error_detail(exc: Exception) -> str:
@@ -979,7 +997,7 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
     # del producto a cada publicación y pisaba cantidades buenas con malas; ahora
     # cada una recibe el stock de SU variedad y las que no tienen variedad
     # elegida no se tocan. Se apaga con ML_STOCK_RECONCILE=0.
-    reconcile_enabled = os.environ.get("ML_STOCK_RECONCILE", "1") != "0"
+    reconcile = reconcile_enabled()
     stock_pushed = 0
     # Cache user-product stock per user_product_id so publications sharing the
     # same Full stock (catalog + traditional) don't trigger duplicate API calls.
@@ -1100,7 +1118,7 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
     # publicaciones que se vieron en esta pasada: con el barrido truncado el
     # resto tiene datos viejos y empujarlos sería a ciegas.
     stock_report: dict = {}
-    if reconcile_enabled:
+    if reconcile:
         stock_report = reconcile_stock_to_ml(
             MercadoLibreItem.objects.filter(item_id__in=item_ids), access_token
         )
@@ -1115,6 +1133,104 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
         metrics = {**metrics, "truncated": True, "max_items": max_items}
     metrics = {**metrics, "stock_pushed": stock_pushed, **stock_report}
     return SyncResult(total, matched, unmatched, updated_stock, metrics)
+
+
+def run_full_sync(connection: MercadoLibreConnection, user) -> dict:
+    """Una pasada completa: ventas recientes + stock de todas las publicaciones.
+
+    Es lo mismo que hace el botón "Sincronizar todo", en una sola función, para
+    que el disparador automático y el botón no puedan divergir.
+    """
+    try:
+        orders = sync_recent_orders(connection, user, days=7)
+    except Exception:
+        logger.exception("ML: falló el sync de ventas")
+        orders = {}
+    result = sync_items_and_stock(connection, user, ignore_env_limit=True)
+    return {"orders": orders, "stock": result}
+
+
+def _claim_sync_slot(connection: MercadoLibreConnection, interval_minutes: int):
+    """Reservar la próxima sincronización, o None si no toca / la tomó otro.
+
+    Devuelve el last_sync_at anterior (para poder restaurarlo si el sync falla).
+    Con varios workers de gunicorn la reserva tiene que ser atómica: gana el que
+    logra actualizar la fila con el valor que leyó, los demás ven 0 filas
+    afectadas y no arrancan un segundo sync en paralelo.
+    """
+    previous = connection.last_sync_at
+    if previous and previous > timezone.now() - timedelta(minutes=interval_minutes):
+        return None
+    claimed = MercadoLibreConnection.objects.filter(
+        pk=connection.pk, last_sync_at=previous
+    ).update(last_sync_at=timezone.now())
+    return (previous,) if claimed else None
+
+
+def _run_sync_in_background(connection_pk: int, user_pk: int, previous_sync_at) -> None:
+    from django.contrib.auth import get_user_model
+    from django.db import connections as db_connections
+
+    try:
+        connection = MercadoLibreConnection.objects.filter(pk=connection_pk).first()
+        user = get_user_model().objects.filter(pk=user_pk).first()
+        if not connection or not user:
+            return
+        run_full_sync(connection, user)
+    except Exception:
+        logger.exception("ML: falló el sync automático")
+        # Devolver la marca anterior: si no, el panel mostraría "sincronizado
+        # recién" después de una corrida que no sincronizó nada.
+        MercadoLibreConnection.objects.filter(pk=connection_pk).update(
+            last_sync_at=previous_sync_at
+        )
+    finally:
+        # El hilo tiene su propia conexión a la base: sin esto queda abierta.
+        db_connections.close_all()
+
+
+# Momento (reloj monotónico) a partir del cual vale la pena volver a mirar si
+# toca sincronizar. Evita una consulta por request sin depender de un caché.
+_next_sync_check = 0.0
+_sync_check_lock = threading.Lock()
+
+
+def maybe_start_background_sync(user) -> bool:
+    """Disparar el sync si pasó el intervalo. Devuelve True si arrancó uno.
+
+    El loop del contenedor puede no estar corriendo (start command distinto,
+    servicio dormido, contenedor reiniciado) y entonces el stock queda viejo
+    hasta que alguien aprieta el botón. Con esto, usar el ERP alcanza para que
+    se sincronice solo: la primera visita después del intervalo lo dispara en
+    segundo plano, sin demorar la respuesta.
+    """
+    global _next_sync_check
+    if not getattr(settings, "ML_AUTO_SYNC", True):
+        return False
+    now = time.monotonic()
+    with _sync_check_lock:
+        if now < _next_sync_check:
+            return False
+        # Aunque no toque sincronizar, no volver a consultar por un minuto.
+        _next_sync_check = now + 60
+    try:
+        connection = _default_connection()
+        if not connection or not connection.access_token:
+            return False
+        claim = _claim_sync_slot(connection, sync_interval_minutes())
+        if claim is None:
+            return False
+        thread = threading.Thread(
+            target=_run_sync_in_background,
+            args=(connection.pk, user.pk, claim[0]),
+            name="ml-auto-sync",
+            daemon=True,
+        )
+        thread.start()
+        return True
+    except Exception:
+        logger.exception("ML: no se pudo lanzar el sync automático")
+        return False
 
 
 def _default_connection() -> "MercadoLibreConnection | None":

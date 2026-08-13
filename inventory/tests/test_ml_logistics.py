@@ -1378,3 +1378,113 @@ class SyncReportsStockOutcomeTests(TestCase):
         self.connection.refresh_from_db()
         stored = _json.loads(self.connection.last_metrics)
         self.assertEqual(stored["stock_errors"][0]["error"], "Item can not be modified")
+
+
+class AutoSyncTriggerTests(TestCase):
+    """El sync se dispara solo con el uso del ERP, sin apretar el botón.
+
+    El loop del contenedor puede no estar corriendo (start command distinto,
+    servicio dormido, reinicio): ahí el stock quedaba viejo hasta que alguien
+    sincronizaba a mano.
+    """
+
+    def setUp(self):
+        _reset_current_user()
+        self.user = get_user_model().objects.create_user(
+            username="auto", password="x", is_superuser=True
+        )
+        self.connection = MercadoLibreConnection.objects.create(
+            user=self.user, access_token="tok", ml_user_id="777"
+        )
+
+    def _try_start(self):
+        # El chequeo se cachea por proceso: se resetea para que cada test parta limpio.
+        ml._next_sync_check = 0.0
+        with patch.object(ml, "_run_sync_in_background") as runner:
+            started = ml.maybe_start_background_sync(self.user)
+        return started, runner
+
+    def test_sync_starts_when_the_interval_passed(self):
+        self.connection.last_sync_at = timezone.now() - timedelta(minutes=20)
+        self.connection.save(update_fields=["last_sync_at"])
+        with self.settings(ML_AUTO_SYNC=True), patch.object(ml.threading, "Thread") as thread:
+            ml._next_sync_check = 0.0
+            started = ml.maybe_start_background_sync(self.user)
+        self.assertTrue(started)
+        thread.assert_called_once()
+
+    def test_recent_sync_is_not_repeated(self):
+        self.connection.last_sync_at = timezone.now() - timedelta(minutes=2)
+        self.connection.save(update_fields=["last_sync_at"])
+        with self.settings(ML_AUTO_SYNC=True), patch.object(ml.threading, "Thread") as thread:
+            ml._next_sync_check = 0.0
+            started = ml.maybe_start_background_sync(self.user)
+        self.assertFalse(started)
+        thread.assert_not_called()
+
+    def test_slot_is_claimed_only_once(self):
+        # Dos workers de gunicorn mirando la misma conexión: uno solo sincroniza.
+        self.connection.last_sync_at = timezone.now() - timedelta(minutes=30)
+        self.connection.save(update_fields=["last_sync_at"])
+        first = ml._claim_sync_slot(self.connection, 15)
+        second = ml._claim_sync_slot(
+            MercadoLibreConnection.objects.get(pk=self.connection.pk), 15
+        )
+        self.assertIsNotNone(first)
+        self.assertIsNone(second)
+
+    def test_failed_sync_restores_the_previous_mark(self):
+        previous = timezone.now() - timedelta(minutes=40)
+        with patch.object(ml, "run_full_sync", side_effect=RuntimeError("token")):
+            ml._run_sync_in_background(self.connection.pk, self.user.pk, previous)
+        self.connection.refresh_from_db()
+        # Si no se restaura, el panel diría "sincronizado recién" tras un sync fallido.
+        self.assertEqual(self.connection.last_sync_at, previous)
+
+    def test_disabled_by_setting(self):
+        self.connection.last_sync_at = timezone.now() - timedelta(hours=3)
+        self.connection.save(update_fields=["last_sync_at"])
+        with self.settings(ML_AUTO_SYNC=False):
+            ml._next_sync_check = 0.0
+            self.assertFalse(ml.maybe_start_background_sync(self.user))
+
+    def test_reconcile_flag_has_a_single_source(self):
+        with patch.dict(os.environ, {"ML_STOCK_RECONCILE": "0"}):
+            self.assertFalse(ml.reconcile_enabled())
+        env = {k: v for k, v in os.environ.items() if k != "ML_STOCK_RECONCILE"}
+        with patch.dict(os.environ, env, clear=True):
+            # Sin variable, encendido: el panel y el motor leen esta misma función.
+            self.assertTrue(ml.reconcile_enabled())
+
+    def test_interval_defaults_to_fifteen_minutes(self):
+        env = {k: v for k, v in os.environ.items() if k != "ML_SYNC_EVERY_MINUTES"}
+        with patch.dict(os.environ, env, clear=True):
+            self.assertEqual(ml.sync_interval_minutes(), 15)
+        with patch.dict(os.environ, {"ML_SYNC_EVERY_MINUTES": "5"}):
+            self.assertEqual(ml.sync_interval_minutes(), 5)
+
+
+class AutoSyncMiddlewareTests(TestCase):
+    """El disparo va cableado a cualquier request autenticada, y nunca la rompe."""
+
+    def setUp(self):
+        _reset_current_user()
+        self.user = get_user_model().objects.create_user(username="mw", password="x")
+
+    def test_authenticated_request_triggers_the_check(self):
+        self.client.force_login(self.user)
+        with patch.object(ml, "maybe_start_background_sync") as trigger:
+            response = self.client.get(reverse("inventory_mercadolibre_dashboard"))
+        self.assertEqual(response.status_code, 200)
+        trigger.assert_called_once()
+
+    def test_anonymous_request_does_not_trigger(self):
+        with patch.object(ml, "maybe_start_background_sync") as trigger:
+            self.client.get(reverse("inventory_mercadolibre_dashboard"))
+        trigger.assert_not_called()
+
+    def test_trigger_failure_does_not_break_the_page(self):
+        self.client.force_login(self.user)
+        with patch.object(ml, "maybe_start_background_sync", side_effect=RuntimeError("boom")):
+            response = self.client.get(reverse("inventory_mercadolibre_dashboard"))
+        self.assertEqual(response.status_code, 200)
