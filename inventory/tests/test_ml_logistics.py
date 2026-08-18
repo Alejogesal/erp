@@ -571,6 +571,34 @@ class StockReconciliationTests(TestCase):
         _result, _push_item, push_flex = self._run_sync(item)
         push_flex.assert_called_once_with("MLAU1", 12, "tok")
 
+    def test_selling_address_location_without_tag_is_pushed(self):
+        """La ubicación propia alcanza para reconocer la convivencia.
+
+        Caso real: /items no traía el tag `self_service_in` pero el stock del
+        user_product sí tenía la ubicación `selling_address`. Mirando solo el
+        tag, la publicación quedaba como Full puro y nunca recibía el stock del
+        ERP — con todo el catálogo así, "el stock no se sincroniza" y el panel
+        no decía por qué.
+        """
+        item = {
+            "id": "MLA1",
+            "title": "Cera",
+            "status": "paused",
+            "available_quantity": 0,
+            "user_product_id": "MLAU1",
+            "shipping": {"logistic_type": "fulfillment"},
+        }
+        self.user_product_stock = {
+            "locations": [
+                {"type": "selling_address", "quantity": 0},
+                {"type": "meli_facility", "quantity": 0},
+            ]
+        }
+        _result, push_item, push_flex = self._run_sync(item)
+        push_flex.assert_called_once_with("MLAU1", 12, "tok")
+        push_item.assert_not_called()
+        self.assertTrue(MercadoLibreItem.objects.get(item_id="MLA1").has_flex)
+
     def test_coexistence_in_sync_is_left_alone(self):
         item = {
             "id": "MLA1",
@@ -614,7 +642,7 @@ class StockBreakdownTests(TestCase):
 
     def test_non_full_publication_is_all_own_warehouse(self):
         item = {"available_quantity": 9, "shipping": {"logistic_type": "self_service"}}
-        _avail, _up, full, flex = self._breakdown(item)
+        _avail, _up, full, flex, _own = self._breakdown(item)
         self.assertEqual((full, flex), (0, 9))
 
     def test_pure_full_has_no_own_stock(self):
@@ -623,10 +651,11 @@ class StockBreakdownTests(TestCase):
             "user_product_id": "MLAU1",
             "shipping": {"logistic_type": "fulfillment"},
         }
-        _avail, _up, full, flex = self._breakdown(
+        _avail, _up, full, flex, own = self._breakdown(
             item, {"locations": [{"type": "meli_facility", "quantity": 3}]}
         )
         self.assertEqual((full, flex), (3, 0))
+        self.assertFalse(own)
 
     def test_coexistence_splits_both_locations(self):
         item = {
@@ -634,7 +663,7 @@ class StockBreakdownTests(TestCase):
             "user_product_id": "MLAU1",
             "shipping": {"logistic_type": "fulfillment", "tags": ["self_service_in"]},
         }
-        _avail, _up, full, flex = self._breakdown(
+        _avail, _up, full, flex, own = self._breakdown(
             item,
             {
                 "locations": [
@@ -644,6 +673,30 @@ class StockBreakdownTests(TestCase):
             },
         )
         self.assertEqual((full, flex), (3, 16))
+        self.assertTrue(own)
+
+    def test_selling_address_location_without_tag_still_counts_as_own(self):
+        """ML informa la ubicación propia aunque /items no traiga self_service_in.
+
+        Es el caso real que dejaba publicaciones sin recibir stock: sin el tag
+        quedaban clasificadas como Full puro y la reconciliación las salteaba.
+        """
+        item = {
+            "available_quantity": 0,
+            "user_product_id": "MLAU4405576918",
+            "shipping": {"logistic_type": "fulfillment"},
+        }
+        _avail, _up, full, flex, own = self._breakdown(
+            item,
+            {
+                "locations": [
+                    {"type": "selling_address", "quantity": 0},
+                    {"type": "meli_facility", "quantity": 0},
+                ]
+            },
+        )
+        self.assertEqual((full, flex), (0, 0))
+        self.assertTrue(own)
 
     def test_sells_from_own_warehouse_flag(self):
         pure_full = MercadoLibreItem(logistic_type="fulfillment", has_flex=False)

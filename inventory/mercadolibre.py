@@ -426,13 +426,19 @@ def resolve_stock_breakdown(
     item: dict,
     access_token: str,
     cache: dict | None = None,
-) -> tuple[int, str, int, int]:
-    """(available, user_product_id, en_full, en_deposito_propio) de una publicación.
+) -> tuple[int, str, int, int, bool]:
+    """(available, user_product_id, en_full, en_deposito_propio, tiene_ubicación_propia).
 
     Separar las dos ubicaciones importa porque significan cosas distintas:
     `meli_facility` es mercadería que está físicamente en el depósito de ML, y
     `selling_address` es la que está en el tuyo. Mostrarlas juntas en un solo
     número hace que parezcan un desfasaje cosas que no lo son.
+
+    El último valor dice si ML informó una ubicación `selling_address` para el
+    user_product. Es la prueba de que la publicación vende desde el depósito
+    propio, y es más confiable que el tag `self_service_in`: el tag puede no
+    venir en /items aunque la convivencia exista, y sin él la publicación
+    quedaba clasificada como Full puro y no recibía nunca el stock del ERP.
 
     Para las publicaciones que no son Full no hace falta llamar a la API: todo
     el stock publicado sale del depósito propio.
@@ -440,7 +446,7 @@ def resolve_stock_breakdown(
     available, user_product_id = resolve_authoritative_stock(connection, item, access_token, cache=cache)
     logistic_type = item_logistic_type(item)
     if logistic_type != "fulfillment":
-        return available, user_product_id, 0, available
+        return available, user_product_id, 0, available, False
     data = (cache or {}).get(user_product_id)
     if data is None and user_product_id:
         try:
@@ -452,8 +458,8 @@ def resolve_stock_breakdown(
         if cache is not None:
             cache[user_product_id] = data
     full_qty, _ = _full_stock_from_locations(data or {})
-    flex_qty, _ = _flex_stock_from_locations(data or {})
-    return available, user_product_id, full_qty, flex_qty
+    flex_qty, own_location = _flex_stock_from_locations(data or {})
+    return available, user_product_id, full_qty, flex_qty, own_location
 
 
 def resolve_authoritative_stock(
@@ -1017,14 +1023,19 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
         title = item.get("title", "") or ""
         status = item.get("status", "") or ""
         logistic_type = item_logistic_type(item)
-        has_flex = item_has_flex(item)
         permalink = item.get("permalink", "") or ""
         # For Full items the /items available_quantity is unreliable (Full/Flex
         # coexistence); the user-products stock endpoint (meli_facility) is the
         # source of truth. Non-Full items keep using available_quantity directly.
-        available, user_product_id, full_qty, flex_qty = resolve_stock_breakdown(
+        available, user_product_id, full_qty, flex_qty, own_location = resolve_stock_breakdown(
             connection, item, access_token, cache=fulfillment_cache
         )
+        # La convivencia Full/Flex se confirma de dos formas y alcanza con una:
+        # el tag `self_service_in` de /items, o una ubicación `selling_address`
+        # en el stock del user_product. Cuentas reales tienen la ubicación sin
+        # el tag, y mirando solo el tag esas publicaciones quedaban como Full
+        # puro: el ERP no les empujaba stock nunca y nada decía por qué.
+        has_flex = item_has_flex(item) or own_location
         existing = MercadoLibreItem.objects.filter(item_id=item_id).first()
         product = existing.product if existing else None
         matched_name = existing.matched_name if existing else ""

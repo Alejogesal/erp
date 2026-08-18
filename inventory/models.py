@@ -441,7 +441,7 @@ class MercadoLibreItem(models.Model):
     )
     has_flex = models.BooleanField(
         default=False,
-        help_text="La publicación tiene Envíos Flex activo (tag self_service_in). Con logistic_type=fulfillment indica convivencia Full/Flex.",
+        help_text="La publicación vende desde el depósito propio: tag self_service_in en /items o una ubicación selling_address en el stock del user_product. Con logistic_type=fulfillment indica convivencia Full/Flex.",
     )
     available_quantity = models.IntegerField(default=0)
     full_quantity = models.IntegerField(

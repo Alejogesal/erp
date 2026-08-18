@@ -431,6 +431,7 @@ def mercadolibre_dashboard(request):
                     access_token_dbg = ml.get_valid_access_token(connection)
                     item_data = ml._call_with_refresh(connection, ml.get_item, item_id, access_token=access_token_dbg)
                     logistic = item_data.get("logistic_type", "") or (item_data.get("shipping") or {}).get("logistic_type", "")
+                    tags = ", ".join(str(t) for t in (item_data.get("shipping") or {}).get("tags") or [])
                     avail = item_data.get("available_quantity", "?")
                     up_ids = ml._extract_user_product_ids(item_data)
                     up_id = up_ids[0] if up_ids else ""
@@ -452,6 +453,7 @@ def mercadolibre_dashboard(request):
                     resolved, _ = ml.resolve_authoritative_stock(connection, item_data, access_token_dbg)
                     messages.info(request,
                         f"Item {item_id} | logistic_type: {logistic!r} | "
+                        f"shipping.tags: [{tags}] | "
                         f"user_product_id: {up_id!r} | available_quantity (/items): {avail} | "
                         f"locations: [{locations_str}] | stock Full (meli_facility): {full_stock} | "
                         f"→ ERP usará: {resolved}"
