@@ -619,6 +619,15 @@ def delivery_status_from_shipment(shipment: dict) -> str | None:
     return _SHIPMENT_STATUS_TO_DELIVERY.get(status)
 
 
+class FulfillmentOnlyItem(RuntimeError):
+    """ML rechazó el stock propio porque la publicación es solo Full.
+
+    Es la respuesta definitiva a "¿esta publicación vende desde mi depósito?":
+    ni el tag ni las ubicaciones del user_product lo garantizan, pero este 400
+    sí. Se propaga para poder anotarlo y dejar de intentarlo en cada sync.
+    """
+
+
 def push_selling_address_stock(user_product_id: str, quantity: int, access_token: str) -> bool:
     """Fijar el stock Flex (selling_address) de un user_product.
 
@@ -661,6 +670,11 @@ def push_selling_address_stock(user_product_id: str, quantity: int, access_token
             if exc.code == 409:
                 # Versión desactualizada: releer y reintentar una vez.
                 continue
+            detail = error_detail(exc)
+            if "fulfillment-only" in detail:
+                # No es un fallo pasajero: la publicación no tiene convivencia.
+                # Que suba como excepción propia para anotarlo en el ítem.
+                raise FulfillmentOnlyItem(detail) from exc
             logger.warning(
                 "ML: rechazó el stock %s del user_product %s — %s",
                 quantity, user_product_id, error_detail(exc),
@@ -1030,13 +1044,19 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
         available, user_product_id, full_qty, flex_qty, own_location = resolve_stock_breakdown(
             connection, item, access_token, cache=fulfillment_cache
         )
-        # La convivencia Full/Flex se confirma de dos formas y alcanza con una:
-        # el tag `self_service_in` de /items, o una ubicación `selling_address`
-        # en el stock del user_product. Cuentas reales tienen la ubicación sin
-        # el tag, y mirando solo el tag esas publicaciones quedaban como Full
-        # puro: el ERP no les empujaba stock nunca y nada decía por qué.
-        has_flex = item_has_flex(item) or own_location
         existing = MercadoLibreItem.objects.filter(item_id=item_id).first()
+        # La convivencia Full/Flex se confirma de tres fuentes, en orden de
+        # confianza. El tag `self_service_in` de /items es la buena, pero hay
+        # cuentas donde no viene aunque la convivencia exista: ahí sirve como
+        # pista la ubicación `selling_address` del user_product. Esa pista se
+        # equivoca —hay user_products con la ubicación y publicaciones que son
+        # solo Full—, así que manda el 400 `fulfillment-only` que ML devolvió
+        # alguna vez: quedó anotado en full_only y no se vuelve a intentar. Si
+        # después aparece el tag, la convivencia se activó de verdad y la marca
+        # se limpia sola.
+        tag_flex = item_has_flex(item)
+        full_only = bool(existing and existing.full_only) and not tag_flex
+        has_flex = tag_flex or (own_location and not full_only)
         product = existing.product if existing else None
         matched_name = existing.matched_name if existing else ""
         ml_item, _created = MercadoLibreItem.objects.update_or_create(
@@ -1049,6 +1069,7 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
                 "status": status,
                 "logistic_type": logistic_type,
                 "has_flex": has_flex,
+                "full_only": full_only,
                 "user_product_id": user_product_id,
                 "permalink": permalink,
                 "product": product,
@@ -1096,6 +1117,12 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
                 )
                 updated_stock += 1
 
+    # Las métricas de ventas son informativas y se piden ANTES del empuje de
+    # stock, así que un fallo acá no puede llevárselo puesto: el endpoint de
+    # órdenes es pesado (30 días) y cuando ML devolvía un 500 o cortaba, la
+    # excepción se propagaba y la reconciliación no llegaba a correr. El stock
+    # quedaba sin publicar toda la pasada, y la siguiente fallaba igual.
+    metrics: dict = {}
     try:
         metrics = _call_with_refresh(
             connection,
@@ -1107,7 +1134,9 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
     except HTTPError as exc:
         if exc.code == 401:
             return SyncResult(total, matched, unmatched, updated_stock, {"error": "unauthorized"})
-        raise
+        logger.warning("ML: no se pudieron traer las métricas de ventas — %s", error_detail(exc))
+    except Exception:
+        logger.warning("ML: no se pudieron traer las métricas de ventas", exc_info=True)
     item_sales = metrics.pop("item_sales", {})
     for item_id, data in item_sales.items():
         MercadoLibreItem.objects.filter(item_id=item_id).update(
@@ -1133,7 +1162,7 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
         stock_report = reconcile_stock_to_ml(
             MercadoLibreItem.objects.filter(item_id__in=item_ids), access_token
         )
-        stock_pushed = stock_report.get("pushed", 0)
+        stock_pushed = stock_report.get("stock_pushed", 0)
 
     connection.last_sync_at = timezone.now()
     connection.last_metrics = json.dumps({**metrics, **stock_report})
@@ -1392,6 +1421,19 @@ def apply_stock_alignment(rows, access_token, only_diff: bool = False) -> tuple[
                 )
             row["result"] = "ok"
             pushed += 1
+        except FulfillmentOnlyItem as exc:
+            # ML confirmó que la publicación es Full puro. No es un fallo que
+            # convenga reintentar: se anota en el ítem para que los próximos
+            # sync la salteen (si no, son decenas de llamadas rechazadas por
+            # pasada) y para que el panel la muestre por lo que es en vez de
+            # marcar un desfasaje que nadie puede corregir desde el ERP.
+            _mark_fulfillment_only(item)
+            row["action"] = ALIGN_SKIP
+            row["reason"] = "Full puro confirmado por ML: el stock lo administra ML"
+            logger.info(
+                "ML: %s es fulfillment-only, se deja de empujarle stock propio — %s",
+                item.item_id, exc,
+            )
         except Exception as exc:
             row["error"] = error_detail(exc)
             failed += 1
@@ -1399,6 +1441,21 @@ def apply_stock_alignment(rows, access_token, only_diff: bool = False) -> tuple[
                 "ML: no se pudo publicar stock %s en %s — %s", qty, item.item_id, row["error"]
             )
     return pushed, failed
+
+
+def _mark_fulfillment_only(item) -> None:
+    """Dejar asentado que la publicación no vende desde el depósito propio.
+
+    Se marca por user_product_id porque el rechazo es de la entidad de stock,
+    que comparten la publicación de catálogo y la tradicional del mismo
+    producto.
+    """
+    MercadoLibreItem.objects.filter(user_product_id=item.user_product_id).update(
+        full_only=True, has_flex=False, flex_quantity=0
+    )
+    item.full_only = True
+    item.has_flex = False
+    item.flex_quantity = 0
 
 
 def reconcile_stock_to_ml(ml_items, access_token) -> dict:

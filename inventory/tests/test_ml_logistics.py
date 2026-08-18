@@ -411,7 +411,7 @@ class StockReconciliationTests(TestCase):
         self.product = Product.objects.create(name="Cera", sku="CE1")
         Stock.objects.create(product=self.product, warehouse=self.comun_wh, quantity=Decimal("12"))
 
-    def _run_sync(self, item, reconcile="1"):
+    def _run_sync(self, item, reconcile="1", push_flex_effect=None):
         MercadoLibreItem.objects.update_or_create(
             item_id=item["id"],
             defaults={
@@ -426,6 +426,8 @@ class StockReconciliationTests(TestCase):
             if func is ml.get_item:
                 return item
             if func is ml.get_orders_summary:
+                if getattr(self, "orders_summary_error", None):
+                    raise self.orders_summary_error
                 return {"item_sales": {}}
             if func is ml.get_user_product_stock:
                 return self.user_product_stock
@@ -436,7 +438,9 @@ class StockReconciliationTests(TestCase):
         ), patch.object(ml, "_call_with_refresh", side_effect=dispatch), patch.object(
             ml, "push_item_stock_and_price"
         ) as push_item, patch.object(
-            ml, "push_selling_address_stock", return_value=True
+            ml,
+            "push_selling_address_stock",
+            **({"side_effect": push_flex_effect} if push_flex_effect else {"return_value": True}),
         ) as push_flex:
             result = ml.sync_items_and_stock(self.connection, self.user, ignore_env_limit=True)
         return result, push_item, push_flex
@@ -598,6 +602,80 @@ class StockReconciliationTests(TestCase):
         push_flex.assert_called_once_with("MLAU1", 12, "tok")
         push_item.assert_not_called()
         self.assertTrue(MercadoLibreItem.objects.get(item_id="MLA1").has_flex)
+
+    def test_stock_is_published_even_if_sales_metrics_fail(self):
+        """Un fallo de las métricas no puede dejar el stock sin publicar.
+
+        Las métricas se piden antes de reconciliar y el endpoint de órdenes es
+        pesado: cuando ML devolvía un 500, la excepción se propagaba y el
+        empuje de stock —lo único que la publicación necesita para no quedar
+        desfasada— no llegaba a correr en toda la pasada.
+        """
+        item = {
+            "id": "MLA1",
+            "title": "Cera",
+            "status": "active",
+            "available_quantity": 3,
+            "shipping": {"logistic_type": "self_service"},
+        }
+        self.orders_summary_error = RuntimeError("500 desde ML")
+        _result, push_item, _push_flex = self._run_sync(item)
+        push_item.assert_called_once_with("MLA1", 12, None, "tok")
+
+    def test_fulfillment_only_rejection_is_recorded_and_not_retried(self):
+        """El 400 de ML manda sobre la pista de la ubicación propia.
+
+        Hay user_products que informan una ubicación `selling_address` y aun
+        así ML rechaza el stock propio por ser fulfillment-only. Sin anotarlo,
+        cada sync repetía la llamada rechazada y el panel marcaba un desfasaje
+        que desde el ERP no se puede corregir.
+        """
+        item = {
+            "id": "MLA1",
+            "title": "Cera",
+            "status": "active",
+            "available_quantity": 6,
+            "user_product_id": "MLAU1",
+            "shipping": {"logistic_type": "fulfillment"},
+        }
+        self.user_product_stock = {
+            "locations": [
+                {"type": "selling_address", "quantity": 0},
+                {"type": "meli_facility", "quantity": 6},
+            ]
+        }
+        rejection = ml.FulfillmentOnlyItem(
+            "HTTP 400: cannot modify selling address stock for fulfillment-only items"
+        )
+        _result, _push_item, push_flex = self._run_sync(item, push_flex_effect=rejection)
+        push_flex.assert_called_once()
+        saved = MercadoLibreItem.objects.get(item_id="MLA1")
+        self.assertTrue(saved.full_only)
+        self.assertFalse(saved.has_flex)
+
+        # Segunda pasada: ya no se vuelve a intentar.
+        _result, _push_item, push_flex = self._run_sync(item)
+        push_flex.assert_not_called()
+
+    def test_tag_reactivates_a_publication_marked_full_only(self):
+        # Si el vendedor activa Flex de verdad, ML manda el tag y la marca se
+        # limpia sola: el ERP vuelve a publicarle stock sin intervención.
+        MercadoLibreItem.objects.update_or_create(
+            item_id="MLA1",
+            defaults={"product": self.product, "full_only": True, "logistic_type": "fulfillment"},
+        )
+        item = {
+            "id": "MLA1",
+            "title": "Cera",
+            "status": "active",
+            "available_quantity": 6,
+            "user_product_id": "MLAU1",
+            "shipping": {"logistic_type": "fulfillment", "tags": ["self_service_in"]},
+        }
+        self.user_product_stock = {"locations": [{"type": "meli_facility", "quantity": 6}]}
+        _result, _push_item, push_flex = self._run_sync(item)
+        push_flex.assert_called_once_with("MLAU1", 12, "tok")
+        self.assertFalse(MercadoLibreItem.objects.get(item_id="MLA1").full_only)
 
     def test_coexistence_in_sync_is_left_alone(self):
         item = {

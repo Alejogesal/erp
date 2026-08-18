@@ -443,6 +443,10 @@ class MercadoLibreItem(models.Model):
         default=False,
         help_text="La publicación vende desde el depósito propio: tag self_service_in en /items o una ubicación selling_address en el stock del user_product. Con logistic_type=fulfillment indica convivencia Full/Flex.",
     )
+    full_only = models.BooleanField(
+        default=False,
+        help_text="ML rechazó el stock del depósito propio por ser fulfillment-only. Es la confirmación de que no hay convivencia: el ERP deja de intentar publicarle stock.",
+    )
     available_quantity = models.IntegerField(default=0)
     full_quantity = models.IntegerField(
         default=0,
