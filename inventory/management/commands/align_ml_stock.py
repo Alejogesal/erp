@@ -91,3 +91,31 @@ class Command(BaseCommand):
                     "variedad elegida: enlazalas en el panel para que reciban stock."
                 )
             )
+
+        # Las que están realmente frenadas: publicación Full sin una sola unidad
+        # en el depósito de ML y con stock en el propio. El ERP no las puede
+        # destrabar (ML no deja escribir el stock de Full), pero son las únicas
+        # que justifican ir a cambiar algo a mano, así que van listadas aparte.
+        # El resto de las Full siguen vendiendo con su stock en ML: que su
+        # número no coincida con el del depósito propio es normal, no un
+        # desfasaje.
+        frenadas = [
+            row for row in rows
+            if row["item"].logistic_type == "fulfillment"
+            and not row["item"].full_quantity
+            and (row["erp_qty"] or 0) > 0
+        ]
+        if frenadas:
+            self.stdout.write("")
+            self.stdout.write(
+                self.style.ERROR(
+                    f"{len(frenadas)} publicación(es) Full sin stock en el depósito de ML y con "
+                    "unidades en el tuyo. No venden y el ERP no puede destrabarlas: hay que "
+                    "sacarlas de Full (o mandar mercadería a Full) desde MercadoLibre."
+                )
+            )
+            for row in sorted(frenadas, key=lambda r: -(r["erp_qty"] or 0)):
+                self.stdout.write(
+                    f"  {row['item_id']:<16} {row['erp_qty']:>4} u. en tu depósito  "
+                    f"[{row['item'].status}]  {row['title'][:50]}"
+                )
