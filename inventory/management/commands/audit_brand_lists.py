@@ -36,6 +36,12 @@ class Command(BaseCommand):
         parser.add_argument("--all", action="store_true", help="Muestra también las marcas sin problemas.")
         parser.add_argument("--brand", default="", help="Audita una sola marca.")
         parser.add_argument("--full", action="store_true", help="Lista todos los productos, no solo los primeros 15.")
+        parser.add_argument(
+            "--similares",
+            action="store_true",
+            help="Agrega los pares solo PARECIDOS. Ruidoso: en marcas con familias "
+                 "(ARGAN/KERATINA/BLACK, SH/ACOND) marca productos distintos.",
+        )
 
     def handle(self, *args, **options):
         only_brand = _gkey(options["brand"])
@@ -74,6 +80,7 @@ class Command(BaseCommand):
                 continue
 
             included, missing, unnamed, foreign_text = [], [], [], []
+            shown_name: dict[int, str] = {}
             for p in brand_products:
                 link = links_by_product[p.id].get(principal_id)
                 has_price = link is not None and link.cost_net > Decimal("0.00")
@@ -81,12 +88,16 @@ class Command(BaseCommand):
                     missing.append(p)
                     continue
                 included.append(p)
-                if not link.supplier_name.strip():
+                supplier_name = link.supplier_name.strip()
+                # El nombre que realmente sale en la lista, que es con el que hay que
+                # buscar duplicados.
+                shown_name[p.id] = supplier_name or p.name
+                if not supplier_name:
                     unnamed.append(p)
-                elif link.supplier_name.strip() != p.name.strip():
-                    foreign_text.append((p, link.supplier_name.strip()))
+                elif supplier_name != p.name.strip():
+                    foreign_text.append((p, supplier_name))
 
-            dupes = self._duplicates(included)
+            dupes = self._duplicates(included, shown_name, fuzzy=options["similares"])
             # foreign_text es informativo: es justamente el caso que la lista ahora
             # resuelve bien (texto del proveedor ≠ nombre interno).
             has_problem = bool(unnamed or dupes)
@@ -116,10 +127,14 @@ class Command(BaseCommand):
                 self.stdout.write(f"  · fuera de la lista (los tiene otro proveedor, no el principal):")
                 self._dump(missing, limit, lambda p: p.name)
             if dupes:
+                label_dupes = "iguales" if not options["similares"] else "iguales o parecidos"
                 self.stdout.write(self.style.WARNING(
-                    f"  ⚠ {len(dupes)} par(es) que parecen el MISMO producto cargado dos veces:"
+                    f"  ⚠ {len(dupes)} par(es) {label_dupes} — el mismo producto cargado dos veces:"
                 ))
-                self._dump(dupes, limit, lambda t: f"{t[0].name}  ≈  {t[1].name}")
+                self._dump(
+                    dupes, limit,
+                    lambda t: f"{shown_name.get(t[0].id, t[0].name)}  ≈  {shown_name.get(t[1].id, t[1].name)}",
+                )
 
         self.stdout.write("")
         if problem_brands:
@@ -127,18 +142,38 @@ class Command(BaseCommand):
         else:
             self.stdout.write(self.style.SUCCESS("Ninguna marca con problemas."))
 
-    def _duplicates(self, items: list[Product]) -> list[tuple[Product, Product]]:
-        """Pares de productos de la misma marca que parecen el mismo artículo cargado
-        dos veces (mismos números —tamaño/gramaje— y texto muy parecido)."""
-        by_nums: dict[tuple, list[tuple[str, Product]]] = defaultdict(list)
+    def _duplicates(
+        self, items: list[Product], shown_name: dict[int, str], *, fuzzy: bool
+    ) -> list[tuple[Product, Product]]:
+        """Productos de la misma marca que son el mismo artículo cargado dos veces.
+
+        Por defecto solo pares cuyo texto normalizado es IDÉNTICO (difieren en
+        comillas, tildes, espacios o mayúsculas): esos son duplicados seguros. La
+        comparación por parecido queda detrás de --similares porque en catálogos con
+        familias (ARGAN/KERATINA/BLACK, SH/ACOND/MASCARA) marca como duplicados
+        productos que son distintos.
+        """
+        by_norm: dict[str, list[Product]] = defaultdict(list)
         for p in items:
-            norm = _normalize_lookup_text(p.name)
-            by_nums[_name_numbers(norm)].append((norm, p))
-        pairs = []
+            by_norm[_normalize_lookup_text(shown_name.get(p.id, p.name))].append(p)
+        pairs: list[tuple[Product, Product]] = []
+        for same in by_norm.values():
+            for i in range(len(same)):
+                for j in range(i + 1, len(same)):
+                    pairs.append((same[i], same[j]))
+        if not fuzzy:
+            return pairs
+
+        by_nums: dict[tuple, list[tuple[str, Product]]] = defaultdict(list)
+        for norm, same in by_norm.items():
+            for p in same:
+                by_nums[_name_numbers(norm)].append((norm, p))
         for candidates in by_nums.values():
             for i in range(len(candidates)):
                 for j in range(i + 1, len(candidates)):
                     (norm_a, pa), (norm_b, pb) = candidates[i], candidates[j]
+                    if norm_a == norm_b:
+                        continue  # ya está en pairs
                     tokens_a, tokens_b = set(norm_a.split()), set(norm_b.split())
                     if tokens_a <= tokens_b or tokens_b <= tokens_a:
                         pairs.append((pa, pb))

@@ -320,3 +320,24 @@ class PriceListPreviewTests(TestCase):
         entries = self._entries(reverse("inventory_product_prices") + "?todos=1")
         by_name = {e["name"]: e["in_list"] for e in entries}
         self.assertEqual(by_name, {"MASCARA FIDELITE": True, "Fidelite crema GLM": False})
+
+
+class SuppliersPageLoadTests(TestCase):
+    """La página de proveedores renderiza los vínculos con sus productos."""
+
+    def setUp(self):
+        _reset_current_user()
+        self.user = get_user_model().objects.create_user(username="u4", password="x")
+        self.client.force_login(self.user)
+
+    def test_page_lists_supplier_products(self):
+        supplier = Supplier.objects.create(name="Aris Norma")
+        for i in range(3):
+            product = Product.objects.create(name=f"Prod {i}", group="Marca1", sku=f"SKU{i}")
+            SupplierProduct.objects.create(
+                supplier=supplier, product=product, last_cost=Decimal("10"),
+                supplier_name=f"NOMBRE ARIS {i}",
+            )
+        resp = self.client.get(reverse("inventory_suppliers"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Prod 1")

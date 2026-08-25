@@ -5,7 +5,7 @@ from decimal import Decimal
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import IntegrityError, transaction
-from django.db.models import ProtectedError, Sum
+from django.db.models import Prefetch, ProtectedError, Sum
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -261,7 +261,12 @@ def suppliers(request):
     link_group_form = SupplierGroupForm()
     unlink_group_form = SupplierUnlinkGroupForm()
     brand_supplier_form = BrandSupplierForm()
-    suppliers_qs = Supplier.objects.prefetch_related("supplier_products__product")
+    # Prefetch con JOIN en vez de "supplier_products__product": el anidado hace una
+    # segunda consulta con un IN gigante (un id por vínculo), que revienta cuando el
+    # catálogo crece. Con select_related el producto viene en la misma query.
+    suppliers_qs = Supplier.objects.prefetch_related(
+        Prefetch("supplier_products", queryset=SupplierProduct.objects.select_related("product"))
+    )
 
     if request.method == "POST":
         action = request.POST.get("action")
