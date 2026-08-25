@@ -1,11 +1,12 @@
 """Supplier views."""
+from collections import Counter
 from datetime import datetime, time
 from decimal import Decimal
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import IntegrityError, transaction
-from django.db.models import Prefetch, ProtectedError, Sum
+from django.db.models import Case, Count, Prefetch, ProtectedError, Sum, When
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -851,6 +852,70 @@ def suppliers(request):
     context["debtors"] = debtors
     context["total_debt"] = total_debt
     return render(request, "inventory/suppliers.html", context)
+
+
+@login_required
+def brand_supplier_info(request):
+    """Quién es hoy el proveedor principal de una marca y qué proveedor la cubre.
+
+    Sirve para elegir con los datos a la vista: cuántos productos de la marca tiene
+    cada proveedor con precio cargado. Si el elegido cubre menos que otro, la lista
+    de precios va a salir más corta — eso se avisa antes de asignar, no después.
+    """
+    group = (request.GET.get("group") or "").strip()
+    if not group:
+        return JsonResponse({"ok": False, "error": "Elegí una marca."}, status=400)
+
+    products = Product.objects.filter(group__iexact=group)
+    total = products.count()
+    if not total:
+        return JsonResponse({"ok": False, "error": f"No hay productos con la marca '{group}'."}, status=404)
+
+    rows = (
+        SupplierProduct.objects.filter(product__group__iexact=group)
+        .values("supplier_id", "supplier__name")
+        .annotate(
+            total=Count("id"),
+            con_precio=Count(Case(When(last_cost__gt=Decimal("0.00"), then=1))),
+        )
+        .order_by("-con_precio", "supplier__name")
+    )
+    suppliers = [
+        {
+            "id": row["supplier_id"],
+            "name": row["supplier__name"],
+            "total": row["total"],
+            "con_precio": row["con_precio"],
+        }
+        for row in rows
+    ]
+
+    bs = BrandSupplier.objects.filter(group__iexact=group).select_related("supplier").first()
+    if bs:
+        principal = {"id": bs.supplier_id, "name": bs.supplier.name, "elegido": True}
+    else:
+        # Sin elección explícita se deduce del proveedor principal más frecuente,
+        # que es lo mismo que hace la lista de precios.
+        counts = Counter(
+            pid for pid in products.values_list("default_supplier_id", flat=True) if pid
+        )
+        if counts:
+            pid = counts.most_common(1)[0][0]
+            name = next((s["name"] for s in suppliers if s["id"] == pid), "")
+            if not name:
+                name = Supplier.objects.filter(pk=pid).values_list("name", flat=True).first() or ""
+            principal = {"id": pid, "name": name, "elegido": False}
+        else:
+            principal = None
+
+    return JsonResponse({
+        "ok": True,
+        "group": group,
+        "total": total,
+        "principal": principal,
+        "suppliers": suppliers,
+    })
+
 
 
 @login_required

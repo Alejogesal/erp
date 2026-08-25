@@ -42,33 +42,38 @@
             <button type="submit">Desvincular marca</button>
         </form>
     </div>
-    <div class="card">
-        <details>
-            <summary class="card-title" style="cursor:pointer;">Proveedor principal por marca{% if brand_suppliers %} <span style="font-weight:400; color:var(--muted); font-size:12px;">· {{ brand_suppliers|length }} asignada{{ brand_suppliers|length|pluralize }}</span>{% endif %}</summary>
-            <div style="margin-top:12px;">
-            <p class="subtitle" style="margin-top:0;">Elegí el proveedor principal de cada marca. Su precio se usa como costo de todos los productos de la marca (manda sobre el "más barato" automático). Es lo que aparece en la lista de precios.</p>
-            <form method="post">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="set_brand_supplier">
-                <p>
-                    <label for="id_brand_group">Marca / Grupo</label>
-                    <input id="id_brand_group" name="group" list="group-options-suppliers" required>
-                </p>
-                <p>
-                    <label for="id_brand_supplier">Proveedor principal</label>
-                    <select id="id_brand_supplier" name="supplier" required>
-                        <option value="">Seleccionar</option>
-                        {% for supplier in suppliers %}
-                        <option value="{{ supplier.id }}">{{ supplier.name }}</option>
-                        {% endfor %}
-                    </select>
-                </p>
-                <button type="submit">Asignar proveedor a marca</button>
-            </form>
+    <div class="card" id="brand-principal-card">
+        <div class="card-title">Proveedor principal de la marca</div>
+        <p class="subtitle" style="margin-top:0;">
+            La lista de precios de una marca sale del proveedor que elijas acá: sus precios y su forma de
+            escribir los productos. <strong>Lo que ese proveedor no tenga, no aparece en la lista.</strong>
+        </p>
+        <form method="post" id="brand-principal-form">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="set_brand_supplier">
+            <input type="hidden" name="group" id="bp-group">
+            <input type="hidden" name="supplier" id="bp-supplier">
+        </form>
+        <p>
+            <label for="bp-select">Marca</label>
+            <select id="bp-select">
+                <option value="">Elegí una marca…</option>
+                {% for group in group_options %}
+                <option value="{{ group }}">{{ group }}</option>
+                {% endfor %}
+            </select>
+        </p>
+        <div id="bp-panel" style="display:none; margin-top:4px;">
+            <div id="bp-head" style="font-size:13px; margin-bottom:8px;"></div>
+            <div id="bp-rows"></div>
+            <div id="bp-warn" style="margin-top:10px;"></div>
+        </div>
+        <details style="margin-top:16px;">
+            <summary style="cursor:pointer; font-size:13px; color:var(--muted);">Marcas con proveedor elegido{% if brand_suppliers %} · {{ brand_suppliers|length }}{% endif %}</summary>
             {% if brand_suppliers %}
-            <table style="width:100%; margin-top:12px; font-size:13px; border-collapse:collapse;">
+            <table style="width:100%; margin-top:10px; font-size:13px; border-collapse:collapse;">
                 <thead>
-                    <tr style="text-align:left; border-bottom:1px solid #ccc;">
+                    <tr style="text-align:left; border-bottom:1px solid #2a313c;">
                         <th style="padding:4px 6px;">Marca</th>
                         <th style="padding:4px 6px;">Proveedor principal</th>
                         <th style="padding:4px 6px;"></th>
@@ -76,7 +81,7 @@
                 </thead>
                 <tbody>
                     {% for bs in brand_suppliers %}
-                    <tr style="border-bottom:1px solid #eee;">
+                    <tr style="border-bottom:1px solid #1c2330;">
                         <td style="padding:4px 6px;">{{ bs.group }}</td>
                         <td style="padding:4px 6px;">{{ bs.supplier.name }}</td>
                         <td style="padding:4px 6px; text-align:right;">
@@ -92,9 +97,8 @@
                 </tbody>
             </table>
             {% else %}
-            <p class="subtitle" style="margin-top:12px;">Todavía no asignaste proveedor principal a ninguna marca (se usa el más barato).</p>
+            <p class="subtitle" style="margin-top:10px;">Ninguna marca tiene proveedor elegido: todas usan el más barato.</p>
             {% endif %}
-            </div>
         </details>
     </div>
     <div class="card">
@@ -499,5 +503,103 @@
             .catch(() => { alert("No se pudo guardar."); });
         return false;
     }
+</script>
+<script>
+    // Asignar proveedor principal a una marca, mostrando antes cuánto cubre cada uno.
+    (function() {
+        const select = document.getElementById("bp-select");
+        if (!select) return;
+        const panel = document.getElementById("bp-panel");
+        const head = document.getElementById("bp-head");
+        const rows = document.getElementById("bp-rows");
+        const warn = document.getElementById("bp-warn");
+        const infoUrl = "{% url 'inventory_brand_supplier_info' %}";
+
+        const submit = (group, supplierId, name, conPrecio, total) => {
+            if (conPrecio < total) {
+                const falta = total - conPrecio;
+                const msg = `${name} tiene precio en ${conPrecio} de los ${total} productos de ${group}.\n\n`
+                    + `Los ${falta} restantes NO van a aparecer en tu lista de precios.\n\n¿Asignarlo igual?`;
+                if (!confirm(msg)) return;
+            }
+            document.getElementById("bp-group").value = group;
+            document.getElementById("bp-supplier").value = supplierId;
+            document.getElementById("brand-principal-form").submit();
+        };
+
+        const render = (data) => {
+            const total = data.total;
+            const principal = data.principal;
+            head.innerHTML = "";
+            const title = document.createElement("div");
+            title.innerHTML = `<strong>${data.group}</strong> · ${total} producto${total === 1 ? "" : "s"}`;
+            head.appendChild(title);
+            const current = document.createElement("div");
+            current.style.color = "var(--muted)";
+            if (principal) {
+                current.textContent = `Principal hoy: ${principal.name}`
+                    + (principal.elegido ? " (elegido por vos)" : " (deducido: el más frecuente)");
+            } else {
+                current.textContent = "Esta marca no tiene proveedor principal: no sale en la lista de precios.";
+            }
+            head.appendChild(current);
+
+            rows.innerHTML = "";
+            if (!data.suppliers.length) {
+                rows.innerHTML = '<p class="subtitle">Ningún proveedor está vinculado a esta marca. '
+                    + 'Usá "Vincular proveedor a marca" o importá su lista de precios.</p>';
+                warn.innerHTML = "";
+                return;
+            }
+            data.suppliers.forEach((sup) => {
+                const row = document.createElement("div");
+                row.style.cssText = "display:flex; align-items:center; gap:10px; padding:8px 10px; "
+                    + "border:1px solid #2a313c; border-radius:10px; margin-top:6px; font-size:13px;";
+                const isCurrent = principal && principal.id === sup.id;
+                if (isCurrent) row.style.borderColor = "#1F4EAD";
+                const label = document.createElement("div");
+                label.style.flex = "1";
+                label.innerHTML = `${isCurrent ? "★ " : ""}<strong>${sup.name}</strong>`
+                    + `<div style="color:var(--muted);">${sup.con_precio} de ${total} con precio cargado</div>`;
+                row.appendChild(label);
+                const btn = document.createElement("button");
+                btn.type = "button";
+                btn.className = "pill sm";
+                btn.style.cssText = "font-size:12px; padding:6px 10px;";
+                btn.textContent = isCurrent ? "Ya es el principal" : "Asignar como principal";
+                btn.disabled = isCurrent;
+                btn.addEventListener("click", () => submit(data.group, sup.id, sup.name, sup.con_precio, total));
+                row.appendChild(btn);
+                rows.appendChild(row);
+            });
+
+            warn.innerHTML = "";
+            const cur = principal && data.suppliers.find((s) => s.id === principal.id);
+            const best = data.suppliers[0];
+            if (cur && best && best.con_precio > cur.con_precio) {
+                warn.innerHTML = `<div style="color:#e0a800; font-size:13px;">⚠ Con ${cur.name} tu lista muestra `
+                    + `${cur.con_precio} de ${total}. ${best.name} tiene ${best.con_precio}.</div>`;
+            } else if (!cur && principal) {
+                warn.innerHTML = `<div style="color:#e0a800; font-size:13px;">⚠ ${principal.name} no está vinculado `
+                    + `a ningún producto de esta marca: la lista sale vacía.</div>`;
+            }
+        };
+
+        select.addEventListener("change", () => {
+            const group = select.value;
+            if (!group) { panel.style.display = "none"; return; }
+            panel.style.display = "block";
+            head.textContent = "Cargando…";
+            rows.innerHTML = "";
+            warn.innerHTML = "";
+            fetch(`${infoUrl}?group=${encodeURIComponent(group)}`)
+                .then((r) => r.json())
+                .then((data) => {
+                    if (!data.ok) { head.textContent = data.error || "No se pudo leer la marca."; return; }
+                    render(data);
+                })
+                .catch(() => { head.textContent = "No se pudo leer la marca."; });
+        });
+    })();
 </script>
 {% endblock %}

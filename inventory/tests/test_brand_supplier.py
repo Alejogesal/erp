@@ -341,3 +341,60 @@ class SuppliersPageLoadTests(TestCase):
         resp = self.client.get(reverse("inventory_suppliers"))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Prod 1")
+
+
+class BrandSupplierInfoTests(TestCase):
+    """El asignador de proveedor principal muestra cuánto cubre cada proveedor."""
+
+    def setUp(self):
+        _reset_current_user()
+        self.user = get_user_model().objects.create_user(username="u5", password="x")
+        self.client.force_login(self.user)
+        self.aris = Supplier.objects.create(name="Aris Norma")
+        self.glm = Supplier.objects.create(name="GLM Distribuidora")
+        # 3 productos de la marca: Aris tiene los 3 con precio, GLM solo 1.
+        self.products = [
+            Product.objects.create(name=f"Fid {i}", group="FIDELITE", margin_consumer=Decimal("0.00"))
+            for i in range(3)
+        ]
+        for p in self.products:
+            SupplierProduct.objects.create(supplier=self.aris, product=p, last_cost=Decimal("100"))
+        SupplierProduct.objects.create(supplier=self.glm, product=self.products[0], last_cost=Decimal("90"))
+
+    def _info(self, group="FIDELITE"):
+        resp = self.client.get(reverse("inventory_brand_supplier_info"), {"group": group})
+        return resp, resp.json()
+
+    def test_reports_coverage_per_supplier(self):
+        BrandSupplier.objects.create(group="FIDELITE", supplier=self.glm)
+        resp, data = self._info()
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(data["total"], 3)
+        self.assertEqual(data["principal"], {"id": self.glm.id, "name": "GLM Distribuidora", "elegido": True})
+        coverage = {s["name"]: s["con_precio"] for s in data["suppliers"]}
+        self.assertEqual(coverage, {"Aris Norma": 3, "GLM Distribuidora": 1})
+        # El de mayor cobertura va primero, para que se vea la diferencia.
+        self.assertEqual(data["suppliers"][0]["name"], "Aris Norma")
+
+    def test_principal_deducido_cuando_no_hay_elegido(self):
+        for p in self.products:
+            services.sync_principal_to_cheapest(p)
+        _, data = self._info()
+        self.assertFalse(data["principal"]["elegido"])
+
+    def test_link_sin_precio_no_cuenta(self):
+        otro = Supplier.objects.create(name="Sin precios")
+        SupplierProduct.objects.create(supplier=otro, product=self.products[0], last_cost=Decimal("0"))
+        _, data = self._info()
+        fila = next(s for s in data["suppliers"] if s["name"] == "Sin precios")
+        self.assertEqual((fila["total"], fila["con_precio"]), (1, 0))
+
+    def test_marca_inexistente(self):
+        resp, data = self._info("NO EXISTE")
+        self.assertEqual(resp.status_code, 404)
+        self.assertFalse(data["ok"])
+
+    def test_card_visible_en_proveedores(self):
+        resp = self.client.get(reverse("inventory_suppliers"))
+        self.assertContains(resp, "Proveedor principal de la marca")
+        self.assertContains(resp, 'id="bp-select"')

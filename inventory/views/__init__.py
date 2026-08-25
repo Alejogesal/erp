@@ -35,7 +35,7 @@ from .purchases import (
 from .stock import stock_list, stock_set_comun_ajax
 from .transfer_pdf import import_transfer_pdf
 from .customers import customers_view, customer_history_view, create_credit_note
-from .suppliers import suppliers, supplier_history_view, brand_suppliers_page
+from .suppliers import suppliers, supplier_history_view, brand_suppliers_page, brand_supplier_info
 from .mercadolibre import (
     mercadolibre_callback,
     mercadolibre_connect,
@@ -84,6 +84,7 @@ __all__ = [
     "suppliers",
     "supplier_history_view",
     "brand_suppliers_page",
+    "brand_supplier_info",
     "mercadolibre_callback",
     "mercadolibre_connect",
     "mercadolibre_dashboard",
