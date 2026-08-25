@@ -25,7 +25,6 @@ from .common import _normalize_lookup_text
 from .forms import (
     BrandSupplierForm,
     SupplierForm,
-    SupplierGroupForm,
     SupplierPaymentForm,
     SupplierProductForm,
     SupplierUnlinkGroupForm,
@@ -259,7 +258,6 @@ def _parse_price_list_pdf(pdf_bytes):
 def suppliers(request):
     supplier_form = SupplierForm()
     link_form = SupplierProductForm()
-    link_group_form = SupplierGroupForm()
     unlink_group_form = SupplierUnlinkGroupForm()
     brand_supplier_form = BrandSupplierForm()
     # Prefetch con JOIN en vez de "supplier_products__product": el anidado hace una
@@ -303,46 +301,6 @@ def suppliers(request):
                 )
                 sync_principal_to_cheapest(product)
                 messages.success(request, "Proveedor vinculado al producto.")
-                return redirect("inventory_suppliers")
-        elif action == "link_supplier_group":
-            link_group_form = SupplierGroupForm(request.POST)
-            if link_group_form.is_valid():
-                supplier = link_group_form.cleaned_data["supplier"]
-                group = (link_group_form.cleaned_data["group"] or "").strip()
-                override_last_cost = link_group_form.cleaned_data.get("last_cost")
-                products = Product.objects.filter(group__iexact=group).order_by("id")
-                linked_count = 0
-                default_updated_count = 0
-                for product in products:
-                    # Costo NETO (sin IVA); el con-IVA se calcula con el IVA del producto.
-                    net = override_last_cost if override_last_cost is not None else (product.avg_cost or Decimal("0.00"))
-                    vat = product.vat_percent or Decimal("0.00")
-                    cost_with_vat = (net * (Decimal("1.00") + vat / Decimal("100.00"))).quantize(
-                        Decimal("0.01"), rounding=ROUND_HALF_UP
-                    )
-                    _, created = SupplierProduct.objects.update_or_create(
-                        supplier=supplier,
-                        product=product,
-                        defaults={
-                            "last_cost": cost_with_vat,
-                            "vat_percent": vat,
-                            "last_purchase_at": timezone.now(),
-                        },
-                    )
-                    linked_count += 1 if created else 0
-                    if sync_principal_to_cheapest(product):
-                        default_updated_count += 1
-                if products.exists():
-                    messages.success(
-                        request,
-                        (
-                            f"Proveedor vinculado a {products.count()} productos de la marca/grupo '{group}'. "
-                            f"Nuevos vínculos: {linked_count}. "
-                            f"Proveedor principal actualizado en {default_updated_count}."
-                        ),
-                    )
-                else:
-                    messages.warning(request, f"No hay productos para la marca/grupo '{group}'.")
                 return redirect("inventory_suppliers")
         elif action == "remove_supplier_group":
             unlink_group_form = SupplierUnlinkGroupForm(request.POST)
@@ -769,7 +727,6 @@ def suppliers(request):
     context = {
         "supplier_form": supplier_form,
         "link_form": link_form,
-        "link_group_form": link_group_form,
         "unlink_group_form": unlink_group_form,
         "brand_supplier_form": brand_supplier_form,
         "brand_suppliers": brand_suppliers,

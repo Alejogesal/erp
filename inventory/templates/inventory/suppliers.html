@@ -16,31 +16,33 @@
         </form>
     </div>
     <div class="card">
-        <div class="card-title">Vincular a producto</div>
-        <form method="post">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="link_supplier">
-            {{ link_form.as_p }}
-            <button type="submit">Asignar</button>
-        </form>
-    </div>
-    <div class="card">
-        <div class="card-title">Vincular a marca/grupo</div>
-        <form method="post">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="link_supplier_group">
-            {{ link_group_form.as_p }}
-            <button type="submit">Asignar marca</button>
-        </form>
-    </div>
-    <div class="card">
-        <div class="card-title">Desvincular de marca/grupo</div>
-        <form method="post">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="remove_supplier_group">
-            {{ unlink_group_form.as_p }}
-            <button type="submit">Desvincular marca</button>
-        </form>
+        <div class="card-title">Vínculos a mano</div>
+        <p class="subtitle" style="margin-top:0;">
+            Lo normal es que los vínculos los cree la importación de la lista del proveedor.
+            Esto es para casos sueltos y para limpiar.
+        </p>
+        <details>
+            <summary style="cursor:pointer; font-size:13px; color:var(--muted);">Vincular un producto a un proveedor</summary>
+            <form method="post" style="margin-top:10px;">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="link_supplier">
+                {{ link_form.as_p }}
+                <button type="submit">Asignar</button>
+            </form>
+        </details>
+        <details style="margin-top:10px;">
+            <summary style="cursor:pointer; font-size:13px; color:var(--muted);">Desvincular un proveedor de una marca</summary>
+            <p class="subtitle" style="margin-top:10px;">
+                Borra los vínculos de ese proveedor en toda la marca. Los productos no se borran:
+                los que queden sin ese proveedor pasan al más barato que les quede.
+            </p>
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="remove_supplier_group">
+                {{ unlink_group_form.as_p }}
+                <button type="submit">Desvincular marca</button>
+            </form>
+        </details>
     </div>
     <div class="card" id="brand-principal-card">
         <div class="card-title">Proveedor principal de la marca</div>
