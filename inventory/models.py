@@ -355,6 +355,10 @@ class SupplierProduct(models.Model):
         max_digits=5, decimal_places=2, default=Decimal("0.00"),
         help_text="Condición de IVA de este proveedor para el producto",
     )
+    supplier_name = models.CharField(
+        max_length=255, blank=True, default="",
+        help_text="Nombre del producto tal como lo lista este proveedor",
+    )
     last_purchase_at = models.DateTimeField(null=True, blank=True, default=None)
 
     class Meta:

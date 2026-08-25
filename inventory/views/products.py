@@ -240,7 +240,14 @@ def product_prices(request):
                     KitComponent.objects.create(kit=kit, component=component, quantity=qty)
             messages.success(request, "Kit guardado.")
             return redirect("inventory_product_prices")
-    products = Product.objects.order_by("sku")
+    # La tabla es la previsualización de lo que se descarga: mismas filas, mismo
+    # orden y el nombre del proveedor principal de cada marca. Con ?todos=1 se ven
+    # también los productos que quedan afuera, para poder editarlos desde acá.
+    show_all = request.GET.get("todos") == "1"
+    entries = _price_list_entries(
+        Product.objects.select_related("default_supplier"), include_excluded=show_all
+    )
+    excluded_count = sum(1 for e in entries if not e["in_list"]) if show_all else None
     products_no_kits = Product.objects.filter(is_kit=False).order_by("sku")
     kits = Product.objects.filter(is_kit=True).order_by("sku")
     kit_components = KitComponent.objects.select_related("kit", "component").all()
@@ -275,7 +282,9 @@ def product_prices(request):
         request,
         "inventory/product_prices.html",
         {
-            "products": products,
+            "entries": entries,
+            "show_all": show_all,
+            "excluded_count": excluded_count,
             "group_options": group_options,
             "products_no_kits": products_no_kits,
             "kits": kits,
@@ -768,6 +777,112 @@ def product_search(request):
     return JsonResponse({"ok": True, "results": results})
 
 
+def _price_list_entries(products, *, include_excluded: bool = False) -> list[dict]:
+    """Filas de la lista de precios propia, en el mismo orden que el Excel.
+
+    Cada marca se representa como la tiene el proveedor vinculado a esa marca:
+    entra solo lo que ese proveedor lista (con precio) y el texto es el suyo. Un
+    producto que solo tiene el otro proveedor queda afuera.
+
+    Devuelve dicts {"product", "brand", "name", "in_list"}. Con include_excluded se
+    devuelven también los que NO entran (marcados con in_list=False), para poder
+    mostrarlos en pantalla sin que ensucien la descarga.
+
+    Proveedor principal de cada marca:
+      1) el ELEGIDO por el usuario (BrandSupplier), si la marca tiene uno; o
+      2) el default_supplier más frecuente entre los productos de esa marca
+         (el más barato, del cual sale el costo) como fallback.
+    """
+    from collections import Counter, defaultdict
+    from ..models import BrandSupplier, SupplierProduct
+
+    products = list(products)
+
+    def _gkey(group: str) -> str:
+        # Las marcas se comparan sin espacios de más ni mayúsculas: el group de los
+        # productos y el de BrandSupplier vienen de archivos distintos.
+        return (group or "").strip().casefold()
+
+    brand_supplier_counts: dict[str, Counter] = defaultdict(Counter)
+    for p in products:
+        if p.group and p.default_supplier_id:
+            brand_supplier_counts[_gkey(p.group)][p.default_supplier_id] += 1
+    brand_principal = {
+        key: counts.most_common(1)[0][0]
+        for key, counts in brand_supplier_counts.items()
+    }
+    # La elección explícita del usuario manda sobre lo deducido.
+    brand_rows = list(BrandSupplier.objects.all())
+    pinned = {_gkey(bs.group): bs.supplier_id for bs in brand_rows}
+    brand_principal.update(pinned)
+
+    # Texto de la marca en la planilla: uno solo por marca, aunque los productos la
+    # tengan escrita con distinto casing/espacios (si no, se parte en dos bloques).
+    brand_label = {_gkey(p.group): p.group.strip() for p in products if p.group}
+    brand_label.update({_gkey(bs.group): bs.group.strip() for bs in brand_rows})
+
+    # Vínculo (producto ↔ proveedor principal de su marca), en una sola consulta.
+    wanted = {
+        (p.id, brand_principal[_gkey(p.group)])
+        for p in products
+        if p.group and _gkey(p.group) in brand_principal
+    }
+    principal_link: dict[int, SupplierProduct] = {}
+    if wanted:
+        links = SupplierProduct.objects.filter(
+            product_id__in={pid for pid, _ in wanted},
+            supplier_id__in={sid for _, sid in wanted},
+        )
+        for link in links:
+            if (link.product_id, link.supplier_id) in wanted:
+                principal_link[link.product_id] = link
+
+    def _include(p) -> bool:
+        # Los kits son productos propios (sin proveedor): se incluyen siempre.
+        if p.is_kit:
+            return True
+        if not p.group:
+            return False
+        key = _gkey(p.group)
+        principal = brand_principal.get(key)
+        if principal is None:
+            return False
+        if key in pinned:
+            # Marca con proveedor elegido: entra solo lo que está en SU lista con
+            # precio. No depende de que default_supplier esté sincronizado, así que
+            # un producto que solo tiene el otro proveedor nunca se cuela.
+            link = principal_link.get(p.id)
+            return link is not None and link.cost_net > Decimal("0.00")
+        # Marca sin elección explícita: el principal es deducido, se sigue usando el
+        # proveedor principal ya resuelto del producto.
+        return p.default_supplier_id == principal
+
+    def _name(p) -> str:
+        # Como lo escribe el proveedor principal de la marca. Product.name conserva
+        # el texto del primer proveedor que creó el producto, que puede ser otro.
+        link = principal_link.get(p.id)
+        if link and link.supplier_name.strip():
+            return link.supplier_name.strip()
+        return p.name
+
+    entries = []
+    for p in products:
+        in_list = _include(p)
+        if not in_list and not include_excluded:
+            continue
+        entries.append(
+            {
+                "product": p,
+                "brand": brand_label.get(_gkey(p.group), (p.group or "").strip()),
+                "name": _name(p),
+                "in_list": in_list,
+            }
+        )
+    # Marcas en orden alfabético (case-insensitive), luego producto. Sin marca al final.
+    entries.sort(key=lambda e: (e["brand"] == "", e["brand"].casefold(), e["name"].casefold()))
+    return entries
+
+
 @login_required
 def product_prices_download(request, audience: str):
     headers = ["Marca", "Producto", "Precio"]
@@ -786,47 +901,18 @@ def product_prices_download(request, audience: str):
     if groups_raw:
         groups = [g.strip() for g in groups_raw.split(",") if g.strip()]
         if groups:
-            products = products.filter(group__in=groups)
+            # iexact y no group__in: la marca llega desde la pantalla ya normalizada
+            # (sin espacios de más), y en los productos puede estar con otro casing.
+            brand_filter = Q()
+            for group in groups:
+                brand_filter |= Q(group__iexact=group)
+            products = products.filter(brand_filter)
     products = list(products)
 
-    # Proveedor principal de cada marca:
-    #  1) el ELEGIDO por el usuario (BrandSupplier), si la marca tiene uno; o
-    #  2) el default_supplier más frecuente entre los productos de esa marca
-    #     (el más barato, del cual sale el costo) como fallback.
-    # Solo se listan los productos cuyo proveedor principal coincide con el de su
-    # marca, para no repetir productos por proveedores secundarios/duplicados.
-    from collections import Counter, defaultdict
-    from ..models import BrandSupplier
-
-    brand_supplier_counts: dict[str, Counter] = defaultdict(Counter)
-    for p in products:
-        if p.group and p.default_supplier_id:
-            brand_supplier_counts[p.group][p.default_supplier_id] += 1
-    brand_principal = {
-        group: counts.most_common(1)[0][0]
-        for group, counts in brand_supplier_counts.items()
-    }
-    # La elección explícita del usuario manda sobre lo deducido (match case-insensitive).
-    explicit = {bs.group.casefold(): bs.supplier_id for bs in BrandSupplier.objects.all()}
-    if explicit:
-        for group in list(brand_principal.keys()):
-            chosen = explicit.get(group.casefold())
-            if chosen is not None:
-                brand_principal[group] = chosen
-
-    def _include(p) -> bool:
-        # Los kits son productos propios (sin proveedor): se incluyen siempre.
-        if p.is_kit:
-            return True
-        # Solo productos de una marca cuyo proveedor principal es el de la marca.
-        if not p.group:
-            return False
-        principal = brand_principal.get(p.group)
-        return principal is not None and p.default_supplier_id == principal
-
-    rows = [[p.group or "", p.name, getattr(p, attr)] for p in products if _include(p)]
-    # Marcas en orden alfabético (case-insensitive), luego producto. Sin marca al final.
-    rows.sort(key=lambda r: (r[0] == "", r[0].casefold(), r[1].casefold()))
+    rows = [
+        [e["brand"], e["name"], getattr(e["product"], attr)]
+        for e in _price_list_entries(products)
+    ]
     xlsx_bytes = _build_xlsx(headers, rows, blue_cols={1}, number_cols={3})
     audience_label_map = {
         "consumer": "consumidor",

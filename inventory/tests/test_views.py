@@ -152,12 +152,15 @@ class DashboardViewTests(TestCase):
         self.product.margin_barber = Decimal("10.00")
         self.product.margin_distributor = Decimal("5.00")
         self.product.save()
-        response = self.client.get(reverse("inventory_product_prices"))
+        # La tabla es la preview de la descarga (solo lo que entra en la lista);
+        # este producto no tiene proveedor, así que se pide la vista completa.
+        response = self.client.get(reverse("inventory_product_prices") + "?todos=1")
         self.assertEqual(response.status_code, 200)
-        products = list(response.context["products"])
-        self.assertEqual(products[0].consumer_price, Decimal("72.60"))
-        self.assertEqual(products[0].barber_price, Decimal("66.55"))
-        self.assertEqual(products[0].distributor_price, Decimal("63.525"))
+        products = [entry["product"] for entry in response.context["entries"]]
+        # Margen bruto: precio = costo con IVA / (1 - margen%). Costo con IVA = 60,50.
+        self.assertEqual(products[0].consumer_price, Decimal("75.63"))
+        self.assertEqual(products[0].barber_price, Decimal("67.22"))
+        self.assertEqual(products[0].distributor_price, Decimal("63.68"))
 
     def test_product_price_download(self):
         self.product.avg_cost = Decimal("100.00")

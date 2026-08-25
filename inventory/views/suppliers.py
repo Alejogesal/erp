@@ -505,6 +505,11 @@ def suppliers(request):
                     defaults={
                         "last_cost": cost_with_vat,
                         "vat_percent": iva,
+                        # El nombre tal cual lo escribe ESTE proveedor. La lista de
+                        # precios propia usa el del proveedor principal de la marca,
+                        # así que no alcanza con Product.name (que queda con el texto
+                        # del primer proveedor que creó el producto).
+                        "supplier_name": name,
                         "last_purchase_at": timezone.now(),
                     },
                 )
@@ -666,6 +671,7 @@ def suppliers(request):
                 product=product,
                 last_cost=cost_with_vat,
                 vat_percent=vat_percent,
+                supplier_name=name,
                 last_purchase_at=timezone.now(),
             )
             messages.success(request, f"Producto '{name}' creado y vinculado a {supplier.name}.")

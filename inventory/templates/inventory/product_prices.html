@@ -44,6 +44,17 @@
     .price-input::placeholder {
         color: var(--muted);
     }
+    tr.out-of-list td { opacity: 0.55; }
+    .out-badge {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+        color: var(--muted);
+        border: 1px solid #2a313c;
+        border-radius: 6px;
+        padding: 1px 6px;
+        white-space: nowrap;
+    }
 </style>
 
 <div class="actions" style="margin-bottom:16px;">
@@ -149,15 +160,25 @@
 {{ kit_data|json_script:"kit-data" }}
 <div class="card table-card">
     <div class="card-title">Precios por producto</div>
+    <p class="hint" style="margin:0 0 10px;">
+        {% if show_all %}
+            Todos los productos. Los marcados <span class="out-badge">fuera de lista</span> no se descargan:
+            el proveedor principal de esa marca no los tiene.
+            <a href="{% url 'inventory_product_prices' %}">Ver solo lo que se descarga</a>
+        {% else %}
+            Vista previa exacta de lo que se descarga: cada marca sale como la escribe su proveedor principal.
+            <a href="{% url 'inventory_product_prices' %}?todos=1">Ver también los que quedan afuera</a>
+        {% endif %}
+    </p>
     <div class="price-filter">
         <span class="hint">Buscar</span>
         <input id="price-search" type="text" placeholder="SKU, producto o marca" list="price-options">
         <datalist id="price-options">
-            {% for product in products %}
-            <option value="{{ product.sku }}"></option>
-            <option value="{{ product.name }}"></option>
-            {% if product.group %}
-            <option value="{{ product.group }}"></option>
+            {% for entry in entries %}
+            <option value="{{ entry.product.sku }}"></option>
+            <option value="{{ entry.name }}"></option>
+            {% if entry.brand %}
+            <option value="{{ entry.brand }}"></option>
             {% endif %}
             {% endfor %}
         </datalist>
@@ -175,11 +196,12 @@
             </tr>
         </thead>
         <tbody>
-            {% for product in products %}
-            <tr>
+            {% for entry in entries %}
+            {% with product=entry.product %}
+            <tr {% if not entry.in_list %}class="out-of-list"{% endif %}>
                 <td>{{ product.sku }}</td>
-                <td>{{ product.name }}</td>
-                <td>{{ product.group|default:"-" }}</td>
+                <td>{{ entry.name }}{% if not entry.in_list %} <span class="out-badge">fuera de lista</span>{% endif %}</td>
+                <td>{{ entry.brand|default:"-" }}</td>
                 <td>
                     <form id="price-form-{{ product.id }}" method="post" action="{% url 'inventory_product_prices' %}">
                         {% csrf_token %}
@@ -203,8 +225,9 @@
                     </form>
                 </td>
             </tr>
+            {% endwith %}
             {% empty %}
-            <tr><td colspan="6">Aún no hay productos cargados.</td></tr>
+            <tr><td colspan="7">Aún no hay productos en la lista.</td></tr>
             {% endfor %}
         </tbody>
     </table>

@@ -185,3 +185,138 @@ class BulkBrandSupplierTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         # La marca aparece en la tabla.
         self.assertContains(resp, "Marca1")
+
+
+class BrandListNamingTests(TestCase):
+    """La lista propia sale como la escribe el proveedor principal de la marca, y
+    nunca trae productos que ese proveedor no tiene."""
+
+    def setUp(self):
+        _reset_current_user()
+        self.user = get_user_model().objects.create_user(username="u2", password="x")
+        self.client.force_login(self.user)
+        self.aris = Supplier.objects.create(name="Aris Norma")
+        self.glm = Supplier.objects.create(name="GLM Distribuidora")
+
+    def _rows(self):
+        url = reverse("inventory_product_prices_download", args=["consumer"])
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        ws = load_workbook(BytesIO(resp.content)).active
+        return list(ws.iter_rows(min_row=2, values_only=True))
+
+    def test_name_comes_from_brand_principal_not_from_product(self):
+        # Producto creado al importar la lista de GLM: Product.name quedó con SU texto.
+        p = Product.objects.create(
+            name="Fidelite balsam caviar x900", group="FIDELITE", margin_consumer=Decimal("0.00")
+        )
+        SupplierProduct.objects.create(
+            supplier=self.glm, product=p, last_cost=Decimal("100"),
+            supplier_name="Fidelite balsam caviar x900",
+        )
+        SupplierProduct.objects.create(
+            supplier=self.aris, product=p, last_cost=Decimal("120"),
+            supplier_name="BALSAMO CAVIAR 900ML FIDELITE",
+        )
+        BrandSupplier.objects.create(group="FIDELITE", supplier=self.aris)
+        services.sync_principal_to_cheapest(p)
+
+        nombres = [r[1] for r in self._rows()]
+        self.assertEqual(nombres, ["BALSAMO CAVIAR 900ML FIDELITE"])
+
+    def test_falls_back_to_product_name_when_principal_list_not_imported(self):
+        p = Product.objects.create(name="Fidelite shampoo x300", group="FIDELITE", margin_consumer=Decimal("0.00"))
+        # Vínculo con Aris cargado a mano (sin lista importada): no hay supplier_name.
+        SupplierProduct.objects.create(supplier=self.aris, product=p, last_cost=Decimal("90"))
+        BrandSupplier.objects.create(group="FIDELITE", supplier=self.aris)
+        services.sync_principal_to_cheapest(p)
+
+        self.assertEqual([r[1] for r in self._rows()], ["Fidelite shampoo x300"])
+
+    def test_product_only_the_other_supplier_has_is_ignored(self):
+        solo_glm = Product.objects.create(name="Fidelite crema GLM", group="FIDELITE", margin_consumer=Decimal("0.00"))
+        SupplierProduct.objects.create(
+            supplier=self.glm, product=solo_glm, last_cost=Decimal("70"), supplier_name="Fidelite crema GLM",
+        )
+        ambos = Product.objects.create(name="Fidelite mascara", group="FIDELITE", margin_consumer=Decimal("0.00"))
+        SupplierProduct.objects.create(supplier=self.glm, product=ambos, last_cost=Decimal("50"))
+        SupplierProduct.objects.create(
+            supplier=self.aris, product=ambos, last_cost=Decimal("60"), supplier_name="MASCARA FIDELITE",
+        )
+        BrandSupplier.objects.create(group="FIDELITE", supplier=self.aris)
+        for p in (solo_glm, ambos):
+            services.sync_principal_to_cheapest(p)
+
+        self.assertEqual([r[1] for r in self._rows()], ["MASCARA FIDELITE"])
+
+    def test_ignores_other_supplier_even_if_default_supplier_is_stale(self):
+        # default_supplier desincronizado (apunta al principal de la marca aunque el
+        # producto no está en su lista): igual tiene que quedar afuera.
+        solo_glm = Product.objects.create(
+            name="Fidelite solo GLM", group="FIDELITE", margin_consumer=Decimal("0.00"),
+            default_supplier=self.aris,
+        )
+        SupplierProduct.objects.create(supplier=self.glm, product=solo_glm, last_cost=Decimal("70"))
+        BrandSupplier.objects.create(group="FIDELITE", supplier=self.aris)
+
+        self.assertEqual(self._rows(), [])
+
+    def test_brand_matching_ignores_case_and_spaces(self):
+        p = Product.objects.create(name="Interno", group=" Fidelite ", margin_consumer=Decimal("0.00"))
+        SupplierProduct.objects.create(
+            supplier=self.aris, product=p, last_cost=Decimal("80"), supplier_name="COMO LO ESCRIBE ARIS",
+        )
+        SupplierProduct.objects.create(supplier=self.glm, product=p, last_cost=Decimal("10"))
+        BrandSupplier.objects.create(group="FIDELITE", supplier=self.aris)
+
+        rows = self._rows()
+        self.assertEqual([r[1] for r in rows], ["COMO LO ESCRIBE ARIS"])
+        # La marca sale con un texto único (el de BrandSupplier), sin los espacios
+        # del group del producto.
+        self.assertEqual([r[0] for r in rows], ["FIDELITE"])
+
+
+class PriceListPreviewTests(TestCase):
+    """La pantalla "Lista de precios" muestra lo mismo que el Excel."""
+
+    def setUp(self):
+        _reset_current_user()
+        self.user = get_user_model().objects.create_user(username="u3", password="x")
+        self.client.force_login(self.user)
+        self.aris = Supplier.objects.create(name="Aris Norma")
+        self.glm = Supplier.objects.create(name="GLM Distribuidora")
+
+        self.ambos = Product.objects.create(
+            name="Fidelite mascara", group="FIDELITE", margin_consumer=Decimal("0.00")
+        )
+        SupplierProduct.objects.create(supplier=self.glm, product=self.ambos, last_cost=Decimal("50"))
+        SupplierProduct.objects.create(
+            supplier=self.aris, product=self.ambos, last_cost=Decimal("60"),
+            supplier_name="MASCARA FIDELITE",
+        )
+        self.solo_glm = Product.objects.create(
+            name="Fidelite crema GLM", group="FIDELITE", margin_consumer=Decimal("0.00")
+        )
+        SupplierProduct.objects.create(supplier=self.glm, product=self.solo_glm, last_cost=Decimal("70"))
+        BrandSupplier.objects.create(group="FIDELITE", supplier=self.aris)
+        for p in (self.ambos, self.solo_glm):
+            services.sync_principal_to_cheapest(p)
+
+    def _entries(self, url):
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        return resp.context["entries"]
+
+    def test_preview_matches_download(self):
+        entries = self._entries(reverse("inventory_product_prices"))
+        self.assertEqual([(e["brand"], e["name"]) for e in entries], [("FIDELITE", "MASCARA FIDELITE")])
+
+        resp = self.client.get(reverse("inventory_product_prices_download", args=["consumer"]))
+        ws = load_workbook(BytesIO(resp.content)).active
+        excel = [(r[0], r[1]) for r in ws.iter_rows(min_row=2, values_only=True)]
+        self.assertEqual([(e["brand"], e["name"]) for e in entries], excel)
+
+    def test_todos_shows_excluded_products_flagged(self):
+        entries = self._entries(reverse("inventory_product_prices") + "?todos=1")
+        by_name = {e["name"]: e["in_list"] for e in entries}
+        self.assertEqual(by_name, {"MASCARA FIDELITE": True, "Fidelite crema GLM": False})
