@@ -79,7 +79,7 @@ class Command(BaseCommand):
                 problem_brands += 1
                 continue
 
-            included, missing, unnamed, foreign_text = [], [], [], []
+            included, missing, unnamed, foreign_text, mismatched = [], [], [], [], []
             shown_name: dict[int, str] = {}
             for p in brand_products:
                 link = links_by_product[p.id].get(principal_id)
@@ -95,12 +95,19 @@ class Command(BaseCommand):
                 if not supplier_name:
                     unnamed.append(p)
                 elif supplier_name != p.name.strip():
-                    foreign_text.append((p, supplier_name))
+                    # Si al normalizar son el mismo texto, el proveedor solo lo escribe
+                    # distinto (comillas, tildes, mayúsculas) y está todo bien. Si no,
+                    # el match difuso del import pudo haber pegado la fila del proveedor
+                    # a un producto que no es ese.
+                    if _normalize_lookup_text(supplier_name) == _normalize_lookup_text(p.name):
+                        foreign_text.append((p, supplier_name))
+                    else:
+                        mismatched.append((p, supplier_name))
 
             dupes = self._duplicates(included, shown_name, fuzzy=options["similares"])
             # foreign_text es informativo: es justamente el caso que la lista ahora
-            # resuelve bien (texto del proveedor ≠ nombre interno).
-            has_problem = bool(unnamed or dupes)
+            # resuelve bien (el proveedor escribe distinto el mismo producto).
+            has_problem = bool(unnamed or dupes or mismatched)
             if not has_problem and not missing and not options["all"] and not only_brand:
                 continue
             if has_problem:
@@ -120,9 +127,16 @@ class Command(BaseCommand):
             if foreign_text:
                 self.stdout.write(
                     f"  · {len(foreign_text)} producto(s) se listan con el texto del proveedor "
-                    f"(distinto del nombre interno) — esto es lo esperado:"
+                    f"(mismo producto, otra escritura) — esto es lo esperado:"
                 )
                 self._dump(foreign_text, limit, lambda t: f"{t[1]}   [interno: {t[0].name}]")
+            if mismatched:
+                self.stdout.write(self.style.ERROR(
+                    f"  ⚠ {len(mismatched)} producto(s) donde el nombre del proveedor NO describe el "
+                    f"mismo producto que el interno: el match difuso del import pegó la fila (y su "
+                    f"precio) al producto equivocado. Revisalos uno por uno."
+                ))
+                self._dump(mismatched, limit, lambda t: f"{t[1]}   ← se pegó a: {t[0].name}")
             if missing:
                 self.stdout.write(f"  · fuera de la lista (los tiene otro proveedor, no el principal):")
                 self._dump(missing, limit, lambda p: p.name)
