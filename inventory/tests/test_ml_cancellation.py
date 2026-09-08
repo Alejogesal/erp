@@ -11,6 +11,7 @@ from django.urls import reverse
 from inventory import mercadolibre as ml
 from inventory.middleware import _current_user
 from inventory.models import (
+    Company,
     MercadoLibreConnection,
     Product,
     Sale,
@@ -27,7 +28,9 @@ class SyncOrderCancellationTests(TestCase):
     def setUp(self):
         _reset_current_user()
         self.user = get_user_model().objects.create_user(username="c", password="x")
-        self.connection = MercadoLibreConnection.objects.create(user=self.user)
+        self.connection = MercadoLibreConnection.objects.create(
+            company=Company.objects.get(name="Stylmoda"), user=self.user
+        )
         self.ml_wh = Warehouse.objects.get(type=Warehouse.WarehouseType.MERCADOLIBRE)
         self.sale = Sale.objects.create(
             warehouse=self.ml_wh, user=self.user,

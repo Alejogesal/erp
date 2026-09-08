@@ -4,6 +4,18 @@
 <h1>MercadoLibre</h1>
 <p class="subtitle">Conexión, stock y ventas sincronizadas con el depósito MERCADOLIBRE.</p>
 
+{% if companies|length > 1 %}
+<div style="display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap;">
+    {% for company in companies %}
+    <a href="?company={{ company.id }}"
+       class="pill"
+       style="{% if selected_company.id == company.id %}background:var(--accent,#2d7ff9); color:#fff; font-weight:700;{% endif %}">
+        {{ company.name }}
+    </a>
+    {% endfor %}
+</div>
+{% endif %}
+
 {% load latam_numbers %}
 <div class="cards">
     <div class="card">
@@ -21,7 +33,7 @@
                         Sin esto el stock y las ventas <strong>dejan de sincronizarse</strong> (los datos quedan congelados).
                         Reautorizá para restablecer la conexión de forma permanente.
                     </p>
-                    <a class="pill" href="{% url 'inventory_mercadolibre_connect' %}" style="display:inline-block; background:var(--negative); color:#fff;">Reautorizar ahora</a>
+                    <a class="pill" href="{% url 'inventory_mercadolibre_connect' %}?company={{ selected_company.id }}" style="display:inline-block; background:var(--negative); color:#fff;">Reautorizar ahora</a>
                 </div>
             {% elif token_health and token_health.expired %}
                 <p style="color: #f0ad4e; font-weight:600; margin-top:8px;">
@@ -52,18 +64,18 @@
                         {% endif %}
                     </p>
                     {% if not missing_credentials and token_health and not token_health.healthy %}
-                    <a href="{% url 'inventory_mercadolibre_connect' %}" style="display:inline-block; margin-top:8px; font-size:13px; color:var(--accent);">Reautorizar con MercadoLibre</a>
+                    <a href="{% url 'inventory_mercadolibre_connect' %}?company={{ selected_company.id }}" style="display:inline-block; margin-top:8px; font-size:13px; color:var(--accent);">Reautorizar con MercadoLibre</a>
                     {% endif %}
                 {% endif %}
             {% else %}
                 <p style="color: var(--muted); font-size:13px; margin-top:8px;">Esperando primer sync automático...</p>
                 {% if not missing_credentials %}
-                <a href="{% url 'inventory_mercadolibre_connect' %}" style="display:inline-block; margin-top:8px; font-size:13px; color:var(--accent);">Autorizar conexión</a>
+                <a href="{% url 'inventory_mercadolibre_connect' %}?company={{ selected_company.id }}" style="display:inline-block; margin-top:8px; font-size:13px; color:var(--accent);">Autorizar conexión</a>
                 {% endif %}
             {% endif %}
             {% if sync_age_minutes is not None and sync_age_minutes < 120 %}
             <p style="color:var(--muted); font-size:11px; margin-top:10px;">
-                El token se renueva solo. <a href="{% url 'inventory_mercadolibre_connect' %}" style="color:var(--muted);">Reautorizar</a> solo si hay errores.
+                El token se renueva solo. <a href="{% url 'inventory_mercadolibre_connect' %}?company={{ selected_company.id }}" style="color:var(--muted);">Reautorizar</a> solo si hay errores.
             </p>
             {% endif %}
             <form method="post" style="margin-top:12px;" onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='Sincronizando…';">
@@ -103,7 +115,7 @@
         {% else %}
             <p style="color:var(--muted);">Cuenta no conectada.</p>
             {% if not missing_credentials %}
-            <a class="pill" href="{% url 'inventory_mercadolibre_connect' %}" style="margin-top:10px; display:inline-block;">Conectar MercadoLibre</a>
+            <a class="pill" href="{% url 'inventory_mercadolibre_connect' %}?company={{ selected_company.id }}" style="margin-top:10px; display:inline-block;">Conectar MercadoLibre</a>
             {% endif %}
         {% endif %}
     </div>

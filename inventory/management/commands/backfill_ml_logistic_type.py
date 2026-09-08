@@ -36,18 +36,12 @@ class Command(BaseCommand):
         limit = options["limit"]
         dry_run = options["dry_run"]
 
-        connection = (
-            MercadoLibreConnection.objects.exclude(access_token="")
-            .order_by("id")
-            .first()
-        )
-        if not connection:
+        connections = list(MercadoLibreConnection.objects.exclude(access_token="").order_by("id"))
+        if not connections:
             self.stderr.write("No hay conexión de MercadoLibre configurada.")
             return
-        access_token = ml.get_valid_access_token(connection)
-        if not access_token:
-            self.stderr.write("No se pudo obtener un access token válido.")
-            return
+        connection_by_company = {c.company_id: c for c in connections if c.company_id}
+        default_connection = connections[0]
 
         User = get_user_model()
         if not User.objects.exists():
@@ -63,6 +57,12 @@ class Command(BaseCommand):
         updated = 0
         skipped = 0
         for sale in pending:
+            connection = connection_by_company.get(sale.company_id, default_connection)
+            access_token = ml.get_valid_access_token(connection)
+            if not access_token:
+                self.stderr.write(f"Orden {sale.ml_order_id}: sin access token válido para {connection}.")
+                skipped += 1
+                continue
             try:
                 order = ml._call_with_refresh(
                     connection, ml.get_order, sale.ml_order_id, access_token=access_token

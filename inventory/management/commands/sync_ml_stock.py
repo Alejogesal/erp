@@ -7,11 +7,11 @@ from inventory.models import MercadoLibreConnection
 
 
 class Command(BaseCommand):
-    help = "Sincroniza stock de MercadoLibre para la cuenta conectada."
+    help = "Sincroniza stock de MercadoLibre para todas las cuentas conectadas."
 
     def handle(self, *args, **options):
-        connection = MercadoLibreConnection.objects.first()
-        if not connection:
+        connections = list(MercadoLibreConnection.objects.exclude(access_token=""))
+        if not connections:
             self.stdout.write(self.style.ERROR("No hay conexión de MercadoLibre configurada."))
             return
 
@@ -21,30 +21,32 @@ class Command(BaseCommand):
             self.stdout.write(self.style.ERROR("No hay usuarios para ejecutar la sincronización."))
             return
 
-        ts = timezone.now().strftime("%Y-%m-%d %H:%M:%S")
-        # El sync de stock debe recorrer TODAS las publicaciones: si se trunca
-        # (ML_SYNC_MAX_ITEMS), las publicaciones fuera de la ventana quedan con
-        # stock viejo para siempre. ignore_env_limit fuerza el scan completo.
-        result = ml.sync_items_and_stock(connection, sync_user, ignore_env_limit=True)
-        if result.metrics.get("error") == "unauthorized" or (result.total_items == 0 and result.matched == 0 and not result.metrics):
-            self.stderr.write(
-                f"[{ts}] sync_ml_stock FALLÓ: token inválido o expirado — se requiere reautorizar con MercadoLibre."
-            )
-            return
-        metrics = result.metrics or {}
-        self.stdout.write(
-            f"[{ts}] Sync OK. Items: {result.total_items}, Matcheados: {result.matched}, "
-            f"Sin match: {result.unmatched}, Stock actualizado: {result.updated_stock}, "
-            f"Publicaciones corregidas en ML: {metrics.get('stock_pushed', 0)}."
-        )
-        # El detalle de lo que ML rechazó es lo único que permite arreglarlo, y
-        # este comando corre desatendido: si no queda en el log, se pierde.
-        for err in metrics.get("stock_errors") or []:
-            self.stderr.write(
-                f"[{ts}] ML rechazó {err['item_id']} ({err['title']}): {err['error']}"
-            )
-        if metrics.get("stock_unlinked_variant"):
+        for connection in connections:
+            label = connection.company.name if connection.company else (connection.nickname or f"conexión #{connection.pk}")
+            ts = timezone.now().strftime("%Y-%m-%d %H:%M:%S")
+            # El sync de stock debe recorrer TODAS las publicaciones: si se trunca
+            # (ML_SYNC_MAX_ITEMS), las publicaciones fuera de la ventana quedan con
+            # stock viejo para siempre. ignore_env_limit fuerza el scan completo.
+            result = ml.sync_items_and_stock(connection, sync_user, ignore_env_limit=True)
+            if result.metrics.get("error") == "unauthorized" or (result.total_items == 0 and result.matched == 0 and not result.metrics):
+                self.stderr.write(
+                    f"[{ts}] sync_ml_stock ({label}) FALLÓ: token inválido o expirado — se requiere reautorizar con MercadoLibre."
+                )
+                continue
+            metrics = result.metrics or {}
             self.stdout.write(
-                f"[{ts}] {metrics['stock_unlinked_variant']} publicación(es) sin variedad elegida: "
-                "no reciben stock hasta enlazarlas en el panel."
+                f"[{ts}] Sync OK ({label}). Items: {result.total_items}, Matcheados: {result.matched}, "
+                f"Sin match: {result.unmatched}, Stock actualizado: {result.updated_stock}, "
+                f"Publicaciones corregidas en ML: {metrics.get('stock_pushed', 0)}."
             )
+            # El detalle de lo que ML rechazó es lo único que permite arreglarlo, y
+            # este comando corre desatendido: si no queda en el log, se pierde.
+            for err in metrics.get("stock_errors") or []:
+                self.stderr.write(
+                    f"[{ts}] ({label}) ML rechazó {err['item_id']} ({err['title']}): {err['error']}"
+                )
+            if metrics.get("stock_unlinked_variant"):
+                self.stdout.write(
+                    f"[{ts}] ({label}) {metrics['stock_unlinked_variant']} publicación(es) sin variedad elegida: "
+                    "no reciben stock hasta enlazarlas en el panel."
+                )

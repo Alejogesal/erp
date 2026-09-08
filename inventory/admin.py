@@ -1,12 +1,35 @@
 from django.contrib import admin
 
-from .models import AuditLog, Company, Product, Stock, StockMovement, Warehouse
+from .models import (
+    AuditLog,
+    Company,
+    MercadoLibreConnection,
+    MercadoLibreItem,
+    Product,
+    Stock,
+    StockMovement,
+    Warehouse,
+)
 
 
 @admin.register(Company)
 class CompanyAdmin(admin.ModelAdmin):
     list_display = ("name", "cuit", "fiscal_condition", "is_active")
     search_fields = ("name", "cuit")
+
+
+@admin.register(MercadoLibreConnection)
+class MercadoLibreConnectionAdmin(admin.ModelAdmin):
+    list_display = ("company", "nickname", "ml_user_id", "user", "last_sync_at")
+    list_filter = ("company",)
+    readonly_fields = ("access_token", "refresh_token")
+
+
+@admin.register(MercadoLibreItem)
+class MercadoLibreItemAdmin(admin.ModelAdmin):
+    list_display = ("item_id", "title", "company", "status", "logistic_type", "available_quantity")
+    list_filter = ("company", "status", "logistic_type")
+    search_fields = ("item_id", "title")
 
 
 @admin.register(Warehouse)

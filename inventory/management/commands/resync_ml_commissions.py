@@ -41,10 +41,12 @@ class Command(BaseCommand):
             User.objects.filter(is_superuser=True).order_by("id").first()
             or User.objects.order_by("id").first()
         )
-        connection = MercadoLibreConnection.objects.exclude(access_token="").first()
-        if not connection:
+        connections = list(MercadoLibreConnection.objects.exclude(access_token=""))
+        if not connections:
             self.stderr.write(self.style.ERROR("No hay conexión de MercadoLibre configurada."))
             return
+        connection_by_company = {c.company_id: c for c in connections if c.company_id}
+        default_connection = connections[0]
         if not user:
             self.stderr.write(self.style.ERROR("No hay usuarios disponibles."))
             return
@@ -77,6 +79,7 @@ class Command(BaseCommand):
         updated = skipped = errors = 0
         for i, sale in enumerate(sales, 1):
             before_c, before_t = sale.ml_commission_total, sale.ml_tax_total
+            connection = connection_by_company.get(sale.company_id, default_connection)
             try:
                 ok, reason = ml.sync_order(connection, sale.ml_order_id, user)
             except Exception as exc:  # noqa: BLE001

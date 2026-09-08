@@ -15,6 +15,7 @@ from django.test import TestCase
 
 from inventory import mercadolibre as ml
 from inventory.models import (
+    Company,
     MercadoLibreConnection,
     MercadoLibreItem,
     Product,
@@ -40,7 +41,9 @@ def _dispatch(payments_result):
 class MLCommissionTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user(username="ml", password="x")
-        self.connection = MercadoLibreConnection.objects.create(user=self.user)
+        self.connection = MercadoLibreConnection.objects.create(
+            company=Company.objects.get(name="Stylmoda"), user=self.user
+        )
         self.product = Product.objects.create(sku="P1", name="Producto ML")
         MercadoLibreItem.objects.create(item_id="MLA123", product=self.product)
 

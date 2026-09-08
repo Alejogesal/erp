@@ -1005,7 +1005,9 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
         if exc.code == 401:
             return SyncResult(0, 0, 0, 0, {"error": "unauthorized"})
         raise
-    ml_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.MERCADOLIBRE).first()
+    ml_wh = Warehouse.objects.filter(
+        type=Warehouse.WarehouseType.MERCADOLIBRE, company=connection.company
+    ).first()
     comun_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
     total = matched = unmatched = updated_stock = 0
     # Reconciliación ERP -> ML, al final del barrido (ver reconcile_stock_to_ml).
@@ -1062,6 +1064,7 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
         ml_item, _created = MercadoLibreItem.objects.update_or_create(
             item_id=item_id,
             defaults={
+                "company": connection.company,
                 "title": title,
                 "available_quantity": available,
                 "full_quantity": full_qty,
@@ -1254,20 +1257,21 @@ def maybe_start_background_sync(user) -> bool:
         # Aunque no toque sincronizar, no volver a consultar por un minuto.
         _next_sync_check = now + 60
     try:
-        connection = _default_connection()
-        if not connection or not connection.access_token:
-            return False
-        claim = _claim_sync_slot(connection, sync_interval_minutes())
-        if claim is None:
-            return False
-        thread = threading.Thread(
-            target=_run_sync_in_background,
-            args=(connection.pk, user.pk, claim[0]),
-            name="ml-auto-sync",
-            daemon=True,
-        )
-        thread.start()
-        return True
+        started_any = False
+        interval = sync_interval_minutes()
+        for connection in MercadoLibreConnection.objects.exclude(access_token=""):
+            claim = _claim_sync_slot(connection, interval)
+            if claim is None:
+                continue
+            thread = threading.Thread(
+                target=_run_sync_in_background,
+                args=(connection.pk, user.pk, claim[0]),
+                name="ml-auto-sync",
+                daemon=True,
+            )
+            thread.start()
+            started_any = True
+        return started_any
     except Exception:
         logger.exception("ML: no se pudo lanzar el sync automático")
         return False
@@ -1714,7 +1718,9 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
     reference = f"ML ORDER {order_id}"
     existing_sale = Sale.objects.filter(reference=reference).first()
 
-    ml_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.MERCADOLIBRE).first()
+    ml_wh = Warehouse.objects.filter(
+        type=Warehouse.WarehouseType.MERCADOLIBRE, company=connection.company
+    ).first()
     if not ml_wh:
         return False, "missing_warehouse"
 
@@ -1746,6 +1752,7 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
             MercadoLibreItem.objects.update_or_create(
                 item_id=item_id,
                 defaults={
+                    "company": connection.company,
                     "title": title,
                     "available_quantity": available,
                     "status": status,
@@ -1870,6 +1877,7 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
 
     sale = Sale.objects.create(
         warehouse=ml_wh,
+        company=connection.company,
         audience=Customer.Audience.CONSUMER,
         total=total_amount,
         reference=reference,

@@ -4,6 +4,17 @@
 {% block content %}
 <h1>Stock</h1>
 <p class="subtitle">Listado de productos por depósito.</p>
+{% if companies|length > 1 %}
+<div style="display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap;">
+    {% for company in companies %}
+    <a href="?company={{ company.id }}"
+       class="pill"
+       style="{% if selected_company.id == company.id %}background:var(--accent,#2d7ff9); color:#fff; font-weight:700;{% endif %}">
+        {{ company.name }}
+    </a>
+    {% endfor %}
+</div>
+{% endif %}
 <style>
     .stock-filter {
         display: flex;

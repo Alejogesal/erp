@@ -19,6 +19,7 @@ from urllib.error import HTTPError
 from .. import mercadolibre as ml
 from .. import services
 from ..models import (
+    Company,
     MercadoLibreConnection,
     MercadoLibreItem,
     MercadoLibreNotification,
@@ -37,6 +38,11 @@ def mercadolibre_connect(request):
     if not settings.ML_CLIENT_ID or not settings.ML_CLIENT_SECRET or not settings.ML_REDIRECT_URI:
         messages.error(request, "Faltan credenciales de MercadoLibre en las variables de entorno.")
         return redirect("inventory_mercadolibre_dashboard")
+    company_id = (request.GET.get("company") or "").strip()
+    if company_id:
+        request.session["ml_connect_company_id"] = company_id
+    else:
+        request.session.pop("ml_connect_company_id", None)
     state = secrets.token_urlsafe(16)
     request.session["ml_state"] = state
     return redirect(ml.get_authorize_url(state))
@@ -81,7 +87,16 @@ def mercadolibre_callback(request):
         messages.error(request, "No se pudo completar la conexión con MercadoLibre.")
         return redirect("inventory_mercadolibre_dashboard")
 
-    connection, _ = MercadoLibreConnection.objects.get_or_create(user=request.user)
+    company_id = request.session.pop("ml_connect_company_id", None)
+    company = Company.objects.filter(pk=company_id).first() if company_id else None
+    if not company:
+        company = Company.objects.filter(is_active=True).order_by("name").first()
+    if company:
+        connection, _ = MercadoLibreConnection.objects.get_or_create(
+            company=company, defaults={"user": request.user}
+        )
+    else:
+        connection, _ = MercadoLibreConnection.objects.get_or_create(user=request.user)
     connection.access_token = access_token
     connection.refresh_token = refresh_token
     connection.expires_at = timezone.now() + timedelta(seconds=expires_in) if expires_in else None
@@ -99,9 +114,14 @@ def mercadolibre_callback(request):
 @require_http_methods(["GET", "POST"])
 def mercadolibre_dashboard(request):
     missing_credentials = not settings.ML_CLIENT_ID or not settings.ML_CLIENT_SECRET or not settings.ML_REDIRECT_URI
+    companies = list(Company.objects.filter(is_active=True).order_by("name"))
+    company_id = (request.GET.get("company") or request.POST.get("company") or "").strip()
+    selected_company = next((c for c in companies if str(c.id) == company_id), None)
+    if not selected_company:
+        selected_company = companies[0] if companies else None
     try:
-        connection = MercadoLibreConnection.objects.filter(user=request.user).first()
-        items_qs = MercadoLibreItem.objects.select_related("product", "variant")
+        connection = MercadoLibreConnection.objects.filter(company=selected_company).first()
+        items_qs = MercadoLibreItem.objects.filter(company=selected_company).select_related("product", "variant")
     except OperationalError:
         messages.error(request, "Faltan tablas de MercadoLibre. Ejecutá migrate y recargá.")
         connection = None
@@ -310,7 +330,8 @@ def mercadolibre_dashboard(request):
                             request,
                             "No hay token válido de MercadoLibre. Volvé a conectar la cuenta.",
                         )
-                        return redirect("inventory_mercadolibre_dashboard")
+                        company_qs = f"?company={selected_company.id}" if selected_company else ""
+                        return redirect(f"{request.path}{company_qs}")
                     item = ml._call_with_refresh(connection, ml.get_item, item_id, access_token=access_token)
                     title = item.get("title", "") or ""
                     status = item.get("status", "") or ""
@@ -328,6 +349,7 @@ def mercadolibre_dashboard(request):
                     MercadoLibreItem.objects.update_or_create(
                         item_id=item_id,
                         defaults={
+                            "company": connection.company,
                             "title": title,
                             "available_quantity": available,
                             "status": status,
@@ -537,7 +559,7 @@ def mercadolibre_dashboard(request):
     # Detect duplicate ML sales (same ml_order_id appearing more than once)
     from django.db.models import Count
     duplicate_order_ids = (
-        Sale.objects.filter(ml_order_id__gt="")
+        Sale.objects.filter(ml_order_id__gt="", company=selected_company)
         .values("ml_order_id")
         .annotate(cnt=Count("id"))
         .filter(cnt__gt=1)
@@ -562,7 +584,7 @@ def mercadolibre_dashboard(request):
         if group:
             duplicate_sales.append(group)
 
-    fraud_sales = Sale.objects.filter(ml_fraud_risk=True).order_by("-created_at")[:20]
+    fraud_sales = Sale.objects.filter(ml_fraud_risk=True, company=selected_company).order_by("-created_at")[:20]
 
     import math as _math
 
@@ -610,6 +632,7 @@ def mercadolibre_dashboard(request):
     stock_groups: dict = {}
     for ml_item in MercadoLibreItem.objects.select_related("product").filter(
         status__in=["active", "paused"],
+        company=selected_company,
     ):
         up = (ml_item.user_product_id or "").strip()
         key = f"up:{up}" if up else f"item:{ml_item.item_id}"
@@ -740,6 +763,7 @@ def mercadolibre_dashboard(request):
         MercadoLibreItem.objects.filter(
             variant__isnull=True,
             product__variants__isnull=False,
+            company=selected_company,
         )
         .exclude(status="closed")
         .distinct()
@@ -786,7 +810,9 @@ def mercadolibre_dashboard(request):
     now = timezone.now()
     thirty_days_ago = now - timedelta(days=30)
     this_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    ml_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.MERCADOLIBRE).first()
+    ml_wh = Warehouse.objects.filter(
+        type=Warehouse.WarehouseType.MERCADOLIBRE, company=selected_company
+    ).first()
     db_metrics = {}
     if ml_wh:
         def _agg(qs):
@@ -797,7 +823,7 @@ def mercadolibre_dashboard(request):
                 "commission": r["commission"] or _Dec("0.00"),
                 "taxes": r["taxes"] or _Dec("0.00"),
             }
-        base = Sale.objects.filter(warehouse=ml_wh)
+        base = Sale.objects.filter(warehouse=ml_wh, company=selected_company)
         db_metrics["month"] = _agg(base.filter(created_at__gte=this_month_start))
         db_metrics["days30"] = _agg(base.filter(created_at__gte=thirty_days_ago))
         _meses = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]
@@ -807,6 +833,8 @@ def mercadolibre_dashboard(request):
         request,
         "inventory/mercadolibre_dashboard.html",
         {
+            "companies": companies,
+            "selected_company": selected_company,
             "connection": connection,
             "items": items,
             "missing_credentials": missing_credentials,
@@ -834,12 +862,14 @@ def mercadolibre_dashboard(request):
 @login_required
 @require_http_methods(["GET", "POST"])
 def mercadolibre_messages(request, order_id):
-    connection = MercadoLibreConnection.objects.filter(user=request.user).first()
+    sale = Sale.objects.filter(ml_order_id=str(order_id)).first()
+    if sale and sale.company:
+        connection = MercadoLibreConnection.objects.filter(company=sale.company).first()
+    else:
+        connection = MercadoLibreConnection.objects.first()
     if not connection or not connection.access_token:
         messages.error(request, "Cuenta de MercadoLibre no conectada.")
         return redirect("inventory_mercadolibre_dashboard")
-
-    sale = Sale.objects.filter(ml_order_id=str(order_id)).first()
     conversation = {}
     send_error = None
 

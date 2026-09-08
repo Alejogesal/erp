@@ -19,6 +19,7 @@ from django.urls import reverse
 from inventory import mercadolibre as ml
 from inventory.middleware import _current_user
 from inventory.models import (
+    Company,
     MercadoLibreConnection,
     MercadoLibreItem,
     Product,
@@ -33,6 +34,12 @@ from inventory.models import (
 
 def _reset_current_user():
     _current_user.user = None
+
+
+def _stylmoda():
+    # La migración 0066 crea esta Company como backfill de la única cuenta
+    # que existía antes del modelo multi-cuenta.
+    return Company.objects.get(name="Stylmoda")
 
 
 class ShipmentParsingTests(TestCase):
@@ -81,7 +88,7 @@ class SyncOrderLogisticsTests(TestCase):
     def setUp(self):
         _reset_current_user()
         self.user = get_user_model().objects.create_user(username="flex", password="x")
-        self.connection = MercadoLibreConnection.objects.create(user=self.user, ml_user_id="777")
+        self.connection = MercadoLibreConnection.objects.create(company=_stylmoda(), user=self.user, ml_user_id="777")
         self.ml_wh = Warehouse.objects.get(type=Warehouse.WarehouseType.MERCADOLIBRE)
         self.comun_wh = Warehouse.objects.get(type=Warehouse.WarehouseType.COMUN)
         self.product = Product.objects.create(name="Shampoo", sku="SH1")
@@ -241,7 +248,7 @@ class PushComunStockTests(TestCase):
     def setUp(self):
         _reset_current_user()
         self.user = get_user_model().objects.create_user(username="push", password="x")
-        MercadoLibreConnection.objects.create(user=self.user, access_token="tok", ml_user_id="777")
+        MercadoLibreConnection.objects.create(company=_stylmoda(), user=self.user, access_token="tok", ml_user_id="777")
         self.comun_wh = Warehouse.objects.get(type=Warehouse.WarehouseType.COMUN)
         self.product = Product.objects.create(name="Crema", sku="CR1")
         Stock.objects.create(product=self.product, warehouse=self.comun_wh, quantity=Decimal("7"))
@@ -405,7 +412,7 @@ class StockReconciliationTests(TestCase):
         _reset_current_user()
         self.user = get_user_model().objects.create_user(username="rec", password="x")
         self.connection = MercadoLibreConnection.objects.create(
-            user=self.user, access_token="tok", ml_user_id="777"
+            company=_stylmoda(), user=self.user, access_token="tok", ml_user_id="777"
         )
         self.comun_wh = Warehouse.objects.get(type=Warehouse.WarehouseType.COMUN)
         self.product = Product.objects.create(name="Cera", sku="CE1")
@@ -707,7 +714,7 @@ class StockBreakdownTests(TestCase):
     def setUp(self):
         _reset_current_user()
         self.user = get_user_model().objects.create_user(username="brk", password="x")
-        self.connection = MercadoLibreConnection.objects.create(user=self.user, ml_user_id="777")
+        self.connection = MercadoLibreConnection.objects.create(company=_stylmoda(), user=self.user, ml_user_id="777")
 
     def _breakdown(self, item, stock_payload=None):
         def dispatch(connection, func, *args, **kwargs):
@@ -1062,7 +1069,7 @@ class VariantAwareStockPushTests(TestCase):
         _reset_current_user()
         self.user = get_user_model().objects.create_user(username="varpush", password="x")
         self.connection = MercadoLibreConnection.objects.create(
-            user=self.user, access_token="tok", ml_user_id="777"
+            company=_stylmoda(), user=self.user, access_token="tok", ml_user_id="777"
         )
         self.comun_wh = Warehouse.objects.get(type=Warehouse.WarehouseType.COMUN)
         self.product = Product.objects.create(name="Mascara", sku="MK1")
@@ -1144,7 +1151,7 @@ class VariantAwareReconcileTests(TestCase):
         _reset_current_user()
         self.user = get_user_model().objects.create_user(username="varrec", password="x")
         self.connection = MercadoLibreConnection.objects.create(
-            user=self.user, access_token="tok", ml_user_id="777"
+            company=_stylmoda(), user=self.user, access_token="tok", ml_user_id="777"
         )
         self.comun_wh = Warehouse.objects.get(type=Warehouse.WarehouseType.COMUN)
         self.product = Product.objects.create(name="Mascara", sku="MK2")
@@ -1208,7 +1215,7 @@ class MlSaleDiscountsVariantTests(TestCase):
     def setUp(self):
         _reset_current_user()
         self.user = get_user_model().objects.create_user(username="varsale", password="x")
-        self.connection = MercadoLibreConnection.objects.create(user=self.user, ml_user_id="777")
+        self.connection = MercadoLibreConnection.objects.create(company=_stylmoda(), user=self.user, ml_user_id="777")
         self.comun_wh = Warehouse.objects.get(type=Warehouse.WarehouseType.COMUN)
         self.product = Product.objects.create(name="Mascara", sku="MK3")
         self.cachos = ProductVariant.objects.create(
@@ -1278,7 +1285,7 @@ class LinkVariantFromPanelTests(TestCase):
         )
         self.client.force_login(self.user)
         # Sin access_token: el panel no sale a la API de ML durante el test.
-        MercadoLibreConnection.objects.create(user=self.user, ml_user_id="777")
+        MercadoLibreConnection.objects.create(company=_stylmoda(), user=self.user, ml_user_id="777")
         self.comun_wh = Warehouse.objects.get(type=Warehouse.WarehouseType.COMUN)
         self.product = Product.objects.create(name="Mascara", sku="MK4")
         self.cachos = ProductVariant.objects.create(
@@ -1288,7 +1295,7 @@ class LinkVariantFromPanelTests(TestCase):
         Stock.objects.create(product=self.product, warehouse=self.comun_wh, quantity=Decimal("7"))
         self.item = MercadoLibreItem.objects.create(
             item_id="MLA1", title="Skala Mais Cachos 1kg", product=self.product,
-            logistic_type="self_service", flex_quantity=7,
+            logistic_type="self_service", flex_quantity=7, company=_stylmoda(),
         )
 
     def _post(self, **extra):
@@ -1357,7 +1364,7 @@ class StockAlignmentReportTests(TestCase):
     def setUp(self):
         _reset_current_user()
         self.user = get_user_model().objects.create_user(username="align", password="x")
-        MercadoLibreConnection.objects.create(user=self.user, access_token="tok", ml_user_id="777")
+        MercadoLibreConnection.objects.create(company=_stylmoda(), user=self.user, access_token="tok", ml_user_id="777")
         self.comun_wh = Warehouse.objects.get(type=Warehouse.WarehouseType.COMUN)
         self.product = Product.objects.create(name="Aurill", sku="AU1")
         Stock.objects.create(product=self.product, warehouse=self.comun_wh, quantity=Decimal("12"))
@@ -1462,7 +1469,7 @@ class SyncReportsStockOutcomeTests(TestCase):
         _reset_current_user()
         self.user = get_user_model().objects.create_user(username="rep", password="x")
         self.connection = MercadoLibreConnection.objects.create(
-            user=self.user, access_token="tok", ml_user_id="777"
+            company=_stylmoda(), user=self.user, access_token="tok", ml_user_id="777"
         )
         self.comun_wh = Warehouse.objects.get(type=Warehouse.WarehouseType.COMUN)
         self.product = Product.objects.create(name="Cera", sku="CE9")
@@ -1525,7 +1532,7 @@ class AutoSyncTriggerTests(TestCase):
             username="auto", password="x", is_superuser=True
         )
         self.connection = MercadoLibreConnection.objects.create(
-            user=self.user, access_token="tok", ml_user_id="777"
+            company=_stylmoda(), user=self.user, access_token="tok", ml_user_id="777"
         )
 
     def _try_start(self):
