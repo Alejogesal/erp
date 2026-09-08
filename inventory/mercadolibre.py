@@ -1492,35 +1492,54 @@ def reconcile_stock_to_ml(ml_items, access_token) -> dict:
     return report
 
 
-def push_comun_stock_to_ml(products, connection=None) -> int:
+def push_comun_stock_to_ml(products) -> int:
     """Empujar el stock del depósito propio a las publicaciones de esos productos.
 
-    COMUN es la fuente de verdad para todo lo que no sea Full: da igual si la
-    venta entró por MercadoLibre (Flex/Colecta/Correo) o por fuera, el stock
-    publicado se recalcula desde el mismo número. Como se manda el valor
-    absoluto y no un delta, repetir el push es inofensivo. En los productos con
-    variedades el número sale de la variedad enlazada a cada publicación.
+    COMUN es la fuente de verdad para todo lo que no sea Full, y es un pool
+    COMPARTIDO entre las cuentas que venden por ME común/Flex: una venta de
+    Stylmoda tiene que reflejarse también en la publicación de KodaraStyl del
+    mismo producto, y viceversa. Por eso acá se agrupan las publicaciones
+    matcheadas por la cuenta dueña de cada una y se empuja cada grupo con el
+    access token de SU conexión — no existe un token único que sirva para
+    todas. Da igual si la venta que originó el cambio entró por MercadoLibre
+    (cualquiera de las cuentas) o por fuera del sistema.
 
-    Qué se hace con cada publicación lo decide stock_alignment_rows; acá solo se
-    juntan las publicaciones de los productos recibidos.
+    Como se manda el valor absoluto y no un delta, repetir el push es
+    inofensivo. En los productos con variedades el número sale de la
+    variedad enlazada a cada publicación.
 
-    Devuelve la cantidad de publicaciones actualizadas.
+    Qué se hace con cada publicación lo decide stock_alignment_rows; acá solo
+    se agrupan las publicaciones de los productos recibidos por cuenta.
+
+    Devuelve la cantidad de publicaciones actualizadas (todas las cuentas).
     """
-    connection = connection or _default_connection()
-    if not connection or not connection.access_token:
-        return 0
-    access_token = get_valid_access_token(connection)
-    if not access_token:
-        return 0
     product_ids = {product.id for product in products}
     if not product_ids:
         return 0
     ml_items = list(MercadoLibreItem.objects.filter(product_id__in=product_ids))
     if not ml_items:
         return 0
-    rows = stock_alignment_rows(ml_items)
-    pushed, _failed = apply_stock_alignment(rows, access_token)
-    return pushed
+
+    items_by_company: dict[int | None, list] = {}
+    for item in ml_items:
+        items_by_company.setdefault(item.company_id, []).append(item)
+
+    pushed_total = 0
+    for company_id, company_items in items_by_company.items():
+        connection = (
+            MercadoLibreConnection.objects.filter(company_id=company_id).first()
+            if company_id
+            else _default_connection()
+        )
+        if not connection or not connection.access_token:
+            continue
+        access_token = get_valid_access_token(connection)
+        if not access_token:
+            continue
+        rows = stock_alignment_rows(company_items)
+        pushed, _failed = apply_stock_alignment(rows, access_token)
+        pushed_total += pushed
+    return pushed_total
 
 
 def _resolve_shipment_info(connection, order: dict, access_token: str) -> dict:
@@ -1917,12 +1936,15 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
     # de COMUN igual que una venta mostrador.
     if seller_fulfilled:
         _apply_ml_stock_exit(sale, matched_items, user)
-        # Reflejar el COMUN ya descontado en las publicaciones. ML normalmente ya
-        # bajó su propio available_quantity al concretarse la venta, así que esto
-        # suele ser un no-op; sirve para corregir desvíos (ventas por fuera de
-        # ML, ajustes manuales) sin esperar al sync completo de items.
+        # Reflejar el COMUN ya descontado en las publicaciones de TODAS las
+        # cuentas que lo comparten (no solo la de esta orden): una venta de
+        # Stylmoda tiene que bajarle el stock también a la publicación
+        # equivalente de KodaraStyl. ML normalmente ya bajó su propio
+        # available_quantity al concretarse la venta, así que esto suele ser
+        # un no-op; sirve para corregir desvíos (ventas por fuera de ML,
+        # ajustes manuales, la otra cuenta) sin esperar al sync completo.
         try:
-            push_comun_stock_to_ml([p for p, *_ in matched_items], connection=connection)
+            push_comun_stock_to_ml([p for p, *_ in matched_items])
         except Exception:
             pass
 

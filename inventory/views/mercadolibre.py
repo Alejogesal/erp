@@ -423,7 +423,7 @@ def mercadolibre_dashboard(request):
                                 )
                                 pushed = 0
                                 try:
-                                    pushed = ml.push_comun_stock_to_ml([product], connection=connection)
+                                    pushed = ml.push_comun_stock_to_ml([product])
                                 except Exception as exc:
                                     messages.error(request, f"Match guardado, pero falló el push a ML: {exc}")
                                 messages.success(
