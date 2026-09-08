@@ -5,16 +5,49 @@ from django.db import models
 from django.utils import timezone
 
 
+class Company(models.Model):
+    """Empresa/cuenta de MercadoLibre (Stylmoda, KodaraStyl, Pinkrevolution, ...).
+
+    Cada una es una razón social distinta (CUIT propio) con su propia
+    conexión de MercadoLibre. El depósito COMUN es compartido entre las
+    empresas que venden por ME común/Flex, así que su stock no se etiqueta
+    con una company: la etiqueta vive en la venta/compra, no en el depósito.
+    """
+
+    name = models.CharField(max_length=100, unique=True)
+    cuit = models.CharField(max_length=20, blank=True, default="")
+    fiscal_condition = models.CharField(max_length=50, blank=True, default="")
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return self.name
+
+
 class Warehouse(models.Model):
     class WarehouseType(models.TextChoices):
         MERCADOLIBRE = "MERCADOLIBRE", "MercadoLibre"
         COMUN = "COMUN", "Comun"
 
     name = models.CharField(max_length=100)
-    type = models.CharField(max_length=20, choices=WarehouseType.choices, unique=True)
+    type = models.CharField(max_length=20, choices=WarehouseType.choices)
+    company = models.ForeignKey(
+        Company,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="warehouses",
+        help_text="Dueña del depósito Full de esta cuenta. En blanco para el depósito COMUN, que es compartido.",
+    )
 
     class Meta:
         ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(fields=["type", "company"], name="warehouse_type_company_unique"),
+        ]
 
     def __str__(self) -> str:
         return f"{self.name} ({self.type})"
@@ -412,7 +445,19 @@ class MercadoLibreNotification(models.Model):
 
 
 class MercadoLibreConnection(models.Model):
-    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ml_connection")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="ml_connections",
+        help_text="Usuario que conectó la cuenta. Ya no identifica la cuenta: eso lo hace company.",
+    )
+    company = models.OneToOneField(
+        Company,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="ml_connection",
+    )
     access_token = models.TextField(blank=True, default="")
     refresh_token = models.TextField(blank=True, default="")
     expires_at = models.DateTimeField(null=True, blank=True)
@@ -433,6 +478,14 @@ class MercadoLibreConnection(models.Model):
 
 class MercadoLibreItem(models.Model):
     item_id = models.CharField(max_length=50, unique=True)
+    company = models.ForeignKey(
+        Company,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="ml_items",
+        help_text="Cuenta de MercadoLibre dueña de esta publicación.",
+    )
     title = models.CharField(max_length=255, blank=True, default="")
     status = models.CharField(max_length=50, blank=True, default="")
     permalink = models.URLField(max_length=500, blank=True, default="")
@@ -499,6 +552,14 @@ class MercadoLibreItem(models.Model):
 class Purchase(models.Model):
     supplier = models.ForeignKey(Supplier, on_delete=models.SET_NULL, null=True, blank=True, related_name="purchases")
     warehouse = models.ForeignKey(Warehouse, on_delete=models.PROTECT, related_name="purchases")
+    company = models.ForeignKey(
+        Company,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="purchases",
+        help_text="Razón social a la que se imputa esta compra.",
+    )
     total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     discount_percent = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0.00"))
     shipping_cost = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
@@ -581,6 +642,14 @@ class Sale(models.Model):
 
     customer = models.ForeignKey(Customer, on_delete=models.SET_NULL, null=True, blank=True, related_name="sales")
     warehouse = models.ForeignKey(Warehouse, on_delete=models.PROTECT, related_name="sales")
+    company = models.ForeignKey(
+        Company,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="sales",
+        help_text="Razón social bajo la que se factura esta venta. Se completa sola en ventas ML; en ventas propias se elige a mano.",
+    )
     audience = models.CharField(max_length=20, choices=Customer.Audience.choices, default=Customer.Audience.CONSUMER)
     total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     discount_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))

@@ -1,11 +1,18 @@
 from django.contrib import admin
 
-from .models import AuditLog, Product, Stock, StockMovement, Warehouse
+from .models import AuditLog, Company, Product, Stock, StockMovement, Warehouse
+
+
+@admin.register(Company)
+class CompanyAdmin(admin.ModelAdmin):
+    list_display = ("name", "cuit", "fiscal_condition", "is_active")
+    search_fields = ("name", "cuit")
 
 
 @admin.register(Warehouse)
 class WarehouseAdmin(admin.ModelAdmin):
-    list_display = ("name", "type")
+    list_display = ("name", "type", "company")
+    list_filter = ("company",)
     search_fields = ("name", "type")
 
 
