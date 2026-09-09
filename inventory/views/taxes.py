@@ -5,10 +5,12 @@ from decimal import Decimal
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.utils import timezone
 
 from django.db import models
-from ..models import AFIPInvoice, IVAPayment, PurchaseItem, Sale, SaleItem, TaxExpense, Warehouse
+from django.db.models import Q
+from ..models import AFIPInvoice, Company, IVAPayment, PurchaseItem, Sale, SaleItem, TaxExpense, Warehouse
 from .forms import IVAPaymentForm, TaxExpenseForm
 from .afip import _parse_afip_xlsx
 
@@ -151,6 +153,18 @@ def _calc_debito(ml_items_qs, common_items_qs):
 
 @login_required
 def taxes_view(request):
+    companies = list(Company.objects.filter(is_active=True).order_by("name"))
+    company_id = (request.GET.get("company") or request.POST.get("company") or "").strip()
+    selected_company = next((c for c in companies if str(c.id) == company_id), None)
+    if not selected_company:
+        selected_company = companies[0] if companies else None
+
+    def _redirect_taxes():
+        url = reverse("inventory_taxes")
+        if selected_company:
+            url += f"?company={selected_company.id}"
+        return redirect(url)
+
     tax_form = TaxExpenseForm()
     iva_payment_form = IVAPaymentForm()
     afip_import_msg = None
@@ -164,12 +178,12 @@ def taxes_view(request):
                 messages.success(request, "Comprobante eliminado.")
             else:
                 messages.error(request, "No se encontró el comprobante.")
-            return redirect("inventory_taxes")
+            return _redirect_taxes()
 
         if action == "delete_all_afip":
-            count, _ = AFIPInvoice.objects.all().delete()
+            count, _ = AFIPInvoice.objects.filter(company=selected_company).delete()
             messages.success(request, f"Se eliminaron {count} comprobantes AFIP.")
-            return redirect("inventory_taxes")
+            return _redirect_taxes()
 
         if action == "delete_tax":
             tax_id = request.POST.get("tax_id")
@@ -178,7 +192,7 @@ def taxes_view(request):
                 messages.success(request, "Gasto eliminado.")
             else:
                 messages.error(request, "No se encontró el gasto.")
-            return redirect("inventory_taxes")
+            return _redirect_taxes()
 
         if action == "delete_iva_payment":
             pk = request.POST.get("payment_id")
@@ -187,22 +201,26 @@ def taxes_view(request):
                 messages.success(request, "Pago de IVA eliminado.")
             else:
                 messages.error(request, "No se encontró el pago.")
-            return redirect("inventory_taxes")
+            return _redirect_taxes()
 
         if action == "add_iva_payment":
             iva_payment_form = IVAPaymentForm(request.POST)
             if iva_payment_form.is_valid():
-                iva_payment_form.save()
+                payment = iva_payment_form.save(commit=False)
+                payment.company = selected_company
+                payment.save()
                 messages.success(request, "Pago de IVA registrado.")
-                return redirect("inventory_taxes")
+                return _redirect_taxes()
             messages.error(request, "Revisá los datos del pago de IVA.")
 
         elif action == "import_afip":
             upload = request.FILES.get("file")
             if not upload:
                 afip_import_msg = ("error", "Seleccioná un archivo .xlsx.")
+            elif not selected_company:
+                afip_import_msg = ("error", "Creá una empresa antes de importar comprobantes.")
             else:
-                created, duplicates, filtered, errors, file_err = _parse_afip_xlsx(upload)
+                created, duplicates, filtered, errors, file_err = _parse_afip_xlsx(upload, company=selected_company)
                 if file_err:
                     afip_import_msg = ("error", file_err)
                 else:
@@ -218,17 +236,22 @@ def taxes_view(request):
         else:
             tax_form = TaxExpenseForm(request.POST)
             if tax_form.is_valid():
-                tax_form.save()
+                expense = tax_form.save(commit=False)
+                expense.company = None if tax_form.cleaned_data.get("general") else selected_company
+                expense.save()
                 messages.success(request, "Gasto registrado.")
-                return redirect("inventory_taxes")
+                return _redirect_taxes()
             messages.error(request, "Revisá los datos del gasto.")
 
-    taxes = TaxExpense.objects.order_by("-paid_at", "-id")
-    iva_payments = IVAPayment.objects.all()
+    taxes = TaxExpense.objects.filter(
+        Q(company=selected_company) | Q(company__isnull=True)
+    ).order_by("-paid_at", "-id")
+    iva_payments = IVAPayment.objects.filter(company=selected_company)
 
     # ── AFIP: resumen de comprobantes importados ──────────────────────────────
     afip_invoices = AFIPInvoice.objects.filter(
-        tipo_codigo__in=AFIPInvoice.CREDITO_TIPOS
+        company=selected_company,
+        tipo_codigo__in=AFIPInvoice.CREDITO_TIPOS,
     ).order_by("-date")
     use_afip = afip_invoices.exists()
     afip_count = afip_invoices.count()
@@ -238,20 +261,25 @@ def taxes_view(request):
     credito_start_dt = timezone.make_aware(datetime.combine(CREDITO_START_DATE, time.min))
     debito_start_dt = timezone.make_aware(datetime.combine(DEBITO_START_DATE, time.min))
 
+    # Los gastos "generales" (sin company) son compartidos: cuentan para el
+    # crédito fiscal de cualquier cuenta que se esté mirando, además de los
+    # propios de esa cuenta.
     g_expenses = (
-        TaxExpense.objects.filter(vat_amount__gt=0, paid_at__gte=CREDITO_START_DATE)
+        TaxExpense.objects.filter(Q(company=selected_company) | Q(company__isnull=True), vat_amount__gt=0, paid_at__gte=CREDITO_START_DATE)
         .order_by("paid_at", "id")
     )
     g_ml_items = (
         SaleItem.objects
-        .filter(sale__warehouse__type=Warehouse.WarehouseType.MERCADOLIBRE,
+        .filter(sale__company=selected_company,
+                sale__warehouse__type=Warehouse.WarehouseType.MERCADOLIBRE,
                 sale__created_at__gte=debito_start_dt)
         .select_related("sale", "sale__warehouse", "product")
         .order_by("sale__created_at", "sale__id")
     )
     g_common_items = (
         SaleItem.objects
-        .filter(sale__warehouse__type=Warehouse.WarehouseType.COMUN,
+        .filter(sale__company=selected_company,
+                sale__warehouse__type=Warehouse.WarehouseType.COMUN,
                 vat_percent__gt=0,
                 sale__created_at__gte=debito_start_dt)
         .select_related("sale", "sale__warehouse", "product")
@@ -260,19 +288,23 @@ def taxes_view(request):
 
     if use_afip:
         g_afip_qs = AFIPInvoice.objects.filter(
+            company=selected_company,
             tipo_codigo__in=AFIPInvoice.CREDITO_TIPOS,
             date__gte=CREDITO_START_DATE,
         ).order_by("date")
         _, credito_global, _ = _calc_credito_afip(g_afip_qs, g_expenses)
     else:
         g_purchases = (
-            PurchaseItem.objects.filter(vat_percent__gt=0, purchase__created_at__gte=credito_start_dt)
+            PurchaseItem.objects.filter(
+                purchase__company=selected_company, vat_percent__gt=0, purchase__created_at__gte=credito_start_dt
+            )
             .select_related("purchase", "product")
             .order_by("purchase__created_at", "purchase__id")
         )
         g_ml_sales_credito = (
             Sale.objects
-            .filter(warehouse__type=Warehouse.WarehouseType.MERCADOLIBRE,
+            .filter(company=selected_company,
+                    warehouse__type=Warehouse.WarehouseType.MERCADOLIBRE,
                     ml_commission_total__gt=0,
                     created_at__gte=credito_start_dt)
             .order_by("created_at", "id")
@@ -280,7 +312,7 @@ def taxes_view(request):
         _, credito_global, _ = _calc_credito(g_purchases, g_expenses, g_ml_sales_credito)
 
     _, debito_global = _calc_debito(g_ml_items, g_common_items)
-    pagos_total = IVAPayment.objects.aggregate(
+    pagos_total = IVAPayment.objects.filter(company=selected_company).aggregate(
         total=models.Sum("amount")
     )["total"] or Decimal("0.00")
     posicion_global = debito_global - credito_global - pagos_total
@@ -305,13 +337,13 @@ def taxes_view(request):
 
     ml_items_qs = (
         SaleItem.objects
-        .filter(sale__warehouse__type=Warehouse.WarehouseType.MERCADOLIBRE)
+        .filter(sale__company=selected_company, sale__warehouse__type=Warehouse.WarehouseType.MERCADOLIBRE)
         .select_related("sale", "sale__warehouse", "product")
         .order_by("sale__created_at", "sale__id")
     )
     common_items_qs = (
         SaleItem.objects
-        .filter(sale__warehouse__type=Warehouse.WarehouseType.COMUN, vat_percent__gt=0)
+        .filter(sale__company=selected_company, sale__warehouse__type=Warehouse.WarehouseType.COMUN, vat_percent__gt=0)
         .select_related("sale", "sale__warehouse", "product")
         .order_by("sale__created_at", "sale__id")
     )
@@ -322,7 +354,9 @@ def taxes_view(request):
         ml_items_qs = ml_items_qs.filter(sale__created_at__lte=end_dt)
         common_items_qs = common_items_qs.filter(sale__created_at__lte=end_dt)
 
-    expenses_qs = TaxExpense.objects.filter(vat_amount__gt=0).order_by("paid_at", "id")
+    expenses_qs = TaxExpense.objects.filter(
+        Q(company=selected_company) | Q(company__isnull=True), vat_amount__gt=0
+    ).order_by("paid_at", "id")
     if start_d:
         expenses_qs = expenses_qs.filter(paid_at__gte=start_d)
     if end_d:
@@ -330,7 +364,8 @@ def taxes_view(request):
 
     if use_afip:
         f_afip_qs = AFIPInvoice.objects.filter(
-            tipo_codigo__in=AFIPInvoice.CREDITO_TIPOS
+            company=selected_company,
+            tipo_codigo__in=AFIPInvoice.CREDITO_TIPOS,
         ).order_by("date")
         if start_d:
             f_afip_qs = f_afip_qs.filter(date__gte=start_d)
@@ -339,13 +374,13 @@ def taxes_view(request):
         credito_rows, credito_total, credito_subtotals = _calc_credito_afip(f_afip_qs, expenses_qs)
     else:
         purchase_items_qs = (
-            PurchaseItem.objects.filter(vat_percent__gt=0)
+            PurchaseItem.objects.filter(purchase__company=selected_company, vat_percent__gt=0)
             .select_related("purchase", "product")
             .order_by("purchase__created_at", "purchase__id")
         )
         ml_sales_qs = (
             Sale.objects
-            .filter(warehouse__type=Warehouse.WarehouseType.MERCADOLIBRE, ml_commission_total__gt=0)
+            .filter(company=selected_company, warehouse__type=Warehouse.WarehouseType.MERCADOLIBRE, ml_commission_total__gt=0)
             .order_by("created_at", "id")
         )
         if start_dt:
@@ -363,6 +398,8 @@ def taxes_view(request):
         request,
         "inventory/taxes.html",
         {
+            "companies": companies,
+            "selected_company": selected_company,
             "tax_form": tax_form,
             "taxes": taxes,
             "iva_payment_form": iva_payment_form,

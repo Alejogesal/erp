@@ -529,6 +529,12 @@ class SupplierPaymentForm(forms.ModelForm):
 
 
 class TaxExpenseForm(forms.ModelForm):
+    general = forms.BooleanField(
+        label="Gasto general (no de esta cuenta puntual)",
+        required=False,
+        help_text="Tildá esto si el gasto es compartido entre empresas (ej. un servicio que paga el negocio entero) y no debe sumar al crédito fiscal de una sola cuenta.",
+    )
+
     class Meta:
         model = TaxExpense
         fields = ["description", "amount", "vat_amount", "paid_at"]

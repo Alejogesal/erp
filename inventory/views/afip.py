@@ -52,9 +52,14 @@ def _col(row, idx, default=None):
         return default
 
 
-def _parse_afip_xlsx(file_obj):
+def _parse_afip_xlsx(file_obj, company=None):
     """
     Parsea un xlsx de 'Mis Comprobantes Recibidos' de AFIP.
+
+    AFIP genera este archivo por CUIT propio: cada empresa descarga el suyo,
+    así que `company` identifica a cuál de las cuentas pertenece esta
+    importación puntual.
+
     Devuelve (created, duplicates, filtered, errors, error_msg) donde:
       - created:    comprobantes nuevos guardados en la BD
       - duplicates: comprobantes que ya existían en la BD (no se tocan)
@@ -107,6 +112,7 @@ def _parse_afip_xlsx(file_obj):
                 tipo_codigo=tipo_codigo,
                 defaults=dict(
                     date=fecha,
+                    company=company,
                     tipo_descripcion=str(_col(row, 1, "") or "").strip(),
                     cae=str(_col(row, 5, "") or "").strip(),
                     razon_social=str(_col(row, 8, "") or "").strip(),

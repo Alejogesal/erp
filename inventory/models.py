@@ -829,6 +829,14 @@ class IVAPayment(models.Model):
         SALDO = "SALDO", "Saldo a pagar"
 
     tipo = models.CharField(max_length=10, choices=Tipo.choices, default=Tipo.SALDO)
+    company = models.ForeignKey(
+        "Company",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="iva_payments",
+        help_text="Cada empresa declara y paga su propio IVA por separado.",
+    )
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     period = models.DateField(help_text="Período que cubre el pago (primer día del mes)")
     paid_at = models.DateField(default=timezone.localdate)
@@ -844,6 +852,14 @@ class IVAPayment(models.Model):
 
 class TaxExpense(models.Model):
     description = models.CharField(max_length=255)
+    company = models.ForeignKey(
+        "Company",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="tax_expenses",
+        help_text="En blanco si es un gasto general del negocio, no de una empresa puntual.",
+    )
     amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     vat_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     paid_at = models.DateField(default=timezone.now)
@@ -887,6 +903,14 @@ class AFIPInvoice(models.Model):
     B_TIPOS = (FACTURA_B, NOTA_DEBITO_B, NOTA_CREDITO_B)
 
     date = models.DateField()
+    company = models.ForeignKey(
+        "Company",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="afip_invoices",
+        help_text="Empresa (CUIT propio) que recibió este comprobante — 'Mis Comprobantes' se descarga una vez por CUIT.",
+    )
     tipo_codigo = models.IntegerField()
     tipo_descripcion = models.CharField(max_length=100, blank=True)
     punto_venta = models.IntegerField()

@@ -4,7 +4,7 @@ from decimal import Decimal
 from datetime import datetime, time, timedelta
 
 from django.contrib.auth.decorators import login_required
-from django.db.models import Sum, Count
+from django.db.models import Q, Sum, Count
 from django.db.models.functions import TruncDate
 from django.shortcuts import render
 from django.utils import timezone
@@ -72,12 +72,13 @@ def dashboard(request):
     if end_date_obj:
         tax_qs = tax_qs.filter(paid_at__lte=end_date_obj)
     if selected_company_ids:
-        # TaxExpense no lleva company (es un gasto general del negocio, no de
-        # una cuenta puntual): al filtrar por cuenta queda afuera del filtro,
-        # se sigue restando entero del margen neto.
         purchase_qs = purchase_qs.filter(company_id__in=selected_company_ids)
         sale_item_qs = sale_item_qs.filter(sale__company_id__in=selected_company_ids)
         sales_qs = sales_qs.filter(company_id__in=selected_company_ids)
+        # Los gastos "generales" (sin company, cargados en Impuestos/Gastos)
+        # son compartidos entre cuentas: siguen contando acá aunque se filtre
+        # por una empresa puntual.
+        tax_qs = tax_qs.filter(Q(company_id__in=selected_company_ids) | Q(company__isnull=True))
 
     purchase_total = purchase_qs.aggregate(total=Sum("total")).get("total") or Decimal("0.00")
     sale_total = sale_item_qs.aggregate(total=Sum("line_total")).get("total") or Decimal("0.00")

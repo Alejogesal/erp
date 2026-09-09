@@ -4,6 +4,22 @@
 {% block content %}
 <h1>Impuestos / Gastos</h1>
 <p class="subtitle">Registrá impuestos, honorarios, gastos y pagos de IVA a AFIP.</p>
+{% if companies|length > 1 %}
+<div style="display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap;">
+    {% for company in companies %}
+    <a href="?company={{ company.id }}"
+       class="pill"
+       style="{% if selected_company.id == company.id %}background:var(--accent,#2d7ff9); color:#fff; font-weight:700;{% endif %}">
+        {{ company.name }}
+    </a>
+    {% endfor %}
+</div>
+<p class="subtitle" style="margin-top:-8px; margin-bottom:16px; font-size:12px;">
+    Cada empresa tiene CUIT propio: la posición de IVA se calcula por separado, nunca consolidada.
+</p>
+{% elif not selected_company %}
+<p style="color:var(--negative); margin-bottom:16px;">No hay ninguna empresa activa creada — no se puede registrar ni ver nada fiscal hasta crear una en el admin.</p>
+{% endif %}
 
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 <style>
@@ -249,6 +265,7 @@
             <tr>
                 <th>Fecha</th>
                 <th>Descripción</th>
+                <th>Cuenta</th>
                 <th>Monto</th>
                 <th>IVA $</th>
                 <th>Acciones</th>
@@ -259,6 +276,7 @@
             <tr>
                 <td>{{ tax.paid_at|date:"d/m/Y" }}</td>
                 <td>{{ tax.description }}</td>
+                <td>{{ tax.company.name|default:"General" }}</td>
                 <td>${{ tax.amount|latam_number:2 }}</td>
                 <td>{% if tax.vat_amount %}<strong>${{ tax.vat_amount|latam_number:2 }}</strong>{% else %}-{% endif %}</td>
                 <td>
@@ -271,7 +289,7 @@
                 </td>
             </tr>
             {% empty %}
-            <tr><td colspan="5">Aún no hay gastos cargados.</td></tr>
+            <tr><td colspan="6">Aún no hay gastos cargados.</td></tr>
             {% endfor %}
         </tbody>
     </table>
@@ -282,6 +300,7 @@
 <div class="card" style="margin-top:16px;" id="iva-section">
     <div class="card-title">Posición IVA por período</div>
     <form method="get" action="#iva-section" autocomplete="off" style="margin-bottom:16px;">
+        {% if selected_company %}<input type="hidden" name="company" value="{{ selected_company.id }}">{% endif %}
         <div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
             <div>
                 <label style="font-size:13px; display:block; margin-bottom:4px;">Desde</label>
