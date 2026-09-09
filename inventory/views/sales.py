@@ -22,6 +22,7 @@ from .. import services
 from .. import mercadolibre as ml
 from ..models import (
     ML_SELLER_FULFILLED_TYPES,
+    Company,
     Customer,
     KitComponent,
     MLLogisticType,
@@ -39,15 +40,12 @@ from .forms import SaleHeaderForm, SaleItemForm
 from .stock import _sync_common_with_variants
 from .utils_xlsx import _read_ml_sales_xlsx_rows
 
-# Valor especial del filtro para las ventas ML sin tipo logístico conocido:
-# las importadas antes de que se guardara el canal, o las que se sincronizaron
-# cuando ML todavía no había creado el envío.
-ML_TYPE_UNKNOWN = "unknown"
-
-# (valor, etiqueta) para los checkboxes de canal. Se arma desde el enum para que
-# agregar un tipo logístico en el modelo lo haga aparecer solo en el filtro.
-ML_TYPE_FILTER_CHOICES = [(value, label) for value, label in MLLogisticType.choices] + [
-    (ML_TYPE_UNKNOWN, "Sin dato")
+# (valor, etiqueta) para los checkboxes de canal. Solo los dos canales que se
+# usan para filtrar en la práctica: el resto (Colecta, Places, Correo, Envío
+# propio, A convenir, Sin dato) recargaba el filtro sin uso real.
+ML_TYPE_FILTER_CHOICES = [
+    (MLLogisticType.FULFILLMENT, MLLogisticType.FULFILLMENT.label),
+    (MLLogisticType.SELF_SERVICE, MLLogisticType.SELF_SERVICE.label),
 ]
 _ML_TYPE_FILTER_VALUES = {value for value, _label in ML_TYPE_FILTER_CHOICES}
 
@@ -603,6 +601,11 @@ def sales_list(request):
     # tipeado no vacíe el listado en silencio.
     selected_ml_types = [
         value for value in request.GET.getlist("ml_type") if value in _ML_TYPE_FILTER_VALUES
+    ]
+    companies = list(Company.objects.filter(is_active=True).order_by("name"))
+    selected_company_ids = [
+        value for value in request.GET.getlist("company")
+        if value in {str(c.id) for c in companies}
     ]
     show_history = request.GET.get("show_history") == "1"
     customers = Customer.objects.order_by("name")
@@ -1354,15 +1357,12 @@ def sales_list(request):
         if selected_ml_types:
             # El filtro de canal solo acota las ventas de ML; las del depósito
             # común pasan derecho (su inclusión la decide el checkbox de arriba).
-            ml_type_filter = Q()
-            for value in selected_ml_types:
-                if value == ML_TYPE_UNKNOWN:
-                    ml_type_filter |= Q(ml_logistic_type="")
-                else:
-                    ml_type_filter |= Q(ml_logistic_type=value)
+            ml_type_filter = Q(ml_logistic_type__in=selected_ml_types)
             sales = sales.filter(
                 Q(warehouse__type=Warehouse.WarehouseType.COMUN) | ml_type_filter
             )
+        if selected_company_ids:
+            sales = sales.filter(company_id__in=selected_company_ids)
         page_number = request.GET.get("page")
         paginator = Paginator(sales, 25)
         page_obj = paginator.get_page(page_number)
@@ -1419,6 +1419,8 @@ def sales_list(request):
                 "include_ml": include_ml,
                 "ml_type_choices": ML_TYPE_FILTER_CHOICES,
                 "selected_ml_types": selected_ml_types,
+                "companies": companies,
+                "selected_company_ids": selected_company_ids,
                 "show_history": show_history,
                 "show_comun": show_comun,
                 "show_ml": show_ml,
@@ -1447,6 +1449,8 @@ def sales_list(request):
             "include_ml": include_ml,
             "ml_type_choices": ML_TYPE_FILTER_CHOICES,
             "selected_ml_types": selected_ml_types,
+            "companies": companies,
+            "selected_company_ids": selected_company_ids,
             "show_history": show_history,
             "show_comun": show_comun,
             "show_ml": show_ml,

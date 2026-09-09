@@ -963,12 +963,6 @@ class SalesChannelFilterTests(TestCase):
         )
         self.assertEqual(self._ids(resp), {self.flex.id, self.full.id})
 
-    def test_unknown_channel_matches_legacy_sales(self):
-        resp = self.client.get(
-            reverse("inventory_sales_list"), {"show_history": "1", "wh_ml": "1", "ml_type": "unknown"}
-        )
-        self.assertEqual(self._ids(resp), {self.legacy.id})
-
     def test_channel_filter_leaves_comun_sales_alone(self):
         # El canal es una propiedad de ML; el depósito común entra o no según su
         # propio checkbox, no según el tipo logístico.

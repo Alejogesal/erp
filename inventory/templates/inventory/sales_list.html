@@ -113,6 +113,20 @@
             </div>
             <p class="subtitle" style="margin:4px 0 0; font-size:12px;">Sin marcar nada se muestran todos los canales.</p>
         </div>
+        {% if companies|length > 1 %}
+        <div style="margin-top:10px;">
+            <label style="display:block; margin-bottom:4px;">Cuenta</label>
+            <div id="company-filters" style="display:flex; flex-wrap:wrap; gap:12px;">
+                {% for company in companies %}
+                <label style="display:flex; gap:6px; align-items:center; font-size:13px;">
+                    <input type="checkbox" name="company" value="{{ company.id }}" {% if company.id|stringformat:"s" in selected_company_ids %}checked{% endif %}>
+                    {{ company.name }}
+                </label>
+                {% endfor %}
+            </div>
+            <p class="subtitle" style="margin:4px 0 0; font-size:12px;">Sin marcar nada se muestran todas las cuentas.</p>
+        </div>
+        {% endif %}
     </form>
     <form method="post" action="{% url 'inventory_sales_list' %}">
         {% csrf_token %}
@@ -148,6 +162,7 @@
         const getCookie = () => document.querySelector('input[name="csrfmiddlewaretoken"]')?.value || "";
 
         const mlTypeInputs = form ? Array.from(form.querySelectorAll("input[name='ml_type']")) : [];
+        const companyInputs = form ? Array.from(form.querySelectorAll("input[name='company']")) : [];
 
         // Base común de los dos armados de query string: si se agrega un filtro
         // hay que tocarlo en un solo lugar y no en dos que se desincronizan.
@@ -157,6 +172,7 @@
             if (whComun?.checked) params.set("wh_comun", "1");
             if (whMl?.checked) params.set("wh_ml", "1");
             mlTypeInputs.filter((el) => el.checked).forEach((el) => params.append("ml_type", el.value));
+            companyInputs.filter((el) => el.checked).forEach((el) => params.append("company", el.value));
             if (startInput?.value) params.set("start_date", startInput.value);
             if (endInput?.value) params.set("end_date", endInput.value);
             if (page) params.set("page", String(page));
@@ -201,7 +217,7 @@
                 debounceId = setTimeout(() => fetchHistory(1), 250);
             });
         }
-        [whComun, whMl, ...mlTypeInputs].forEach((checkbox) => {
+        [whComun, whMl, ...mlTypeInputs, ...companyInputs].forEach((checkbox) => {
             if (checkbox) checkbox.addEventListener("change", () => {
                 if (!historyEnabled) return;
                 fetchHistory(1);
