@@ -34,6 +34,16 @@
                     {% endfor %}
                 </select>
             </p>
+            {% if companies|length > 1 %}
+            <p>
+                <label for="id_pdf_company_id">Cuenta</label>
+                <select id="id_pdf_company_id" name="pdf_company_id">
+                    {% for company in companies %}
+                    <option value="{{ company.id }}">{{ company.name }}</option>
+                    {% endfor %}
+                </select>
+            </p>
+            {% endif %}
             <p>
                 <label for="id_pdf_purchase_date">Fecha (opcional)</label>
                 <input id="id_pdf_purchase_date" type="date" name="pdf_purchase_date" value="{{ default_purchase_date }}">
@@ -69,6 +79,13 @@
             {{ form.supplier }}
             {{ form.supplier.errors }}
         </p>
+        {% if form.company.field.queryset.count > 1 %}
+        <p>
+            {{ form.company.label_tag }}
+            {{ form.company }}
+            {{ form.company.errors }}
+        </p>
+        {% endif %}
         <p>
             {{ form.purchase_date.label_tag }}
             <div style="display:flex; gap:8px; align-items:center;">
@@ -141,6 +158,21 @@
         {% endif %}
     </div>
     {% if show_history %}
+    {% if companies|length > 1 %}
+    <form method="get" style="margin:0 0 12px;">
+        <input type="hidden" name="show_history" value="1">
+        <label style="display:block; margin-bottom:4px;">Cuenta</label>
+        <div style="display:flex; flex-wrap:wrap; gap:12px;">
+            {% for company in companies %}
+            <label style="display:flex; gap:6px; align-items:center; font-size:13px;">
+                <input type="checkbox" name="company" value="{{ company.id }}" onchange="this.form.submit()" {% if company.id|stringformat:"s" in selected_company_ids %}checked{% endif %}>
+                {{ company.name }}
+            </label>
+            {% endfor %}
+        </div>
+        <p class="subtitle" style="margin:4px 0 0; font-size:12px;">Sin marcar nada se muestran todas las cuentas.</p>
+    </form>
+    {% endif %}
     <table>
         <thead>
             <tr>
@@ -148,6 +180,7 @@
                 <th>Fecha</th>
                 <th>Proveedor</th>
                 <th>Depósito</th>
+                <th>Cuenta</th>
                 <th>Total</th>
                 <th>Acciones</th>
             </tr>
@@ -159,6 +192,7 @@
                 <td>{{ purchase.created_at|date:"d/m/Y H:i" }}</td>
                 <td>{{ purchase.supplier|default:"-" }}</td>
                 <td>{{ purchase.warehouse.name }}</td>
+                <td>{{ purchase.company.name|default:"—" }}</td>
                 <td>${{ purchase.total|latam_number:2 }}</td>
                 <td>
                     <a class="pill" href="{% url 'inventory_purchase_receipt' purchase.id %}">Ver</a>
@@ -170,20 +204,20 @@
                 </td>
             </tr>
             {% empty %}
-            <tr><td colspan="6">Aún no hay compras registradas.</td></tr>
+            <tr><td colspan="7">Aún no hay compras registradas.</td></tr>
             {% endfor %}
         </tbody>
     </table>
     {% if page_obj and page_obj.paginator.num_pages > 1 %}
     <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px;">
         {% if page_obj.has_previous %}
-        <a class="pill" href="?show_history=1&page={{ page_obj.previous_page_number }}">Anterior</a>
+        <a class="pill" href="?show_history=1{% for value in selected_company_ids %}&company={{ value|urlencode }}{% endfor %}&page={{ page_obj.previous_page_number }}">Anterior</a>
         {% endif %}
         <span style="align-self:center; color:var(--muted); font-size:12px;">
             Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}
         </span>
         {% if page_obj.has_next %}
-        <a class="pill" href="?show_history=1&page={{ page_obj.next_page_number }}">Siguiente</a>
+        <a class="pill" href="?show_history=1{% for value in selected_company_ids %}&company={{ value|urlencode }}{% endfor %}&page={{ page_obj.next_page_number }}">Siguiente</a>
         {% endif %}
     </div>
     {% endif %}

@@ -302,6 +302,7 @@ def sale_edit(request, sale_id: int):
             costo_envio = header_form.cleaned_data.get("costo_envio") or Decimal("0.00")
             canal_ml = header_form.cleaned_data.get("canal_ml") or MLLogisticType.FULFILLMENT
             delivery_status = header_form.cleaned_data.get("delivery_status") or Sale.DeliveryStatus.NOT_DELIVERED
+            company = warehouse.company if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE else header_form.cleaned_data.get("company")
             if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE:
                 customer = None
                 audience = Customer.Audience.CONSUMER
@@ -346,6 +347,7 @@ def sale_edit(request, sale_id: int):
 
                     sale.customer = customer
                     sale.warehouse = warehouse
+                    sale.company = company
                     sale.audience = audience
                     sale.delivery_status = delivery_status
                     sale.ml_commission_total = (
@@ -361,6 +363,7 @@ def sale_edit(request, sale_id: int):
                     update_fields = [
                         "customer",
                         "warehouse",
+                        "company",
                         "audience",
                         "delivery_status",
                         "ml_commission_total",
@@ -644,12 +647,20 @@ def sales_list(request):
                 return timezone.make_aware(parsed)
             return parsed
 
-        ml_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.MERCADOLIBRE).first()
+        import_company_id = (request.POST.get("company") or "").strip()
+        import_company = (
+            Company.objects.filter(id=import_company_id).first()
+            if import_company_id
+            else Company.objects.filter(is_active=True).order_by("name").first()
+        )
+        ml_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.MERCADOLIBRE, company=import_company).first()
         if not ml_wh:
-            messages.error(request, "Falta el depósito MercadoLibre.")
+            messages.error(request, "Falta el depósito MercadoLibre de esa cuenta.")
             return redirect("inventory_sales_list")
 
-        ml_items = list(MercadoLibreItem.objects.select_related("product"))
+        ml_items = list(
+            MercadoLibreItem.objects.select_related("product").filter(company=import_company)
+        )
         ml_title_index = {}
         for ml_item in ml_items:
             key = ml._normalize(ml_item.title or "")
@@ -710,6 +721,7 @@ def sales_list(request):
             with transaction.atomic():
                 sale = Sale.objects.create(
                     warehouse=ml_wh,
+                    company=import_company,
                     audience=Customer.Audience.CONSUMER,
                     total=price_total.quantize(Decimal("0.01")),
                     reference=reference,
@@ -749,6 +761,10 @@ def sales_list(request):
             )
         return redirect("inventory_sales_list")
     if action in {"sync_google_sales", "reset_google_sales"}:
+        # Herramienta sin selector de cuenta en la UI: se importa a la primera
+        # empresa activa (hoy Stylmoda). Si hace falta para otra cuenta, hay
+        # que sumarle un selector como el del import de Excel.
+        gs_company = Company.objects.filter(is_active=True).order_by("name").first()
         if action == "reset_google_sales":
             ml_sales = Sale.objects.filter(
                 Q(reference__startswith="ML ORDER ")
@@ -852,7 +868,7 @@ def sales_list(request):
             )
             return redirect("inventory_sales_list")
 
-        ml_items = list(MercadoLibreItem.objects.select_related("product"))
+        ml_items = list(MercadoLibreItem.objects.select_related("product").filter(company=gs_company))
         ml_title_index = {}
         for ml_item in ml_items:
             key = ml._normalize(ml_item.title or "")
@@ -922,7 +938,7 @@ def sales_list(request):
 
         created_sales = 0
         skipped = 0
-        ml_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.MERCADOLIBRE).first()
+        ml_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.MERCADOLIBRE, company=gs_company).first()
         for order_id, data in orders.items():
             reference = f"GS ORDER {order_id}"
             if Sale.objects.filter(reference=reference).exists():
@@ -936,6 +952,7 @@ def sales_list(request):
             with transaction.atomic():
                 sale = Sale.objects.create(
                     warehouse=ml_wh,
+                    company=gs_company,
                     audience=Customer.Audience.CONSUMER,
                     total=data["total"].quantize(Decimal("0.01")),
                     reference=reference,
@@ -1112,6 +1129,7 @@ def sales_list(request):
             costo_envio = header_form.cleaned_data.get("costo_envio") or Decimal("0.00")
             canal_ml = header_form.cleaned_data.get("canal_ml") or MLLogisticType.FULFILLMENT
             delivery_status = header_form.cleaned_data.get("delivery_status") or Sale.DeliveryStatus.NOT_DELIVERED
+            company = warehouse.company if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE else header_form.cleaned_data.get("company")
             if warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE:
                 customer = None
                 audience = Customer.Audience.CONSUMER
@@ -1156,6 +1174,7 @@ def sales_list(request):
                         sale = Sale.objects.create(
                             customer=customer,
                             warehouse=warehouse,
+                            company=company,
                             audience=audience,
                             delivery_status=delivery_status,
                             reference=f"Venta {audience}",

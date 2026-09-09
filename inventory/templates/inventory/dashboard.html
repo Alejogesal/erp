@@ -61,6 +61,20 @@
                     <input id="end_date" name="end_date" type="date" value="{{ end_date }}" autocomplete="off">
                 </div>
             </div>
+            {% if companies|length > 1 %}
+            <div style="margin-top:12px;">
+                <label style="display:block; margin-bottom:4px;">Cuenta</label>
+                <div style="display:flex; flex-wrap:wrap; gap:12px;">
+                    {% for company in companies %}
+                    <label style="display:flex; gap:6px; align-items:center; font-size:13px;">
+                        <input type="checkbox" name="company" value="{{ company.id }}" {% if company.id|stringformat:"s" in selected_company_ids %}checked{% endif %}>
+                        {{ company.name }}
+                    </label>
+                    {% endfor %}
+                </div>
+                <p class="subtitle" style="margin:4px 0 0; font-size:12px;">Sin marcar nada se muestran todas las cuentas (vista consolidada).</p>
+            </div>
+            {% endif %}
             <div style="margin-top:12px;">
                 <button type="submit">Aplicar filtro</button>
             </div>

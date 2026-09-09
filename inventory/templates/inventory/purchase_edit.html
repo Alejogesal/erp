@@ -26,6 +26,13 @@
             {{ form.supplier }}
             {{ form.supplier.errors }}
         </p>
+        {% if form.company.field.queryset.count > 1 %}
+        <p>
+            {{ form.company.label_tag }}
+            {{ form.company }}
+            {{ form.company.errors }}
+        </p>
+        {% endif %}
         <p>
             {{ form.purchase_date.label_tag }}
             <div style="display:flex; gap:8px; align-items:center;">

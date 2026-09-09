@@ -23,6 +23,15 @@
         <p style="color: var(--muted); margin: 0 0 10px;">
             Columnas requeridas: Fecha, Producto, Cantidad, Precio Bruto Venta, Comision, Impuestos.
         </p>
+        {% if companies|length > 1 %}
+        <label style="display:block; margin-bottom:10px;">Cuenta
+            <select name="company">
+                {% for company in companies %}
+                <option value="{{ company.id }}">{{ company.name }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        {% endif %}
         <input type="file" name="file" accept=".xlsx" required>
         <button type="submit" style="margin-top:10px;">Importar ventas</button>
     </form>

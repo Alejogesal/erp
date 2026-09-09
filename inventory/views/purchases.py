@@ -17,6 +17,7 @@ from django.views.decorators.http import require_http_methods
 from .. import services
 from ..services import update_product_avg_costs
 from ..models import (
+    Company,
     Product,
     ProductVariant,
     Purchase,
@@ -251,9 +252,11 @@ def purchases_list(request):
             pdf_upload = request.FILES.get("purchase_pdf")
             warehouse_id = (request.POST.get("pdf_warehouse_id") or "").strip()
             supplier_id = (request.POST.get("pdf_supplier_id") or "").strip()
+            pdf_company_id = (request.POST.get("pdf_company_id") or "").strip()
             raw_date = (request.POST.get("pdf_purchase_date") or "").strip()
             warehouse = Warehouse.objects.filter(id=warehouse_id).first() if warehouse_id else None
             supplier = Supplier.objects.filter(id=supplier_id).first() if supplier_id else None
+            pdf_company = Company.objects.filter(id=pdf_company_id).first() if pdf_company_id else None
             if not pdf_upload:
                 messages.error(request, "Subí un PDF para importar la compra.")
                 return redirect("inventory_purchases_list")
@@ -333,6 +336,7 @@ def purchases_list(request):
                     purchase = Purchase.objects.create(
                         supplier=supplier,
                         warehouse=warehouse,
+                        company=pdf_company,
                         reference=reference,
                         discount_percent=Decimal("0.00"),
                         user=request.user,
@@ -634,6 +638,7 @@ def purchases_list(request):
                     messages.error(request, f"Hay {len(parse_errors)} filas con errores.")
                 items = []
             warehouse = header_form.cleaned_data["warehouse"]
+            purchase_company = header_form.cleaned_data.get("company")
             purchase_supplier = header_form.cleaned_data.get("supplier")
             purchase_date = header_form.cleaned_data.get("purchase_date")
             header_discount_percent = header_form.cleaned_data.get("descuento_total") or Decimal("0.00")
@@ -646,6 +651,7 @@ def purchases_list(request):
                     purchase = Purchase.objects.create(
                         supplier=purchase_supplier,
                         warehouse=warehouse,
+                        company=purchase_company,
                         reference="Compra",
                         discount_percent=header_discount_percent,
                         shipping_cost=shipping_cost,
@@ -737,11 +743,18 @@ def purchases_list(request):
         formset = PurchaseItemFormSet()
         _apply_product_queryset_to_formset(formset, Product.objects.none())
 
+    companies = list(Company.objects.filter(is_active=True).order_by("name"))
+    selected_company_ids = [
+        value for value in request.GET.getlist("company")
+        if value in {str(c.id) for c in companies}
+    ]
     if show_history:
         purchases = (
-            Purchase.objects.select_related("supplier", "warehouse", "user")
+            Purchase.objects.select_related("supplier", "warehouse", "company", "user")
             .order_by("-created_at", "-id")
         )
+        if selected_company_ids:
+            purchases = purchases.filter(company_id__in=selected_company_ids)
         paginator = Paginator(purchases, 25)
         page_number = request.GET.get("page")
         page_obj = paginator.get_page(page_number)
@@ -763,6 +776,8 @@ def purchases_list(request):
             "form": header_form,
             "formset": formset,
             "show_history": show_history,
+            "companies": companies,
+            "selected_company_ids": selected_company_ids,
             "variant_data": variant_data,
             "warehouses": warehouses,
             "suppliers": suppliers,
@@ -978,12 +993,13 @@ def purchase_edit(request, purchase_id: int):
 
                     purchase.warehouse = new_warehouse
                     purchase.supplier = header_form.cleaned_data.get("supplier")
+                    purchase.company = header_form.cleaned_data.get("company")
                     purchase_date = header_form.cleaned_data.get("purchase_date")
                     header_discount_percent = header_form.cleaned_data.get("descuento_total") or Decimal("0.00")
                     shipping_cost = header_form.cleaned_data.get("costo_envio") or Decimal("0.00")
                     purchase.discount_percent = header_discount_percent
                     purchase.shipping_cost = shipping_cost
-                    update_fields = ["warehouse", "supplier", "discount_percent", "shipping_cost"]
+                    update_fields = ["warehouse", "supplier", "company", "discount_percent", "shipping_cost"]
                     if purchase_date:
                         created_at = datetime.combine(purchase_date, time(12, 0))
                         if timezone.is_naive(created_at):
@@ -1089,6 +1105,7 @@ def purchase_edit(request, purchase_id: int):
             initial={
                 "warehouse": purchase.warehouse,
                 "supplier": purchase.supplier,
+                "company": purchase.company,
                 "purchase_date": timezone.localtime(purchase.created_at).date(),
                 "descuento_total": purchase.discount_percent,
                 "costo_envio": purchase.shipping_cost,

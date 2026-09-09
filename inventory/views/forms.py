@@ -5,6 +5,7 @@ from django import forms
 from django.utils import timezone
 
 from ..models import (
+    Company,
     Customer,
     CustomerGroupDiscount,
     CustomerProductDiscount,
@@ -96,6 +97,12 @@ class ProductForm(_CommaDecimalFormMixin, forms.ModelForm):
 
 class PurchaseHeaderForm(forms.Form):
     warehouse = forms.ModelChoiceField(queryset=Warehouse.objects.all())
+    company = forms.ModelChoiceField(
+        queryset=Company.objects.filter(is_active=True).order_by("name"),
+        label="Cuenta",
+        required=False,
+        help_text="Razón social a la que se imputa esta compra.",
+    )
     supplier = forms.ModelChoiceField(
         queryset=Supplier.objects.all(),
         label="Proveedor",
@@ -163,6 +170,12 @@ class PurchaseItemForm(forms.Form):
 
 class SaleHeaderForm(forms.Form):
     warehouse = forms.ModelChoiceField(queryset=Warehouse.objects.all())
+    company = forms.ModelChoiceField(
+        queryset=Company.objects.filter(is_active=True).order_by("name"),
+        label="Cuenta",
+        required=False,
+        help_text="Razón social bajo la que se factura esta venta.",
+    )
     sale_date = forms.DateField(
         label="Fecha",
         required=False,

@@ -10,6 +10,7 @@ from django.shortcuts import render
 from django.utils import timezone
 
 from ..models import (
+    Company,
     Product,
     Purchase,
     Sale,
@@ -43,6 +44,12 @@ def dashboard(request):
         except ValueError:
             end_dt = None
 
+    companies = list(Company.objects.filter(is_active=True).order_by("name"))
+    selected_company_ids = [
+        value for value in request.GET.getlist("company")
+        if value in {str(c.id) for c in companies}
+    ]
+
     purchase_qs = Purchase.objects.all()
     # Las ventas canceladas quedan en el historial pero NO cuentan en ventas ni ganancias.
     sale_item_qs = SaleItem.objects.filter(sale__is_cancelled=False)
@@ -64,6 +71,13 @@ def dashboard(request):
         sales_qs = sales_qs.filter(created_at__lte=end_dt)
     if end_date_obj:
         tax_qs = tax_qs.filter(paid_at__lte=end_date_obj)
+    if selected_company_ids:
+        # TaxExpense no lleva company (es un gasto general del negocio, no de
+        # una cuenta puntual): al filtrar por cuenta queda afuera del filtro,
+        # se sigue restando entero del margen neto.
+        purchase_qs = purchase_qs.filter(company_id__in=selected_company_ids)
+        sale_item_qs = sale_item_qs.filter(sale__company_id__in=selected_company_ids)
+        sales_qs = sales_qs.filter(company_id__in=selected_company_ids)
 
     purchase_total = purchase_qs.aggregate(total=Sum("total")).get("total") or Decimal("0.00")
     sale_total = sale_item_qs.aggregate(total=Sum("line_total")).get("total") or Decimal("0.00")
@@ -179,9 +193,11 @@ def dashboard(request):
 
     # --- Chart data: daily revenue last 30 days ---
     chart_from = timezone.now() - timedelta(days=29)
+    daily_qs = Sale.objects.filter(is_cancelled=False, created_at__gte=chart_from)
+    if selected_company_ids:
+        daily_qs = daily_qs.filter(company_id__in=selected_company_ids)
     daily_qs = (
-        Sale.objects.filter(is_cancelled=False, created_at__gte=chart_from)
-        .annotate(day=TruncDate("created_at"))
+        daily_qs.annotate(day=TruncDate("created_at"))
         .values("day", "warehouse__type")
         .annotate(revenue=Sum("total"))
         .order_by("day")
@@ -212,6 +228,8 @@ def dashboard(request):
         "customer_ranking": customer_ranking,
         "start_date": start_date,
         "end_date": end_date,
+        "companies": companies,
+        "selected_company_ids": selected_company_ids,
         "tax_total": tax_total,
         "low_stock_alerts": low_stock_alerts,
         "chart_labels": json.dumps(chart_labels),
