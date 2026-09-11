@@ -15,7 +15,6 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from .. import services
-from ..services import update_product_avg_costs
 from ..models import (
     Company,
     Product,
@@ -43,17 +42,6 @@ from .utils_purchase_pdf import (
     _normalize_purchase_pdf_item_fields,
     _resolve_product_from_purchase_pdf,
 )
-
-
-def _purchase_updates_cost(product, supplier) -> bool:
-    """El costo de margen del producto se actualiza solo si la compra es al
-    proveedor principal (o el producto aún no tiene principal, o no hay proveedor).
-    Una compra a otro proveedor no altera el costo que se usa para el margen."""
-    if supplier is None:
-        return True
-    if product.default_supplier_id is None:
-        return True
-    return product.default_supplier_id == supplier.id
 
 
 @login_required
@@ -354,10 +342,13 @@ def purchases_list(request):
                         purchase.created_at = created_at
 
                     subtotal = Decimal("0.00")
-                    avg_cost_tracker = []
                     for data in resolved_items:
                         qty = Decimal(data["quantity"])
                         unit_cost = data["unit_cost"]
+                        # Costo unitario $0 = bonificación del proveedor: suma stock
+                        # pero no es un precio real, así que no se guarda como
+                        # referencia de lista de precios de ese proveedor.
+                        is_bonus = unit_cost == Decimal("0.00")
                         discount_percent = data.get("discount_percent") or Decimal("0.00")
                         vat_percent = data.get("vat_percent") or Decimal("0.00")
                         effective_unit_cost = (
@@ -367,12 +358,6 @@ def purchases_list(request):
                             effective_unit_cost * (Decimal("1.00") + (vat_percent / Decimal("100.00")))
                         ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                         subtotal += qty * effective_unit_cost_with_vat
-                        if _purchase_updates_cost(data["product"], supplier):
-                            avg_cost_tracker.append({
-                                "product": data["product"],
-                                "qty": qty,
-                                "cost_no_vat": effective_unit_cost,
-                            })
                         PurchaseItem.objects.create(
                             purchase=purchase,
                             product=data["product"],
@@ -397,13 +382,12 @@ def purchases_list(request):
                             warehouse=warehouse,
                             quantity=qty,
                             unit_cost=effective_unit_cost,
-                            supplier=supplier,
+                            supplier=None if is_bonus else supplier,
                             vat_percent=vat_percent,
                             user=request.user,
                             reference=f"Compra #{purchase.id}",
                             purchase=purchase,
                         )
-                    update_product_avg_costs(avg_cost_tracker)
 
                     purchase.total = subtotal.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                     purchase.save()
@@ -665,10 +649,13 @@ def purchases_list(request):
                     total_units = sum((Decimal(item["quantity"]) for item in items), Decimal("0.00"))
                     shipping_per_unit = _shipping_cost_per_unit(shipping_cost, total_units)
                     subtotal = Decimal("0.00")
-                    avg_cost_tracker = []
                     for data in items:
                         qty = Decimal(data["quantity"])
                         unit_cost = data["unit_cost"]
+                        # Costo unitario $0 = bonificación del proveedor: suma stock
+                        # pero no es un precio real, así que no se guarda como
+                        # referencia de lista de precios de ese proveedor.
+                        is_bonus = unit_cost == Decimal("0.00")
                         item_discount_percent = data.get("discount_percent")
                         if item_discount_percent is None:
                             item_discount_percent = Decimal("0.00")
@@ -688,12 +675,6 @@ def purchases_list(request):
                         cost_with_vat_for_stock = (
                             effective_unit_cost_for_stock * (Decimal("1.00") + (vat_percent / Decimal("100.00")))
                         ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-                        if _purchase_updates_cost(data["product"], purchase_supplier):
-                            avg_cost_tracker.append({
-                                "product": data["product"],
-                                "qty": qty,
-                                "cost_no_vat": effective_unit_cost_for_stock,
-                            })
                         PurchaseItem.objects.create(
                             purchase=purchase,
                             product=data["product"],
@@ -718,13 +699,12 @@ def purchases_list(request):
                             warehouse=warehouse,
                             quantity=qty,
                             unit_cost=effective_unit_cost_for_stock,
-                            supplier=purchase_supplier,
+                            supplier=None if is_bonus else purchase_supplier,
                             vat_percent=vat_percent,
                             user=request.user,
                             reference=f"Compra #{purchase.id}",
                             purchase=purchase,
                         )
-                    update_product_avg_costs(avg_cost_tracker)
                     subtotal_with_shipping = (subtotal + shipping_cost).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                     discount_total = (subtotal_with_shipping * header_discount_percent / Decimal("100.00")).quantize(
                         Decimal("0.01"), rounding=ROUND_HALF_UP
@@ -1011,7 +991,6 @@ def purchase_edit(request, purchase_id: int):
                     total_units = sum((Decimal(item["quantity"]) for item in items), Decimal("0.00"))
                     shipping_per_unit = _shipping_cost_per_unit(shipping_cost, total_units)
                     subtotal = Decimal("0.00")
-                    avg_cost_tracker = []
                     accumulated_new_qty: dict[tuple[int, int], Decimal] = {}
                     for item in items:
                         product = item["product"]
@@ -1028,6 +1007,10 @@ def purchase_edit(request, purchase_id: int):
                             delta_before = max(new_total_before_row - old_total, Decimal("0.00"))
                             delta_qty = (delta_after - delta_before).quantize(Decimal("0.01"))
                         unit_cost = item["unit_cost"]
+                        # Costo unitario $0 = bonificación del proveedor: suma stock
+                        # pero no es un precio real, así que no se guarda como
+                        # referencia de lista de precios de ese proveedor.
+                        is_bonus = unit_cost == Decimal("0.00")
                         item_discount_percent = item.get("discount_percent") or Decimal("0.00")
                         effective_unit_cost = (
                             unit_cost * (Decimal("1.00") - (item_discount_percent / Decimal("100.00")))
@@ -1043,12 +1026,6 @@ def purchase_edit(request, purchase_id: int):
                         cost_with_vat_for_stock = (
                             effective_unit_cost_for_stock * (Decimal("1.00") + (vat / Decimal("100.00")))
                         ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-                        if _purchase_updates_cost(product, purchase.supplier):
-                            avg_cost_tracker.append({
-                                "product": product,
-                                "qty": qty,
-                                "cost_no_vat": effective_unit_cost_for_stock,
-                            })
                         PurchaseItem.objects.create(
                             purchase=purchase,
                             product=product,
@@ -1079,10 +1056,9 @@ def purchase_edit(request, purchase_id: int):
                                 vat_percent=vat,
                                 user=request.user,
                                 reference=f"Compra #{purchase.id}",
-                                supplier=purchase.supplier,
+                                supplier=None if is_bonus else purchase.supplier,
                                 purchase=purchase,
                             )
-                    update_product_avg_costs(avg_cost_tracker)
                     subtotal_with_shipping = (subtotal + shipping_cost).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                     discount_total = (subtotal_with_shipping * header_discount_percent / Decimal("100.00")).quantize(
                         Decimal("0.01"), rounding=ROUND_HALF_UP

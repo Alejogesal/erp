@@ -12,6 +12,7 @@ from inventory.models import (
     Purchase,
     Sale,
     SaleItem,
+    StockMovement,
     Supplier,
     SupplierPayment,
     SupplierProduct,
@@ -129,8 +130,12 @@ class DashboardViewTests(TestCase):
         self.assertEqual(purchase.shipping_cost, Decimal("6.00"))
         self.assertEqual(purchase.total, Decimal("16.00"))
 
+        # El envío prorrateado por unidad se ve en el movimiento de stock; el
+        # costo del producto (avg_cost) es fijo/manual y una compra no lo toca.
+        movement = StockMovement.objects.filter(product=product, movement_type=StockMovement.MovementType.ENTRY).first()
+        self.assertEqual(movement.unit_cost, Decimal("8.00"))
         product.refresh_from_db()
-        self.assertEqual(product.avg_cost, Decimal("8.00"))
+        self.assertEqual(product.avg_cost, Decimal("0.00"))
 
     def test_stock_list_per_warehouse(self):
         services.register_entry(self.product, self.comun, Decimal("3"), Decimal("2.00"), self.user)

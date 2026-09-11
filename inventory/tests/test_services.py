@@ -14,18 +14,24 @@ class InventoryServiceTests(TestCase):
         self.comun = Warehouse.objects.get(type=Warehouse.WarehouseType.COMUN)
         self.mercado_libre = Warehouse.objects.get(type=Warehouse.WarehouseType.MERCADOLIBRE)
 
-    def test_entry_updates_stock_and_avg_cost(self):
+    def test_entry_updates_stock_but_not_avg_cost(self):
+        # El costo es fijo/manual: una entrada de stock (compra) nunca lo pisa
+        # sola, ni siquiera cuando el precio de esa compra es distinto del
+        # costo actual del producto.
+        self.product.avg_cost = Decimal("3.00")
+        self.product.save(update_fields=["avg_cost"])
+
         services.register_entry(self.product, self.comun, Decimal("10"), Decimal("5.00"), self.user, reference="PO1")
         self.product.refresh_from_db()
         stock_qty = self.product.stocks.get(warehouse=self.comun).quantity
         self.assertEqual(stock_qty, Decimal("10.00"))
-        self.assertEqual(self.product.avg_cost, Decimal("5.00"))
+        self.assertEqual(self.product.avg_cost, Decimal("3.00"))
 
         services.register_entry(self.product, self.comun, Decimal("10"), Decimal("7.00"), self.user)
         self.product.refresh_from_db()
         stock_qty = self.product.stocks.get(warehouse=self.comun).quantity
         self.assertEqual(stock_qty, Decimal("20.00"))
-        self.assertEqual(self.product.avg_cost, Decimal("7.00"))
+        self.assertEqual(self.product.avg_cost, Decimal("3.00"))
 
     def test_exit_blocks_negative_stock(self):
         with self.assertRaises(services.NegativeStockError):
@@ -62,6 +68,7 @@ class InventoryServiceTests(TestCase):
         self.assertEqual(stock_qty, Decimal("3.00"))
 
     def test_suggested_price_uses_margin(self):
-        services.register_entry(self.product, self.comun, Decimal("1"), Decimal("10.00"), self.user)
-        self.product.refresh_from_db()
+        # El costo es manual: se carga directo en el producto, no vía compra.
+        self.product.avg_cost = Decimal("10.00")
+        self.product.save(update_fields=["avg_cost"])
         self.assertEqual(self.product.suggested_price, Decimal("12.00"))

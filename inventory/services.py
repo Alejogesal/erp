@@ -124,27 +124,6 @@ def sync_principal_to_cheapest(product: Product) -> bool:
     return changed
 
 
-def update_product_avg_costs(items: list[dict]) -> None:
-    """Recalculate avg_cost (WITHOUT VAT) as weighted average for products in a purchase.
-
-    Call this after all register_entry() calls for a purchase so that products
-    appearing on multiple lines with different VAT rates get the correct blended cost.
-
-    items: list of {'product': Product, 'qty': Decimal, 'cost_no_vat': Decimal}
-    """
-    by_product: dict[int, dict] = {}
-    for item in items:
-        pid = item["product"].pk
-        if pid not in by_product:
-            by_product[pid] = {"total_cost": Decimal("0.00"), "total_qty": Decimal("0.00")}
-        by_product[pid]["total_cost"] += item["cost_no_vat"] * item["qty"]
-        by_product[pid]["total_qty"] += item["qty"]
-    for pid, data in by_product.items():
-        if data["total_qty"] > 0:
-            avg = (data["total_cost"] / data["total_qty"]).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            Product.objects.filter(pk=pid).update(avg_cost=avg)
-
-
 @transaction.atomic
 def register_entry(
     product: Product,
@@ -171,32 +150,15 @@ def register_entry(
         cost_with_vat = cost_base
 
     stock = _get_stock_for_update(product, warehouse)
-    current_total = _total_stock_quantity(product)
 
-    # El costo de margen sale del proveedor principal. Una compra a un proveedor
-    # que NO es el principal solo registra el precio de ese proveedor (su lista),
-    # sin tocar avg_cost / vat_percent del producto. Si el producto todavía no
-    # tiene proveedor principal, esta compra lo define (y sí actualiza el costo).
-    if supplier is None:
-        is_principal = True  # compra sin proveedor: comportamiento histórico
-    elif product.default_supplier_id is None:
+    # El costo del producto (avg_cost) es fijo: lo carga o edita una persona a
+    # mano (en Productos o Proveedores) y una compra nunca lo pisa sola, para
+    # que no cambie solo porque compraste a un precio puntual distinto o
+    # recibiste unidades bonificadas. Lo único que una compra define sola es
+    # el proveedor principal, si el producto todavía no tenía uno.
+    if supplier is not None and product.default_supplier_id is None:
         product.default_supplier = supplier
         product.save(update_fields=["default_supplier"])
-        is_principal = True
-    else:
-        is_principal = product.default_supplier_id == supplier.id
-
-    # Store avg_cost WITHOUT VAT. cost_with_vat() adds vat_percent at read time.
-    # For purchases with the same product on multiple lines with different VAT rates,
-    # purchases.py calls update_product_avg_costs() after the loop to recalculate the
-    # correct weighted average across all lines.
-    if is_principal:
-        product.avg_cost = cost_base
-        update_fields = ["avg_cost"]
-        if vat_percent is not None:
-            product.vat_percent = vat
-            update_fields.append("vat_percent")
-        product.save(update_fields=update_fields)
 
     stock.quantity = (stock.quantity + qty).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     stock.save(update_fields=["quantity"])
