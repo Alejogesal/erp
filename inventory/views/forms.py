@@ -275,6 +275,18 @@ class SaleItemForm(forms.Form):
         self.fields["product"].label_from_instance = _product_label_with_cost_vat
 
 
+class CompanyForm(forms.ModelForm):
+    class Meta:
+        model = Company
+        fields = ["name", "cuit", "fiscal_condition", "is_active"]
+        labels = {
+            "name": "Nombre",
+            "cuit": "CUIT",
+            "fiscal_condition": "Condición fiscal",
+            "is_active": "Activa",
+        }
+
+
 class StockTransferForm(forms.Form):
     product = forms.ModelChoiceField(queryset=Product.objects.all(), label="Producto")
     quantity = forms.DecimalField(min_value=Decimal("0.01"), decimal_places=2, label="Cantidad")

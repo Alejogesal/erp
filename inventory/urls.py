@@ -21,6 +21,7 @@ urlpatterns = [
     path("productos/<int:product_id>/variedades/", views.product_variants, name="inventory_product_variants"),
     path("productos/precios/<str:audience>/", views.product_prices_download, name="inventory_product_prices_download"),
     path("productos/importar-costos/", views.import_costs_xlsx, name="inventory_import_costs"),
+    path("empresas/", views.companies_view, name="inventory_companies"),
     path("clientes/", views.customers_view, name="inventory_customers"),
     path("clientes/<int:customer_id>/historial/", views.customer_history_view, name="inventory_customer_history"),
     path("clientes/<int:customer_id>/nota-de-credito/", views.create_credit_note, name="inventory_create_credit_note"),

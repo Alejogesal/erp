@@ -1,0 +1,58 @@
+{% extends "inventory/base.html" %}
+{% block title %}Empresas{% endblock %}
+{% block content %}
+<h1>Empresas</h1>
+<p class="subtitle">Cada empresa es una cuenta de MercadoLibre con su propio CUIT: creála acá, conectala desde MercadoLibre y va a aparecer como pestaña en Dashboard, Stock, Ventas, Compras e Impuestos/Gastos.</p>
+
+<div class="card" style="margin-bottom:16px;">
+    <div class="card-title">{% if editing %}Editar «{{ editing.name }}»{% else %}Nueva empresa{% endif %}</div>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="save_company">
+        {% if editing %}<input type="hidden" name="company_id" value="{{ editing.id }}">{% endif %}
+        {{ form.as_p }}
+        <button type="submit">{% if editing %}Guardar cambios{% else %}Crear empresa{% endif %}</button>
+        {% if editing %}<a class="pill" href="{% url 'inventory_companies' %}" style="margin-left:8px;">Cancelar</a>{% endif %}
+    </form>
+</div>
+
+<div class="card table-card">
+    <div class="card-title">Cuentas</div>
+    <table>
+        <thead>
+            <tr>
+                <th>Nombre</th>
+                <th>CUIT</th>
+                <th>Condición fiscal</th>
+                <th>Activa</th>
+                <th>Depósito Full</th>
+                <th>MercadoLibre</th>
+                <th>Acciones</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            <tr>
+                <td>{{ row.company.name }}</td>
+                <td>{{ row.company.cuit|default:"—" }}</td>
+                <td>{{ row.company.fiscal_condition|default:"—" }}</td>
+                <td>{% if row.company.is_active %}Sí{% else %}No{% endif %}</td>
+                <td>{{ row.warehouse.name|default:"—" }}</td>
+                <td>
+                    {% if row.is_connected %}
+                    <span class="pill" style="background:rgba(46,160,67,0.15); color:#2ea043;">Conectada{% if row.connection.nickname %} ({{ row.connection.nickname }}){% endif %}</span>
+                    {% else %}
+                    <a class="pill" href="{% url 'inventory_mercadolibre_dashboard' %}?company={{ row.company.id }}">Conectar</a>
+                    {% endif %}
+                </td>
+                <td>
+                    <a class="pill" href="?edit={{ row.company.id }}">Editar</a>
+                </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="7">Todavía no hay empresas cargadas.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
