@@ -100,6 +100,12 @@
         <input type="hidden" name="action" value="create_product">
         <div class="product-form-grid">
             <div>
+                {{ product_form.sku.label_tag }}
+                {{ product_form.sku }}
+                {{ product_form.sku.errors }}
+                <p class="subtitle" style="margin:4px 0 0; font-size:11px;">En blanco, se genera uno solo.</p>
+            </div>
+            <div>
                 {{ product_form.name.label_tag }}
                 {{ product_form.name }}
                 {{ product_form.name.errors }}
@@ -214,6 +220,7 @@
         <table>
             <thead>
                 <tr>
+                <th>SKU</th>
                 <th>Producto</th>
                 <th>Marca / Grupo</th>
                 <th>Proveedor</th>
@@ -228,6 +235,10 @@
             <tr>
                     <td>
                         {{ form.product_id }}
+                        {{ form.sku }}
+                        {{ form.sku.errors }}
+                    </td>
+                    <td>
                         {{ form.name }}
                         {{ form.name.errors }}
                         <div style="margin-top:6px; font-size:12px;">
@@ -251,7 +262,7 @@
                     </td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="7">Aún no hay productos cargados.</td></tr>
+                <tr><td colspan="8">Aún no hay productos cargados.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

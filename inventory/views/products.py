@@ -388,6 +388,7 @@ def product_costs(request):
     initial = [
         {
             "product_id": product.id,
+            "sku": product.sku or "",
             "name": product.name,
             "group": product.group,
             "supplier": product.default_supplier,
@@ -672,20 +673,28 @@ def product_costs(request):
                         {"formset": formset, "product_form": product_form},
                     )
 
+                sku_conflicts = []
                 for form in formset:
                     product = product_map.get(form.cleaned_data["product_id"])
                     if not product:
                         continue
                     # Costo e IVA NO se editan acá: salen del proveedor principal
-                    # (se cargan en Proveedores). Solo nombre, grupo, márgenes y
-                    # el proveedor principal.
+                    # (se cargan en Proveedores). Solo SKU, nombre, grupo,
+                    # márgenes y el proveedor principal.
                     supplier = form.cleaned_data.get("supplier")
+                    sku = (form.cleaned_data.get("sku") or "").strip()
                     name = form.cleaned_data.get("name") or product.name
                     group = (form.cleaned_data.get("group") or "").strip()
                     margin_consumer = form.cleaned_data.get("margin_consumer")
                     margin_barber = form.cleaned_data.get("margin_barber")
                     margin_distributor = form.cleaned_data.get("margin_distributor")
                     update_fields = []
+                    if (product.sku or "") != sku:
+                        if sku and Product.objects.filter(sku__iexact=sku).exclude(pk=product.pk).exists():
+                            sku_conflicts.append(f"{product.name}: el SKU «{sku}» ya lo usa otro producto.")
+                        else:
+                            product.sku = sku or None
+                            update_fields.append("sku")
                     if product.name != name:
                         product.name = name
                         update_fields.append("name")
@@ -711,7 +720,13 @@ def product_costs(request):
                     # de ese proveedor (si la tiene).
                     if supplier_changed:
                         services.sync_product_cost_from_principal(product)
-                messages.success(request, "Márgenes y proveedor principal actualizados. El costo se edita en Proveedores.")
+                if sku_conflicts:
+                    messages.warning(
+                        request,
+                        "Se guardó el resto, pero no se pudo asignar el SKU en: " + " | ".join(sku_conflicts),
+                    )
+                else:
+                    messages.success(request, "Cambios guardados. El costo se edita en Proveedores.")
                 return redirect("inventory_product_costs")
             messages.error(request, "Revisá los costos ingresados.")
     return render(

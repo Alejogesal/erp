@@ -349,6 +349,7 @@ class ProductCostRowForm(_CommaDecimalFormMixin, forms.Form):
     )
 
     product_id = forms.IntegerField(widget=forms.HiddenInput)
+    sku = forms.CharField(required=False, label="SKU")
     name = forms.CharField(required=True, label="Producto")
     group = forms.CharField(required=False, label="Marca / Grupo")
     supplier = forms.ModelChoiceField(queryset=Supplier.objects.all(), required=False, label="Proveedor")
