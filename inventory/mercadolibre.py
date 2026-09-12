@@ -1884,9 +1884,11 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
                     target.variant = variant
                     to_update.append("variant")
                 if not target.cost_unit or target.cost_unit <= Decimal("0.00"):
-                    new_cost = product.last_purchase_cost()
-                    if not new_cost or new_cost <= Decimal("0.00"):
-                        new_cost = product.cost_with_vat()
+                    # Costo del proveedor principal, no el del último movimiento
+                    # de stock (que puede ser de otro proveedor o una
+                    # bonificación a $0) — mismo criterio que el resto del
+                    # sistema usa para el margen.
+                    new_cost = product.cost_with_vat()
                     if new_cost and new_cost > Decimal("0.00"):
                         target.cost_unit = new_cost
                         to_update.append("cost_unit")
@@ -1914,9 +1916,9 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
         Sale.objects.filter(pk=sale.pk).update(created_at=order_date)
     for product, quantity, unit_price, vat_percent, variant, _item_id in matched_items:
         line_total = (unit_price * quantity).quantize(Decimal("0.01"))
-        cost_unit = product.last_purchase_cost()
-        if not cost_unit or cost_unit <= Decimal("0.00"):
-            cost_unit = product.cost_with_vat()
+        # Costo del proveedor principal, no el del último movimiento de stock —
+        # mismo criterio que el resto del sistema usa para el margen.
+        cost_unit = product.cost_with_vat()
         SaleItem.objects.create(
             sale=sale,
             product=product,

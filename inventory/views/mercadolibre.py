@@ -548,8 +548,6 @@ def mercadolibre_dashboard(request):
             fixed = 0
             for item in items_to_fix:
                 new_cost = item.product.cost_with_vat()
-                if not new_cost or new_cost <= _Dec("0.00"):
-                    new_cost = item.product.last_purchase_cost()
                 if new_cost and new_cost > _Dec("0.00"):
                     item.cost_unit = new_cost
                     item.save(update_fields=["cost_unit"])
