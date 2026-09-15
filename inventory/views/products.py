@@ -552,8 +552,17 @@ def product_costs(request):
             if not product:
                 return JsonResponse({"ok": False, "error": "product_not_found"}, status=404)
             # Costo e IVA no se editan acá: se cargan en Proveedores y se reflejan
-            # desde el proveedor principal. Solo se guardan los márgenes.
+            # desde el proveedor principal. Solo se guardan el SKU y los márgenes.
             update_fields = []
+            sku_conflict = None
+            if "sku" in request.POST:
+                sku = (request.POST.get("sku") or "").strip()
+                if (product.sku or "") != sku:
+                    if sku and Product.objects.filter(sku__iexact=sku).exclude(pk=product.pk).exists():
+                        sku_conflict = sku
+                    else:
+                        product.sku = sku or None
+                        update_fields.append("sku")
             if "margin_consumer" in request.POST:
                 margin_consumer = _parse_decimal(request.POST.get("margin_consumer"))
                 if product.margin_consumer != margin_consumer:
@@ -571,6 +580,15 @@ def product_costs(request):
                     update_fields.append("margin_distributor")
             if update_fields:
                 product.save(update_fields=update_fields)
+            if sku_conflict:
+                return JsonResponse(
+                    {
+                        "ok": False,
+                        "error": "sku_conflict",
+                        "message": f"El SKU «{sku_conflict}» ya lo usa otro producto.",
+                    },
+                    status=409,
+                )
             return JsonResponse({"ok": True})
         elif action == "bulk_update":
             bulk_form = ProductBulkUpdateForm(request.POST)
