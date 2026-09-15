@@ -93,20 +93,26 @@ class Command(BaseCommand):
                 Q(product__name__icontains=product_filter) | Q(product__sku__icontains=product_filter)
             )
 
+        # Publicaciones sin variedad elegida: la reconciliación las deja
+        # explícitamente afuera ("las que no tienen variedad elegida no se
+        # tocan"), así que comparar su flex_quantity contra el total del
+        # producto no dice nada — se separan aparte, agrupadas por producto,
+        # porque varias publicaciones sin variedad apuntando al MISMO producto
+        # es en sí mismo la señal de un mapeo SKU/variante mal hecho.
+        no_variant_by_product: dict[int, list] = {}
         push_mismatches = []
         for item in flex_items:
             if item.variant_id:
                 variant = ProductVariant.objects.filter(id=item.variant_id).first()
                 real_qty = int(variant.quantity) if variant else None
+                if real_qty is None:
+                    continue
+                if item.flex_quantity != real_qty:
+                    push_mismatches.append((item, real_qty))
             else:
-                stock = Stock.objects.filter(product=item.product, warehouse=comun_wh).first()
-                real_qty = int(stock.quantity) if stock else 0
-            if real_qty is None:
-                continue
-            if item.flex_quantity != real_qty:
-                push_mismatches.append((item, real_qty))
+                no_variant_by_product.setdefault(item.product_id, []).append(item)
 
-        self.stdout.write(self.style.WARNING("\n=== Publicaciones Flex: último stock empujado a ML vs. COMUN real ahora ==="))
+        self.stdout.write(self.style.WARNING("\n=== Publicaciones Flex CON variedad asignada: último stock empujado a ML vs. COMUN real ==="))
         if not push_mismatches:
             self.stdout.write("  (ninguna desalineada)")
         for item, real_qty in sorted(push_mismatches, key=lambda t: -(t[0].flex_quantity - t[1])):
@@ -115,6 +121,20 @@ class Command(BaseCommand):
             self.stdout.write(
                 f"  {item.item_id:<16} {item.title[:40]:<40} publicado={item.flex_quantity:>6} real={real_qty:>6}{riesgo}"
             )
+
+        self.stdout.write(self.style.WARNING("\n=== Publicaciones Flex SIN variedad asignada (la reconciliación no las toca) ==="))
+        if not no_variant_by_product:
+            self.stdout.write("  (ninguna)")
+        for product_id, items in no_variant_by_product.items():
+            product = items[0].product
+            stock = Stock.objects.filter(product=product, warehouse=comun_wh).first()
+            comun_total = stock.quantity if stock else Decimal("0.00")
+            compartido = " *** varias publicaciones distintas comparten el mismo producto del ERP ***" if len(items) > 1 else ""
+            self.stdout.write(
+                f"  Producto #{product_id} {product.sku or product.name:<20} COMUN total={comun_total}{compartido}"
+            )
+            for item in items:
+                self.stdout.write(f"      {item.item_id:<16} {item.title[:50]:<50} publicado={item.flex_quantity}")
 
         # --- 3. Stock COMUN negativo: sobreventa ya concretada ---
         negativos = Stock.objects.filter(warehouse=comun_wh, quantity__lt=0).select_related("product")
