@@ -12,6 +12,8 @@ from .products import (
     product_prices,
     product_prices_download,
     product_search,
+    product_sku_bulk_update,
+    product_sku_export,
     product_variants,
 )
 from .sales import (
@@ -62,6 +64,8 @@ __all__ = [
     "product_prices",
     "product_prices_download",
     "product_search",
+    "product_sku_bulk_update",
+    "product_sku_export",
     "product_variants",
     "register_sale",
     "sale_delete",

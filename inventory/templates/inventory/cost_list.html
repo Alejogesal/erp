@@ -211,11 +211,12 @@
 
 <div class="card table-card" id="productos">
     <div class="card-title">Productos</div>
-    <div style="margin: 8px 0 12px;">
-        <div class="product-filter">
+    <div style="margin: 8px 0 12px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+        <div class="product-filter" style="flex:1; min-width:220px;">
             <span class="hint">Buscar</span>
             <input id="product-filter" type="text" placeholder="Producto, marca o proveedor">
         </div>
+        <a class="pill" href="{% url 'inventory_product_sku_bulk_update' %}">Cambiar SKU masivamente</a>
     </div>
     <form method="post">
         {% csrf_token %}

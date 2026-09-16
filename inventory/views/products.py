@@ -105,16 +105,20 @@ def _push_variant_stock_to_ml(product) -> None:
         pass
 
 
-def _variant_sku_taken(sku: str, *, exclude_variant_id: int | None = None) -> bool:
-    """El SKU ya lo usa un producto o (otra) variedad. Comparten el mismo espacio
-    de nombres: no tendría sentido que una variedad y un producto distinto
-    coincidan en SKU, se confundirían en el matcheo de MercadoLibre."""
-    if Product.objects.filter(sku__iexact=sku).exists():
+def _sku_conflict(sku: str, *, exclude_product_id: int | None = None, exclude_variant_id: int | None = None) -> bool:
+    """El SKU ya lo usa otro producto o variedad. Comparten el mismo espacio de
+    nombres: un producto y una variedad de otro producto no pueden coincidir en
+    SKU, porque el matcheo automático de MercadoLibre (match_product_by_sku) los
+    confundiría."""
+    products_qs = Product.objects.filter(sku__iexact=sku)
+    if exclude_product_id:
+        products_qs = products_qs.exclude(pk=exclude_product_id)
+    if products_qs.exists():
         return True
-    qs = ProductVariant.objects.filter(sku__iexact=sku)
+    variants_qs = ProductVariant.objects.filter(sku__iexact=sku)
     if exclude_variant_id:
-        qs = qs.exclude(pk=exclude_variant_id)
-    return qs.exists()
+        variants_qs = variants_qs.exclude(pk=exclude_variant_id)
+    return variants_qs.exists()
 
 
 @login_required
@@ -127,7 +131,7 @@ def product_variants(request, product_id: int):
             add_form = ProductVariantForm(request.POST)
             if add_form.is_valid():
                 sku = (add_form.cleaned_data.get("sku") or "").strip()
-                if sku and _variant_sku_taken(sku):
+                if sku and _sku_conflict(sku):
                     messages.error(request, f"El SKU «{sku}» ya lo usa otro producto o variedad.")
                 else:
                     ProductVariant.objects.create(
@@ -159,7 +163,7 @@ def product_variants(request, product_id: int):
                     update_fields = ["name", "quantity"]
                     sku = (form.cleaned_data.get("sku") or "").strip()
                     if (variant.sku or "") != sku:
-                        if sku and _variant_sku_taken(sku, exclude_variant_id=variant.id):
+                        if sku and _sku_conflict(sku, exclude_variant_id=variant.id):
                             sku_conflicts.append(f"{variant.name}: el SKU «{sku}» ya lo usa otro producto o variedad.")
                         else:
                             variant.sku = sku or None
@@ -591,7 +595,7 @@ def product_costs(request):
             if "sku" in request.POST:
                 sku = (request.POST.get("sku") or "").strip()
                 if (product.sku or "") != sku:
-                    if sku and Product.objects.filter(sku__iexact=sku).exclude(pk=product.pk).exists():
+                    if sku and _sku_conflict(sku, exclude_product_id=product.pk):
                         sku_conflict = sku
                     else:
                         product.sku = sku or None
@@ -741,7 +745,7 @@ def product_costs(request):
                     margin_distributor = form.cleaned_data.get("margin_distributor")
                     update_fields = []
                     if (product.sku or "") != sku:
-                        if sku and Product.objects.filter(sku__iexact=sku).exclude(pk=product.pk).exists():
+                        if sku and _sku_conflict(sku, exclude_product_id=product.pk):
                             sku_conflicts.append(f"{product.name}: el SKU «{sku}» ya lo usa otro producto.")
                         else:
                             product.sku = sku or None
@@ -1000,6 +1004,92 @@ def product_prices_download(request, audience: str):
     )
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
     return response
+
+
+@login_required
+@require_http_methods(["GET"])
+def product_sku_export(request):
+    """CSV para editar SKU de muchos productos a la vez fuera del sistema.
+
+    Trae el id (clave para el reingreso) junto al SKU actual y el nombre, para
+    poder ubicar cada fila en la planilla sin adivinar. No incluye variedades:
+    el SKU de variedad se sigue cargando desde Productos > Variedades.
+    """
+    import csv
+    import io
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["id", "sku", "nombre", "grupo"])
+    for product in Product.objects.order_by("sku", "name"):
+        writer.writerow([product.id, product.sku or "", product.name, product.group or ""])
+    response = HttpResponse(buffer.getvalue(), content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = 'attachment; filename="productos_sku.csv"'
+    return response
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def product_sku_bulk_update(request):
+    """Sube de nuevo el CSV de product_sku_export con la columna sku editada.
+
+    Matchea por id (no por sku: el SKU es justamente lo que está cambiando).
+    Filas sin id válido, o cuyo SKU nuevo choca con el de otro producto o
+    variedad, se saltean con un aviso — el resto se aplica igual, mismo
+    criterio que el resto de las cargas masivas del sistema.
+    """
+    if request.method == "POST":
+        upload = request.FILES.get("file")
+        if not upload:
+            messages.error(request, "Subí un archivo CSV.")
+            return redirect("inventory_product_sku_bulk_update")
+
+        import csv
+
+        try:
+            decoded = upload.read().decode("utf-8-sig").splitlines()
+            reader = csv.DictReader(decoded)
+        except Exception:
+            messages.error(request, "No se pudo leer el CSV. Verificá el formato.")
+            return redirect("inventory_product_sku_bulk_update")
+
+        normalized_fieldnames = [name.strip().lower() for name in (reader.fieldnames or [])]
+        if "id" not in normalized_fieldnames or "sku" not in normalized_fieldnames:
+            messages.error(request, "El CSV necesita las columnas 'id' y 'sku'. Descargá la plantilla de acá abajo.")
+            return redirect("inventory_product_sku_bulk_update")
+
+        updated = 0
+        skipped_not_found = 0
+        conflicts = []
+        for row in reader:
+            data = {k.strip().lower(): (v or "").strip() for k, v in row.items()}
+            raw_id = data.get("id")
+            if not raw_id or not raw_id.isdigit():
+                continue
+            product = Product.objects.filter(id=int(raw_id)).first()
+            if not product:
+                skipped_not_found += 1
+                continue
+            new_sku = data.get("sku", "")
+            if (product.sku or "") == new_sku:
+                continue
+            if new_sku and _sku_conflict(new_sku, exclude_product_id=product.pk):
+                conflicts.append(f"{product.name} (id {product.id}): el SKU «{new_sku}» ya lo usa otro producto o variedad.")
+                continue
+            product.sku = new_sku or None
+            product.save(update_fields=["sku"])
+            updated += 1
+
+        summary = f"SKU actualizados: {updated}."
+        if skipped_not_found:
+            summary += f" Filas con id inexistente: {skipped_not_found}."
+        if conflicts:
+            messages.warning(request, summary + " No se pudo asignar en: " + " | ".join(conflicts))
+        else:
+            messages.success(request, summary)
+        return redirect("inventory_product_sku_bulk_update")
+
+    return render(request, "inventory/product_sku_bulk_update.html")
 
 
 @login_required

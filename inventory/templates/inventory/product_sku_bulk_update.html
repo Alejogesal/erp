@@ -1,0 +1,27 @@
+{% extends "inventory/base.html" %}
+{% block title %}Cambiar SKU masivamente{% endblock %}
+{% block content %}
+<h1>Cambiar SKU masivamente</h1>
+<p class="subtitle">
+    Descargá el CSV actual, editá la columna SKU en Excel/Sheets y volvé a subirlo.
+    El match es por <strong>id</strong>, así que no hace falta tocar esa columna.
+</p>
+<div class="card" style="margin-bottom:16px;">
+    <div class="card-title">1. Descargar</div>
+    <a class="pill" href="{% url 'inventory_product_sku_export' %}">Descargar CSV con id, SKU y nombre</a>
+</div>
+<div class="card">
+    <div class="card-title">2. Subir el CSV editado</div>
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <label for="csv-file">Archivo CSV</label>
+        <input id="csv-file" name="file" type="file" accept=".csv" required />
+        <button type="submit">Aplicar cambios</button>
+    </form>
+    <p class="subtitle" style="margin-top:12px; font-size:12px;">
+        Filas con un id que no existe se saltean. Si un SKU nuevo ya lo tiene otro
+        producto o una variedad, esa fila puntual no se aplica y el resto sigue igual
+        — se avisa cuáles quedaron afuera.
+    </p>
+</div>
+{% endblock %}
