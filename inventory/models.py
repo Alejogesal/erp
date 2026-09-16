@@ -437,6 +437,24 @@ class BrandSupplier(models.Model):
         return f"{self.group} → {self.supplier.name}"
 
 
+class ExcludedBrand(models.Model):
+    """Marca que no debe entrar en la lista de precios propia.
+
+    Independiente de BrandSupplier: una marca puede tener proveedor principal
+    (para que sus productos tengan costo) y aun así no querer publicarla en la
+    lista de precios. Antes no había forma de excluir una marca que sí tenía
+    proveedor principal, elegido o deducido: si tenía uno, entraba sí o sí.
+    """
+    group = models.CharField(max_length=100, unique=True, help_text="Marca / grupo")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["group"]
+
+    def __str__(self) -> str:
+        return f"{self.group} (excluida de la lista de precios)"
+
+
 class MercadoLibreNotification(models.Model):
     topic = models.CharField(max_length=100, blank=True, default="")
     resource = models.CharField(max_length=255, blank=True, default="")

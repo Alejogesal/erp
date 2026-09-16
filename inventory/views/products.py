@@ -864,7 +864,7 @@ def _price_list_entries(products, *, include_excluded: bool = False) -> list[dic
          (el más barato, del cual sale el costo) como fallback.
     """
     from collections import Counter, defaultdict
-    from ..models import BrandSupplier, SupplierProduct
+    from ..models import BrandSupplier, ExcludedBrand, SupplierProduct
 
     products = list(products)
 
@@ -872,6 +872,8 @@ def _price_list_entries(products, *, include_excluded: bool = False) -> list[dic
         # Las marcas se comparan sin espacios de más ni mayúsculas: el group de los
         # productos y el de BrandSupplier vienen de archivos distintos.
         return (group or "").strip().casefold()
+
+    excluded_groups = {_gkey(g) for g in ExcludedBrand.objects.values_list("group", flat=True)}
 
     brand_supplier_counts: dict[str, Counter] = defaultdict(Counter)
     for p in products:
@@ -914,6 +916,10 @@ def _price_list_entries(products, *, include_excluded: bool = False) -> list[dic
         if not p.group:
             return False
         key = _gkey(p.group)
+        if key in excluded_groups:
+            # Marca excluida a mano: no entra aunque tenga proveedor principal
+            # (elegido o deducido). Independiente de esa elección.
+            return False
         principal = brand_principal.get(key)
         if principal is None:
             return False

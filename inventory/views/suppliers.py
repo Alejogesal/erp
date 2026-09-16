@@ -14,6 +14,7 @@ from django.views.decorators.http import require_http_methods
 
 from ..models import (
     BrandSupplier,
+    ExcludedBrand,
     Product,
     Purchase,
     Supplier,
@@ -883,38 +884,53 @@ def brand_suppliers_page(request):
     if request.method == "POST" and request.POST.get("action") == "bulk_set_brand_suppliers":
         groups = request.POST.getlist("bg_group")
         sup_ids = request.POST.getlist("bg_supplier")
+        # Checkboxes solo viajan cuando están tildados: cada uno manda el nombre
+        # exacto de SU marca como value, así que esto ya es el set de marcas que
+        # quedan excluidas después de guardar (no un delta).
+        excluded_after_save = set(request.POST.getlist("bg_excluded"))
         current = {bs.group.casefold(): bs.supplier_id for bs in BrandSupplier.objects.all()}
+        current_excluded = {eb.group.casefold() for eb in ExcludedBrand.objects.all()}
         assigned = removed = resynced = 0
+        excluded_added = excluded_removed = 0
         for group, sup_raw in zip(groups, sup_ids):
             group = (group or "").strip()
             if not group:
                 continue
             new_sid = int(sup_raw) if sup_raw else None
             cur_sid = current.get(group.casefold())
-            if new_sid == cur_sid:
-                continue  # sin cambios en esta marca
-            if new_sid is None:
-                BrandSupplier.objects.filter(group__iexact=group).delete()
-                removed += 1
-            else:
-                supplier = Supplier.objects.filter(id=new_sid).first()
-                if not supplier:
-                    continue
-                real_group = (
-                    Product.objects.filter(group__iexact=group)
-                    .values_list("group", flat=True)
-                    .first()
-                ) or group
-                BrandSupplier.objects.update_or_create(group=real_group, defaults={"supplier": supplier})
-                assigned += 1
-            for p in Product.objects.filter(group__iexact=group):
-                if sync_principal_to_cheapest(p):
-                    resynced += 1
-        if assigned or removed:
+            if new_sid != cur_sid:
+                if new_sid is None:
+                    BrandSupplier.objects.filter(group__iexact=group).delete()
+                    removed += 1
+                else:
+                    supplier = Supplier.objects.filter(id=new_sid).first()
+                    if supplier:
+                        real_group = (
+                            Product.objects.filter(group__iexact=group)
+                            .values_list("group", flat=True)
+                            .first()
+                        ) or group
+                        BrandSupplier.objects.update_or_create(group=real_group, defaults={"supplier": supplier})
+                        assigned += 1
+                for p in Product.objects.filter(group__iexact=group):
+                    if sync_principal_to_cheapest(p):
+                        resynced += 1
+            # La exclusión de la lista de precios es independiente del proveedor
+            # principal: se guarda aunque el proveedor no haya cambiado.
+            want_excluded = group in excluded_after_save
+            was_excluded = group.casefold() in current_excluded
+            if want_excluded and not was_excluded:
+                ExcludedBrand.objects.update_or_create(group=group)
+                excluded_added += 1
+            elif not want_excluded and was_excluded:
+                ExcludedBrand.objects.filter(group__iexact=group).delete()
+                excluded_removed += 1
+        if assigned or removed or excluded_added or excluded_removed:
             messages.success(
                 request,
                 f"Marcas actualizadas: {assigned} asignadas, {removed} quitadas. "
-                f"Productos reasignados: {resynced}.",
+                f"Productos reasignados: {resynced}. "
+                f"Excluidas de la lista de precios: {excluded_added} agregadas, {excluded_removed} quitadas.",
             )
         else:
             messages.info(request, "No hubo cambios en las marcas.")
@@ -932,6 +948,7 @@ def brand_suppliers_page(request):
     )
     brand_suppliers = list(BrandSupplier.objects.select_related("supplier"))
     current_brand_map = {bs.group.casefold(): bs.supplier_id for bs in brand_suppliers}
+    excluded_group_set = {eb.group.casefold() for eb in ExcludedBrand.objects.all()}
     group_product_count: _Counter = _Counter()
     group_default_counts: dict = _defaultdict(_Counter)
     for row in (
@@ -965,12 +982,17 @@ def brand_suppliers_page(request):
             "product_count": group_product_count.get(group, 0),
             "selected_sid": selected_sid,
             "is_assigned": cur_sid is not None,
+            "is_excluded": group.casefold() in excluded_group_set,
             "options": options,
         })
     return render(
         request,
         "inventory/brand_suppliers.html",
-        {"brand_rows": brand_rows, "assigned_count": len(brand_suppliers)},
+        {
+            "brand_rows": brand_rows,
+            "assigned_count": len(brand_suppliers),
+            "excluded_count": len(excluded_group_set),
+        },
     )
 
 
