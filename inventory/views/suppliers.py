@@ -390,6 +390,19 @@ def suppliers(request):
             else:
                 messages.warning(request, f"La marca '{group}' no tenía proveedor principal fijo.")
             return redirect("inventory_suppliers")
+        elif action == "set_brand_excluded":
+            group = (request.POST.get("group") or "").strip()
+            want_excluded = request.POST.get("excluded") == "1"
+            if not group:
+                messages.error(request, "Elegí una marca.")
+                return redirect("inventory_suppliers")
+            if want_excluded:
+                ExcludedBrand.objects.update_or_create(group=group)
+                messages.success(request, f"'{group}' ya no va a aparecer en tu lista de precios.")
+            else:
+                ExcludedBrand.objects.filter(group__iexact=group).delete()
+                messages.success(request, f"'{group}' vuelve a poder aparecer en tu lista de precios.")
+            return redirect("inventory_suppliers")
         elif action == "import_price_list":
             supplier = Supplier.objects.filter(id=request.POST.get("price_supplier_id")).first()
             upload = request.FILES.get("price_file")
@@ -866,12 +879,15 @@ def brand_supplier_info(request):
         else:
             principal = None
 
+    excluded = ExcludedBrand.objects.filter(group__iexact=group).exists()
+
     return JsonResponse({
         "ok": True,
         "group": group,
         "total": total,
         "principal": principal,
         "suppliers": suppliers,
+        "excluded": excluded,
     })
 
 

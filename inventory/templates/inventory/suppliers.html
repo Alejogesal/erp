@@ -56,6 +56,12 @@
             <input type="hidden" name="group" id="bp-group">
             <input type="hidden" name="supplier" id="bp-supplier">
         </form>
+        <form method="post" id="brand-excluded-form">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="set_brand_excluded">
+            <input type="hidden" name="group" id="bp-excluded-group">
+            <input type="hidden" name="excluded" id="bp-excluded-value">
+        </form>
         <p>
             <label for="bp-select">Marca</label>
             <select id="bp-select">
@@ -529,6 +535,12 @@
             document.getElementById("brand-principal-form").submit();
         };
 
+        const toggleExcluded = (group, exclude) => {
+            document.getElementById("bp-excluded-group").value = group;
+            document.getElementById("bp-excluded-value").value = exclude ? "1" : "0";
+            document.getElementById("brand-excluded-form").submit();
+        };
+
         const render = (data) => {
             const total = data.total;
             const principal = data.principal;
@@ -545,6 +557,24 @@
                 current.textContent = "Esta marca no tiene proveedor principal: no sale en la lista de precios.";
             }
             head.appendChild(current);
+
+            const excludedRow = document.createElement("div");
+            excludedRow.style.cssText = "margin-top:8px; display:flex; align-items:center; gap:10px;";
+            const excludedLabel = document.createElement("span");
+            excludedLabel.style.color = data.excluded ? "#e0a800" : "var(--muted)";
+            excludedLabel.style.fontSize = "13px";
+            excludedLabel.textContent = data.excluded
+                ? "⚠ Excluida a mano: no aparece en tu lista de precios aunque tenga proveedor."
+                : "Aparece en tu lista de precios (si tiene proveedor y precio).";
+            excludedRow.appendChild(excludedLabel);
+            const excludedBtn = document.createElement("button");
+            excludedBtn.type = "button";
+            excludedBtn.className = "pill sm";
+            excludedBtn.style.cssText = "font-size:12px; padding:6px 10px;";
+            excludedBtn.textContent = data.excluded ? "Volver a incluir" : "Excluir de lista de precios";
+            excludedBtn.addEventListener("click", () => toggleExcluded(data.group, !data.excluded));
+            excludedRow.appendChild(excludedBtn);
+            head.appendChild(excludedRow);
 
             rows.innerHTML = "";
             if (!data.suppliers.length) {
