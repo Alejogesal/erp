@@ -667,14 +667,14 @@
                                 <input
                                     type="text"
                                     class="ml-product-typeahead"
-                                    placeholder="Buscar producto..."
+                                    placeholder="Buscar por SKU o nombre..."
                                     list="ml-products-{{ item.id }}"
-                                    value="{% if item.product %}{{ item.product.name }}{% if item.product.group %} ({{ item.product.group }}){% endif %}{% endif %}"
+                                    value="{% if item.product %}{% if item.product.sku %}{{ item.product.sku }} — {% endif %}{{ item.product.name }}{% if item.product.group %} ({{ item.product.group }}){% endif %}{% endif %}"
                                 >
                                 <datalist id="ml-products-{{ item.id }}">
                                     {% for product in products %}
                                     <option
-                                        value="{{ product.name }}{% if product.group %} ({{ product.group }}){% endif %}"
+                                        value="{% if product.sku %}{{ product.sku }} — {% endif %}{{ product.name }}{% if product.group %} ({{ product.group }}){% endif %}"
                                         data-id="{{ product.id }}"
                                     ></option>
                                     {% endfor %}

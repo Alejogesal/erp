@@ -1,0 +1,23 @@
+{% extends "inventory/base.html" %}
+{% block title %}Confirmar reemplazo de cuenta MercadoLibre{% endblock %}
+{% block content %}
+<h1>¿Reemplazar la cuenta de MercadoLibre?</h1>
+<p class="subtitle">
+    <strong>{{ company.name }}</strong> ya tiene conectada una cuenta distinta de MercadoLibre.
+</p>
+<div class="card" style="max-width:640px;">
+    <p>Cuenta actualmente conectada: <strong>{{ current_nickname }}</strong></p>
+    <p>Cuenta que se está por conectar: <strong>{{ new_nickname }}</strong></p>
+    <p style="margin-top:16px;">
+        Si confirmás, se reemplaza el token de la cuenta actual por el de la cuenta nueva
+        para <strong>{{ company.name }}</strong>. Las ventas y publicaciones ya sincronizadas
+        no se borran, pero a partir de ahora el sync de esta empresa va a traer datos de la
+        cuenta nueva.
+    </p>
+    <form method="post" action="{% url 'inventory_mercadolibre_connect_confirm' %}" style="margin-top:16px; display:flex; gap:10px;">
+        {% csrf_token %}
+        <button type="submit" name="confirm" value="1" class="danger">Sí, reemplazar</button>
+        <button type="submit" name="confirm" value="0">Cancelar</button>
+    </form>
+</div>
+{% endblock %}

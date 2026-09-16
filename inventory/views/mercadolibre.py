@@ -48,6 +48,20 @@ def mercadolibre_connect(request):
     return redirect(ml.get_authorize_url(state))
 
 
+def _save_connection_tokens(connection, *, access_token, refresh_token, expires_in, ml_user_id, nickname, user):
+    connection.access_token = access_token
+    connection.refresh_token = refresh_token
+    connection.expires_at = timezone.now() + timedelta(seconds=expires_in) if expires_in else None
+    connection.last_sync_at = timezone.now()
+    connection.ml_user_id = ml_user_id
+    connection.nickname = nickname
+    if not connection.user_id:
+        connection.user = user
+    connection.save(
+        update_fields=["access_token", "refresh_token", "expires_at", "last_sync_at", "ml_user_id", "nickname", "user"]
+    )
+
+
 @login_required
 @require_http_methods(["GET"])
 def mercadolibre_callback(request):
@@ -87,26 +101,92 @@ def mercadolibre_callback(request):
         messages.error(request, "No se pudo completar la conexión con MercadoLibre.")
         return redirect("inventory_mercadolibre_dashboard")
 
+    # Antes esto caía a "la primera empresa activa por orden alfabético"
+    # cuando no se podía identificar la empresa de la sesión. Eso pisaba en
+    # silencio la conexión de otra empresa (get_or_create sobre un
+    # OneToOneField reutiliza la fila existente en vez de crear una nueva).
+    # Ahora, si no se puede identificar la empresa, se corta y se pide
+    # reintentar en vez de adivinar.
     company_id = request.session.pop("ml_connect_company_id", None)
     company = Company.objects.filter(pk=company_id).first() if company_id else None
     if not company:
-        company = Company.objects.filter(is_active=True).order_by("name").first()
-    if company:
-        connection, _ = MercadoLibreConnection.objects.get_or_create(
-            company=company, defaults={"user": request.user}
+        messages.error(
+            request,
+            "No se pudo determinar para qué empresa se estaba conectando esta cuenta. "
+            "Elegí la empresa en el panel de MercadoLibre y volvé a apretar 'Conectar MercadoLibre'.",
         )
-    else:
-        connection, _ = MercadoLibreConnection.objects.get_or_create(user=request.user)
-    connection.access_token = access_token
-    connection.refresh_token = refresh_token
-    connection.expires_at = timezone.now() + timedelta(seconds=expires_in) if expires_in else None
-    connection.last_sync_at = timezone.now()
-    profile = ml.get_user_profile(access_token)
-    connection.ml_user_id = str(profile.get("id", "") or "")
-    connection.nickname = profile.get("nickname", "") or ""
-    connection.save(update_fields=["access_token", "refresh_token", "expires_at", "last_sync_at", "ml_user_id", "nickname"])
+        return redirect("inventory_mercadolibre_dashboard")
 
-    messages.success(request, "MercadoLibre conectado correctamente. Podés recuperar órdenes históricas desde Herramientas avanzadas.")
+    profile = ml.get_user_profile(access_token)
+    ml_user_id = str(profile.get("id", "") or "")
+    nickname = profile.get("nickname", "") or ""
+
+    existing = MercadoLibreConnection.objects.filter(company=company).first()
+    if existing and existing.ml_user_id and ml_user_id and existing.ml_user_id != ml_user_id:
+        # Esta empresa ya tiene otra cuenta de ML conectada: no se pisa en
+        # silencio. Se guarda el token nuevo en la sesión (el "code" de OAuth
+        # ya se usó y no sirve para un segundo intento) y se pide confirmar.
+        request.session["ml_pending_connection"] = {
+            "company_id": company.id,
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "expires_in": expires_in,
+            "ml_user_id": ml_user_id,
+            "nickname": nickname,
+        }
+        return render(
+            request,
+            "inventory/mercadolibre_connect_conflict.html",
+            {
+                "company": company,
+                "current_nickname": existing.nickname or existing.ml_user_id,
+                "new_nickname": nickname or ml_user_id,
+            },
+        )
+
+    connection, _ = MercadoLibreConnection.objects.get_or_create(company=company, defaults={"user": request.user})
+    _save_connection_tokens(
+        connection,
+        access_token=access_token,
+        refresh_token=refresh_token,
+        expires_in=expires_in,
+        ml_user_id=ml_user_id,
+        nickname=nickname,
+        user=request.user,
+    )
+
+    messages.success(
+        request,
+        f"MercadoLibre conectado correctamente a {company.name}. Podés recuperar órdenes históricas desde Herramientas avanzadas.",
+    )
+    return redirect("inventory_mercadolibre_dashboard")
+
+
+@login_required
+@require_http_methods(["POST"])
+def mercadolibre_connect_confirm(request):
+    pending = request.session.pop("ml_pending_connection", None)
+    if not pending:
+        messages.error(request, "No hay ninguna conexión pendiente de confirmar. Volvé a intentar conectar la cuenta.")
+        return redirect("inventory_mercadolibre_dashboard")
+    if request.POST.get("confirm") != "1":
+        messages.info(request, "Conexión cancelada: no se modificó nada.")
+        return redirect("inventory_mercadolibre_dashboard")
+    company = Company.objects.filter(pk=pending["company_id"]).first()
+    if not company:
+        messages.error(request, "La empresa ya no existe.")
+        return redirect("inventory_mercadolibre_dashboard")
+    connection, _ = MercadoLibreConnection.objects.get_or_create(company=company, defaults={"user": request.user})
+    _save_connection_tokens(
+        connection,
+        access_token=pending["access_token"],
+        refresh_token=pending["refresh_token"],
+        expires_in=pending["expires_in"],
+        ml_user_id=pending["ml_user_id"],
+        nickname=pending["nickname"],
+        user=request.user,
+    )
+    messages.success(request, f"MercadoLibre conectado correctamente a {company.name}.")
     return redirect("inventory_mercadolibre_dashboard")
 
 

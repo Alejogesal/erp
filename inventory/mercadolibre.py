@@ -378,6 +378,39 @@ def item_logistic_type(item: dict) -> str:
     return str((item or {}).get("logistic_type") or shipping.get("logistic_type") or "")
 
 
+def seller_sku_from_item(item: dict) -> str:
+    """SKU propio del vendedor para una publicación, a nivel producto.
+
+    ML lo expone como `seller_custom_field` en el nivel superior del ítem;
+    algunas categorías lo mandan solo como el atributo SELLER_SKU. No baja a
+    nivel variación: eso queda para cuando haya SKU por variedad en el ERP.
+    """
+    sku = (item or {}).get("seller_custom_field") or ""
+    if sku:
+        return str(sku).strip()
+    for attr in (item or {}).get("attributes") or []:
+        if str(attr.get("id") or "").upper() == "SELLER_SKU":
+            value = attr.get("value_name") or ""
+            if value:
+                return str(value).strip()
+    return ""
+
+
+def match_product_by_sku(item: dict) -> Product | None:
+    """Matchea una publicación contra un producto del ERP por SKU exacto.
+
+    Es el primer intento de match automático de la integración: hoy el vínculo
+    publicación -> producto es 100% manual (ver link_item en las vistas) o por
+    coincidencia difusa de título, que es justamente lo que mezcló publicaciones
+    de productos distintos con nombres parecidos. El SKU exacto no tiene ese
+    riesgo. Si no matchea, el llamador sigue cayendo al flujo manual de siempre.
+    """
+    sku = seller_sku_from_item(item)
+    if not sku:
+        return None
+    return Product.objects.filter(sku__iexact=sku).first()
+
+
 def item_has_flex(item: dict) -> bool:
     """La publicación tiene Envíos Flex activo.
 
@@ -1061,6 +1094,11 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
         has_flex = tag_flex or (own_location and not full_only)
         product = existing.product if existing else None
         matched_name = existing.matched_name if existing else ""
+        if not product:
+            sku_match = match_product_by_sku(item)
+            if sku_match:
+                product = sku_match
+                matched_name = sku_match.name
         ml_item, _created = MercadoLibreItem.objects.update_or_create(
             item_id=item_id,
             defaults={
@@ -1768,6 +1806,7 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
             logistic_type = item_logistic_type(item_detail)
             permalink = item_detail.get("permalink", "") or ""
             available, user_product_id = resolve_authoritative_stock(connection, item_detail, access_token)
+            sku_match = match_product_by_sku(item_detail)
             MercadoLibreItem.objects.update_or_create(
                 item_id=item_id,
                 defaults={
@@ -1779,8 +1818,12 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
                     "has_flex": item_has_flex(item_detail),
                     "user_product_id": user_product_id,
                     "permalink": permalink,
+                    "product": sku_match,
+                    "matched_name": sku_match.name if sku_match else "",
                 },
             )
+            if sku_match:
+                product = sku_match
         if not product:
             continue
         vat_percent = product.vat_percent or Decimal("0.00")

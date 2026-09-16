@@ -40,6 +40,7 @@ from .suppliers import suppliers, supplier_history_view, brand_suppliers_page, b
 from .mercadolibre import (
     mercadolibre_callback,
     mercadolibre_connect,
+    mercadolibre_connect_confirm,
     mercadolibre_dashboard,
     mercadolibre_messages,
     mercadolibre_webhook,
@@ -88,6 +89,7 @@ __all__ = [
     "brand_supplier_info",
     "mercadolibre_callback",
     "mercadolibre_connect",
+    "mercadolibre_connect_confirm",
     "mercadolibre_dashboard",
     "mercadolibre_messages",
     "mercadolibre_webhook",
