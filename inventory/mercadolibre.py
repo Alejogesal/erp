@@ -396,19 +396,29 @@ def seller_sku_from_item(item: dict) -> str:
     return ""
 
 
-def match_product_by_sku(item: dict) -> Product | None:
-    """Matchea una publicación contra un producto del ERP por SKU exacto.
+def match_product_by_sku(item: dict) -> tuple[Product | None, ProductVariant | None]:
+    """Matchea una publicación contra un producto (y, si corresponde, una
+    variedad puntual) del ERP por SKU exacto.
 
     Es el primer intento de match automático de la integración: hoy el vínculo
     publicación -> producto es 100% manual (ver link_item en las vistas) o por
     coincidencia difusa de título, que es justamente lo que mezcló publicaciones
     de productos distintos con nombres parecidos. El SKU exacto no tiene ese
     riesgo. Si no matchea, el llamador sigue cayendo al flujo manual de siempre.
+
+    Primero se busca contra el SKU de variedad (más específico: resuelve
+    también cuál variedad es esta publicación puntual), y si no hay ninguna
+    variedad con ese SKU, se cae al SKU de producto — que no resuelve la
+    variedad, igual que el matcheo manual sin elegir una.
     """
     sku = seller_sku_from_item(item)
     if not sku:
-        return None
-    return Product.objects.filter(sku__iexact=sku).first()
+        return None, None
+    variant = ProductVariant.objects.filter(sku__iexact=sku).select_related("product").first()
+    if variant:
+        return variant.product, variant
+    product = Product.objects.filter(sku__iexact=sku).first()
+    return product, None
 
 
 def item_has_flex(item: dict) -> bool:
@@ -1093,12 +1103,14 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
         full_only = bool(existing and existing.full_only) and not tag_flex
         has_flex = tag_flex or (own_location and not full_only)
         product = existing.product if existing else None
+        variant = existing.variant if existing else None
         matched_name = existing.matched_name if existing else ""
         if not product:
-            sku_match = match_product_by_sku(item)
-            if sku_match:
-                product = sku_match
-                matched_name = sku_match.name
+            sku_product, sku_variant = match_product_by_sku(item)
+            if sku_product:
+                product = sku_product
+                variant = sku_variant
+                matched_name = sku_product.name
         ml_item, _created = MercadoLibreItem.objects.update_or_create(
             item_id=item_id,
             defaults={
@@ -1114,6 +1126,7 @@ def sync_items_and_stock(connection: MercadoLibreConnection, user, *, ignore_env
                 "user_product_id": user_product_id,
                 "permalink": permalink,
                 "product": product,
+                "variant": variant,
                 "matched_name": matched_name,
             },
         )
@@ -1806,7 +1819,7 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
             logistic_type = item_logistic_type(item_detail)
             permalink = item_detail.get("permalink", "") or ""
             available, user_product_id = resolve_authoritative_stock(connection, item_detail, access_token)
-            sku_match = match_product_by_sku(item_detail)
+            sku_product, sku_variant = match_product_by_sku(item_detail)
             MercadoLibreItem.objects.update_or_create(
                 item_id=item_id,
                 defaults={
@@ -1818,12 +1831,14 @@ def sync_order(connection: MercadoLibreConnection, order_id: str, user) -> tuple
                     "has_flex": item_has_flex(item_detail),
                     "user_product_id": user_product_id,
                     "permalink": permalink,
-                    "product": sku_match,
-                    "matched_name": sku_match.name if sku_match else "",
+                    "product": sku_product,
+                    "variant": sku_variant,
+                    "matched_name": sku_product.name if sku_product else "",
                 },
             )
-            if sku_match:
-                product = sku_match
+            if sku_product:
+                product = sku_product
+                linked_variant = sku_variant
         if not product:
             continue
         vat_percent = product.vat_percent or Decimal("0.00")

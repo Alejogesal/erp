@@ -105,6 +105,18 @@ def _push_variant_stock_to_ml(product) -> None:
         pass
 
 
+def _variant_sku_taken(sku: str, *, exclude_variant_id: int | None = None) -> bool:
+    """El SKU ya lo usa un producto o (otra) variedad. Comparten el mismo espacio
+    de nombres: no tendría sentido que una variedad y un producto distinto
+    coincidan en SKU, se confundirían en el matcheo de MercadoLibre."""
+    if Product.objects.filter(sku__iexact=sku).exists():
+        return True
+    qs = ProductVariant.objects.filter(sku__iexact=sku)
+    if exclude_variant_id:
+        qs = qs.exclude(pk=exclude_variant_id)
+    return qs.exists()
+
+
 @login_required
 def product_variants(request, product_id: int):
     product = get_object_or_404(Product, pk=product_id)
@@ -114,19 +126,26 @@ def product_variants(request, product_id: int):
         if action == "add_variant":
             add_form = ProductVariantForm(request.POST)
             if add_form.is_valid():
-                ProductVariant.objects.create(
-                    product=product,
-                    name=add_form.cleaned_data["name"].strip(),
-                    quantity=add_form.cleaned_data["quantity"],
-                )
-                services.sync_comun_from_variants(product)
-                _push_variant_stock_to_ml(product)
-                messages.success(request, "Variedad agregada.")
-                return redirect("inventory_product_variants", product_id=product.id)
-            messages.error(request, "Revisá los datos de la variedad.")
+                sku = (add_form.cleaned_data.get("sku") or "").strip()
+                if sku and _variant_sku_taken(sku):
+                    messages.error(request, f"El SKU «{sku}» ya lo usa otro producto o variedad.")
+                else:
+                    ProductVariant.objects.create(
+                        product=product,
+                        name=add_form.cleaned_data["name"].strip(),
+                        sku=sku or None,
+                        quantity=add_form.cleaned_data["quantity"],
+                    )
+                    services.sync_comun_from_variants(product)
+                    _push_variant_stock_to_ml(product)
+                    messages.success(request, "Variedad agregada.")
+                    return redirect("inventory_product_variants", product_id=product.id)
+            else:
+                messages.error(request, "Revisá los datos de la variedad.")
         elif action == "update_variants":
             formset = VariantFormSet(request.POST)
             if formset.is_valid():
+                sku_conflicts = []
                 for form in formset:
                     variant_id = form.cleaned_data["variant_id"]
                     variant = ProductVariant.objects.filter(id=variant_id, product=product).first()
@@ -137,16 +156,30 @@ def product_variants(request, product_id: int):
                         continue
                     variant.name = form.cleaned_data["name"].strip()
                     variant.quantity = form.cleaned_data["quantity"]
-                    variant.save(update_fields=["name", "quantity"])
+                    update_fields = ["name", "quantity"]
+                    sku = (form.cleaned_data.get("sku") or "").strip()
+                    if (variant.sku or "") != sku:
+                        if sku and _variant_sku_taken(sku, exclude_variant_id=variant.id):
+                            sku_conflicts.append(f"{variant.name}: el SKU «{sku}» ya lo usa otro producto o variedad.")
+                        else:
+                            variant.sku = sku or None
+                            update_fields.append("sku")
+                    variant.save(update_fields=update_fields)
                 services.sync_comun_from_variants(product)
                 _push_variant_stock_to_ml(product)
-                messages.success(request, "Variedades actualizadas.")
+                if sku_conflicts:
+                    messages.warning(
+                        request,
+                        "Se guardó el resto, pero no se pudo asignar el SKU en: " + " | ".join(sku_conflicts),
+                    )
+                else:
+                    messages.success(request, "Variedades actualizadas.")
                 return redirect("inventory_product_variants", product_id=product.id)
             messages.error(request, "Revisá los datos de las variedades.")
     variants = ProductVariant.objects.filter(product=product).order_by("name", "id")
     formset = VariantFormSet(
         initial=[
-            {"variant_id": v.id, "name": v.name, "quantity": v.quantity, "delete": False}
+            {"variant_id": v.id, "name": v.name, "sku": v.sku or "", "quantity": v.quantity, "delete": False}
             for v in variants
         ]
     )

@@ -16,6 +16,11 @@
                 {{ add_form.name }}
             </div>
             <div>
+                {{ add_form.sku.label_tag }}
+                {{ add_form.sku }}
+                <p class="subtitle" style="margin:4px 0 0; font-size:11px;">Opcional. Habilita el matcheo automático con MercadoLibre.</p>
+            </div>
+            <div>
                 {{ add_form.quantity.label_tag }}
                 {{ add_form.quantity }}
             </div>
@@ -36,6 +41,7 @@
             <thead>
                 <tr>
                     <th>Variedad</th>
+                    <th>SKU</th>
                     <th>Stock (Común)</th>
                     <th>Eliminar</th>
                 </tr>
@@ -47,12 +53,13 @@
                         {{ form.variant_id }}
                         {{ form.name }}
                     </td>
+                    <td>{{ form.sku }}</td>
                     <td>{{ form.quantity }}</td>
                     <td>{{ form.delete }}</td>
                 </tr>
                 {% endfor %}
                 {% if not formset.forms %}
-                <tr><td colspan="3">Aún no hay variedades.</td></tr>
+                <tr><td colspan="4">Aún no hay variedades.</td></tr>
                 {% endif %}
             </tbody>
         </table>

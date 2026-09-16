@@ -833,7 +833,7 @@ def mercadolibre_dashboard(request):
     all_variants: dict[str, list] = {}
     for variant in ProductVariant.objects.order_by("name", "id"):
         all_variants.setdefault(str(variant.product_id), []).append(
-            {"id": variant.id, "name": variant.name, "quantity": f"{variant.quantity:.0f}"}
+            {"id": variant.id, "name": variant.name, "sku": variant.sku or "", "quantity": f"{variant.quantity:.0f}"}
         )
     # Publicaciones matcheadas a un producto con variedades pero sin variedad
     # elegida: son las que quedan sin sincronizar stock hasta que se enlacen.

@@ -226,6 +226,14 @@ class Product(models.Model):
 class ProductVariant(models.Model):
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="variants")
     name = models.CharField(max_length=255)
+    sku = models.CharField(
+        max_length=64,
+        unique=True,
+        blank=True,
+        null=True,
+        help_text="SKU propio de esta variedad puntual. Opcional: sin cargar, el matcheo automático de "
+        "MercadoLibre solo llega al producto y hay que elegir la variedad a mano.",
+    )
     quantity = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
 
     class Meta:

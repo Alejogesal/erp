@@ -690,7 +690,7 @@
                                     <option value="">— Elegí la variedad —</option>
                                     {% for variant in item.product_variants %}
                                     <option value="{{ variant.id }}"{% if variant.id == item.variant_id %} selected{% endif %}>
-                                        {{ variant.name }} ({{ variant.quantity|floatformat:0 }} u.)
+                                        {% if variant.sku %}{{ variant.sku }} — {% endif %}{{ variant.name }} ({{ variant.quantity|floatformat:0 }} u.)
                                     </option>
                                     {% endfor %}
                                 </select>
@@ -844,7 +844,8 @@
                 variants.forEach((variant) => {
                     const opt = document.createElement("option");
                     opt.value = variant.id;
-                    opt.textContent = variant.name + " (" + variant.quantity + " u.)";
+                    const skuPrefix = variant.sku ? variant.sku + " — " : "";
+                    opt.textContent = skuPrefix + variant.name + " (" + variant.quantity + " u.)";
                     variantSelect.appendChild(opt);
                 });
                 variantField.classList.toggle("is-hidden", variants.length === 0);

@@ -329,12 +329,14 @@ class BrandSupplierForm(forms.Form):
 
 class ProductVariantForm(forms.Form):
     name = forms.CharField(label="Variedad")
+    sku = forms.CharField(required=False, label="SKU")
     quantity = forms.DecimalField(min_value=Decimal("0.00"), decimal_places=2, label="Stock")
 
 
 class ProductVariantRowForm(forms.Form):
     variant_id = forms.IntegerField(widget=forms.HiddenInput)
     name = forms.CharField(label="Variedad")
+    sku = forms.CharField(required=False, label="SKU")
     quantity = forms.DecimalField(min_value=Decimal("0.00"), decimal_places=2, label="Stock")
     delete = forms.BooleanField(required=False, label="Eliminar")
 
