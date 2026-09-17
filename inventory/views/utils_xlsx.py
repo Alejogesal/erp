@@ -205,17 +205,59 @@ def _sku_prefix(group: str, description: str) -> str:
 def _normalize_header(value: str) -> str:
     normalized = unicodedata.normalize("NFKD", value)
     without_accents = "".join(c for c in normalized if not unicodedata.combining(c))
-    return without_accents.strip().lower()
+    # BOM y espacio de ancho cero: quedan pegados a la primera celda cuando
+    # Excel guarda un CSV con BOM y se lo vuelve a abrir/guardar como XLSX.
+    without_invisibles = without_accents.replace("﻿", "").replace("​", "")
+    return without_invisibles.strip().lower()
+
+
+_ID_COLUMN_ALIASES = ["id"]
+_SKU_COLUMN_ALIASES = [
+    "sku",
+    "sku_corto",
+    "sku corto",
+    "codigo sku",
+    "codigo",
+    "cod",
+]
+
+
+def _pick_id_sku_indexes(headers: list[str]) -> tuple[int | None, int | None]:
+    """Ubica las columnas id/sku por nombre, tolerando variantes comunes
+    (mayúsculas, acentos, y alias como 'sku_corto' o 'codigo')."""
+    header_map: dict[str, int] = {}
+    for idx, header in enumerate(headers):
+        if not header:
+            continue
+        normalized = _normalize_header(str(header))
+        if normalized and normalized not in header_map:
+            header_map[normalized] = idx
+
+    def _pick(aliases: list[str]) -> int | None:
+        for alias in aliases:
+            if alias in header_map:
+                return header_map[alias]
+        return None
+
+    return _pick(_ID_COLUMN_ALIASES), _pick(_SKU_COLUMN_ALIASES)
 
 
 def _read_id_sku_rows(upload) -> tuple[list[dict[str, str]], str | None]:
     """Lee un archivo de reingreso de SKU (CSV o XLSX) con columnas id/sku.
 
-    Devuelve filas normalizadas (claves en minúscula, valores en texto) o un
+    Devuelve filas con claves fijas 'id' y 'sku' (valores en texto) o un
     mensaje de error listo para mostrarle al usuario. Acepta CSV separado por
-    coma o punto y coma (Excel en español suele guardar CSV con ';'), y XLSX.
+    coma o punto y coma (Excel en español suele guardar CSV con ';'), XLSX, y
+    variantes del nombre de la columna SKU (p. ej. 'sku_corto', 'codigo').
     """
     name = (getattr(upload, "name", "") or "").lower()
+
+    def _cell_to_str(value) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, float) and value.is_integer():
+            return str(int(value))
+        return str(value).strip()
 
     if name.endswith(".xlsx"):
         try:
@@ -232,44 +274,55 @@ def _read_id_sku_rows(upload) -> tuple[list[dict[str, str]], str | None]:
         except Exception:
             return [], "No se pudo leer el archivo XLSX. Verificá el formato."
 
-        headers = [str(h).strip().lower() if h is not None else "" for h in header_row]
-
-        def _cell_to_str(value) -> str:
-            if value is None:
-                return ""
-            if isinstance(value, float) and value.is_integer():
-                return str(int(value))
-            return str(value).strip()
+        headers = [str(h) if h is not None else "" for h in header_row]
+        id_idx, sku_idx = _pick_id_sku_indexes(headers)
+        if id_idx is None or sku_idx is None:
+            return [], "El archivo necesita las columnas 'id' y 'sku'. Descargá la plantilla de acá abajo."
 
         rows = []
         for row in rows_iter:
-            data = {}
-            for idx, header in enumerate(headers):
-                if not header:
-                    continue
-                data[header] = _cell_to_str(row[idx] if idx < len(row) else None)
-            rows.append(data)
-    else:
-        import csv
+            if row is None or all(v is None for v in row):
+                continue
+            rows.append(
+                {
+                    "id": _cell_to_str(row[id_idx] if id_idx < len(row) else None),
+                    "sku": _cell_to_str(row[sku_idx] if sku_idx < len(row) else None),
+                }
+            )
+        return rows, None
 
-        try:
-            decoded = upload.read().decode("utf-8-sig").splitlines()
-        except Exception:
-            return [], "No se pudo leer el archivo. Verificá el formato."
-        try:
-            delimiter = csv.Sniffer().sniff(decoded[0], delimiters=",;").delimiter if decoded else ","
-        except csv.Error:
-            delimiter = ","
-        try:
-            reader = csv.DictReader(decoded, delimiter=delimiter)
-            headers = [name.strip().lower() for name in (reader.fieldnames or [])]
-            rows = [{k.strip().lower(): (v or "").strip() for k, v in row.items()} for row in reader]
-        except Exception:
-            return [], "No se pudo leer el archivo. Verificá el formato."
+    import csv
 
-    if "id" not in headers or "sku" not in headers:
+    try:
+        decoded = upload.read().decode("utf-8-sig").splitlines()
+    except Exception:
+        return [], "No se pudo leer el archivo. Verificá el formato."
+    if not decoded:
+        return [], "El archivo está vacío."
+    try:
+        delimiter = csv.Sniffer().sniff(decoded[0], delimiters=",;").delimiter
+    except csv.Error:
+        delimiter = ","
+    try:
+        reader = csv.reader(decoded, delimiter=delimiter)
+        headers = next(reader)
+    except Exception:
+        return [], "No se pudo leer el archivo. Verificá el formato."
+
+    id_idx, sku_idx = _pick_id_sku_indexes(headers)
+    if id_idx is None or sku_idx is None:
         return [], "El archivo necesita las columnas 'id' y 'sku'. Descargá la plantilla de acá abajo."
 
+    rows = []
+    for row in reader:
+        if not row:
+            continue
+        rows.append(
+            {
+                "id": (row[id_idx].strip() if id_idx < len(row) and row[id_idx] else ""),
+                "sku": (row[sku_idx].strip() if sku_idx < len(row) and row[sku_idx] else ""),
+            }
+        )
     return rows, None
 
 
