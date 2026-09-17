@@ -230,6 +230,7 @@
                         <button type="submit" class="pill sm" style="font-size:12px; padding:4px 8px;" onclick="return confirm('¿Eliminar este producto?');">Eliminar</button>
                     </form>
                     {% if entry.brand %}
+                    {% ifchanged entry.brand %}
                     <form method="post" action="{% url 'inventory_product_prices' %}" style="display:inline;">
                         {% csrf_token %}
                         <input type="hidden" name="action" value="set_brand_excluded">
@@ -237,12 +238,13 @@
                         <input type="hidden" name="todos" value="{% if show_all %}1{% endif %}">
                         {% if entry.excluded %}
                         <input type="hidden" name="excluded" value="0">
-                        <button type="submit" class="pill sm" style="font-size:12px; padding:4px 8px;" title="Volver a incluir toda la marca '{{ entry.brand }}' en la lista">Incluir marca</button>
+                        <button type="submit" class="pill sm" style="font-size:12px; padding:4px 8px;" title="Volver a incluir toda la marca '{{ entry.brand }}' en la lista">Incluir marca «{{ entry.brand }}»</button>
                         {% else %}
                         <input type="hidden" name="excluded" value="1">
-                        <button type="submit" class="pill sm" style="font-size:12px; padding:4px 8px;" onclick="return confirm('¿Excluir toda la marca «{{ entry.brand }}» de tu lista de precios?');" title="Excluir toda la marca '{{ entry.brand }}' de la lista">Excluir marca</button>
+                        <button type="submit" class="pill sm" style="font-size:12px; padding:4px 8px;" onclick="return confirm('¿Excluir la marca «{{ entry.brand }}» completa de tu lista de precios? Afecta a todos sus productos, no solo a este.');" title="Excluir toda la marca '{{ entry.brand }}' de la lista">Excluir marca «{{ entry.brand }}»</button>
                         {% endif %}
                     </form>
+                    {% endifchanged %}
                     {% endif %}
                 </td>
             </tr>

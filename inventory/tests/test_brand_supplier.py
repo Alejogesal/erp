@@ -261,6 +261,28 @@ class BrandListNamingTests(TestCase):
 
         self.assertEqual(self._rows(), [])
 
+    def test_deduced_principal_also_ignores_stale_default_supplier(self):
+        # Mismo caso que el anterior, pero SIN elección explícita (BrandSupplier):
+        # el principal se deduce del default_supplier más frecuente de la marca.
+        # Antes, esta rama solo comparaba default_supplier_id == principal sin
+        # verificar que existiera un vínculo con precio real, así que un producto
+        # desincronizado (o sin vínculo real con ese proveedor) se colaba igual.
+        otro = Product.objects.create(
+            name="Fidelite con Aris real", group="FIDELITE", margin_consumer=Decimal("0.00"),
+            default_supplier=self.aris,
+        )
+        SupplierProduct.objects.create(supplier=self.aris, product=otro, last_cost=Decimal("90"))
+
+        solo_glm = Product.objects.create(
+            name="Fidelite solo GLM", group="FIDELITE", margin_consumer=Decimal("0.00"),
+            default_supplier=self.aris,  # desincronizado: Aris no lo tiene vinculado
+        )
+        SupplierProduct.objects.create(supplier=self.glm, product=solo_glm, last_cost=Decimal("70"))
+
+        nombres = [r[1] for r in self._rows()]
+        self.assertIn("Fidelite con Aris real", nombres)
+        self.assertNotIn("Fidelite solo GLM", nombres)
+
     def test_brand_matching_ignores_case_and_spaces(self):
         p = Product.objects.create(name="Interno", group=" Fidelite ", margin_consumer=Decimal("0.00"))
         SupplierProduct.objects.create(
@@ -341,6 +363,59 @@ class SuppliersPageLoadTests(TestCase):
         resp = self.client.get(reverse("inventory_suppliers"))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Prod 1")
+
+    def test_brand_rows_per_supplier_counts_products_and_priced(self):
+        # Marcas que cubre cada proveedor, con cuántos productos tiene y cuántos
+        # de esos tienen precio cargado — la base del desplegable "traer marca".
+        aris = Supplier.objects.create(name="Aris Norma")
+        glm = Supplier.objects.create(name="GLM Distribuidora")
+        con_precio = Product.objects.create(name="Con precio", group="Fidelite")
+        sin_precio = Product.objects.create(name="Sin precio", group="Fidelite")
+        otra_marca = Product.objects.create(name="Otra marca", group="Alfaparf")
+        SupplierProduct.objects.create(supplier=aris, product=con_precio, last_cost=Decimal("100"))
+        SupplierProduct.objects.create(supplier=aris, product=sin_precio, last_cost=Decimal("0"))
+        SupplierProduct.objects.create(supplier=aris, product=otra_marca, last_cost=Decimal("50"))
+        SupplierProduct.objects.create(supplier=glm, product=con_precio, last_cost=Decimal("90"))
+
+        resp = self.client.get(reverse("inventory_suppliers"))
+        self.assertEqual(resp.status_code, 200)
+        aris_rows = {r["group"]: r for r in next(s for s in resp.context["suppliers"] if s.id == aris.id).brand_rows}
+        self.assertEqual(aris_rows["Fidelite"]["total"], 2)
+        self.assertEqual(aris_rows["Fidelite"]["priced"], 1)
+        self.assertEqual(aris_rows["Alfaparf"]["total"], 1)
+        glm_rows = {r["group"]: r for r in next(s for s in resp.context["suppliers"] if s.id == glm.id).brand_rows}
+        self.assertEqual(glm_rows["Fidelite"]["total"], 1)
+        self.assertNotIn("Alfaparf", glm_rows)
+
+    def test_brand_row_is_mine_reflects_current_brand_supplier(self):
+        aris = Supplier.objects.create(name="Aris Norma")
+        glm = Supplier.objects.create(name="GLM Distribuidora")
+        product = Product.objects.create(name="Prod", group="Fidelite")
+        SupplierProduct.objects.create(supplier=aris, product=product, last_cost=Decimal("100"))
+        SupplierProduct.objects.create(supplier=glm, product=product, last_cost=Decimal("90"))
+        BrandSupplier.objects.create(group="Fidelite", supplier=glm)
+
+        resp = self.client.get(reverse("inventory_suppliers"))
+        aris_rows = {r["group"]: r for r in next(s for s in resp.context["suppliers"] if s.id == aris.id).brand_rows}
+        glm_rows = {r["group"]: r for r in next(s for s in resp.context["suppliers"] if s.id == glm.id).brand_rows}
+        self.assertFalse(aris_rows["Fidelite"]["is_mine"])
+        self.assertTrue(glm_rows["Fidelite"]["is_mine"])
+
+    def test_bring_brand_button_reassigns_products_from_supplier_page(self):
+        aris = Supplier.objects.create(name="Aris Norma")
+        glm = Supplier.objects.create(name="GLM Distribuidora")
+        product = Product.objects.create(name="Prod", group="Fidelite", margin_consumer=Decimal("0.00"))
+        SupplierProduct.objects.create(supplier=aris, product=product, last_cost=Decimal("100"))
+        SupplierProduct.objects.create(supplier=glm, product=product, last_cost=Decimal("90"))
+
+        resp = self.client.post(
+            reverse("inventory_suppliers"),
+            {"action": "set_brand_supplier", "group": "Fidelite", "supplier": glm.id},
+        )
+        self.assertRedirects(resp, reverse("inventory_suppliers"))
+        self.assertTrue(BrandSupplier.objects.filter(group__iexact="Fidelite", supplier=glm).exists())
+        product.refresh_from_db()
+        self.assertEqual(product.default_supplier_id, glm.id)
 
 
 class BrandSupplierInfoTests(TestCase):

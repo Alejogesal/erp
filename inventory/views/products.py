@@ -943,15 +943,14 @@ def _price_list_entries(products, *, include_excluded: bool = False) -> list[dic
         principal = brand_principal.get(key)
         if principal is None:
             return False
-        if key in pinned:
-            # Marca con proveedor elegido: entra solo lo que está en SU lista con
-            # precio. No depende de que default_supplier esté sincronizado, así que
-            # un producto que solo tiene el otro proveedor nunca se cuela.
-            link = principal_link.get(p.id)
-            return link is not None and link.cost_net > Decimal("0.00")
-        # Marca sin elección explícita: el principal es deducido, se sigue usando el
-        # proveedor principal ya resuelto del producto.
-        return p.default_supplier_id == principal
+        # Entra solo lo que el proveedor principal (elegido o deducido) tiene
+        # REALMENTE vinculado con precio cargado. Antes, sin elección explícita
+        # (deducido), solo se miraba default_supplier_id == principal sin
+        # chequear que existiera ese vínculo con precio: un producto cuyo
+        # default_supplier había quedado desincronizado (o nunca tuvo vínculo
+        # real con ese proveedor) se colaba en la lista igual.
+        link = principal_link.get(p.id)
+        return link is not None and link.cost_net > Decimal("0.00")
 
     def _name(p) -> str:
         # Como lo escribe el proveedor principal de la marca. Product.name conserva

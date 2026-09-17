@@ -738,6 +738,34 @@ def suppliers(request):
     brand_suppliers = list(
         BrandSupplier.objects.select_related("supplier").order_by("group")
     )
+    # Marcas que cubre cada proveedor (para el desplegable "traer esta marca a mi
+    # lista" de cada uno). Usa el prefetch de supplier_products ya cargado: no
+    # dispara consultas nuevas.
+    current_brand_supplier = {bs.group.casefold(): bs.supplier_id for bs in brand_suppliers}
+    for supplier in suppliers_qs:
+        brand_totals: Counter = Counter()
+        brand_priced: Counter = Counter()
+        brand_label: dict[str, str] = {}
+        for sp in supplier.supplier_products.all():
+            group = (sp.product.group or "").strip()
+            if not group:
+                continue
+            key = group.casefold()
+            brand_totals[key] += 1
+            if sp.cost_net and sp.cost_net > Decimal("0.00"):
+                brand_priced[key] += 1
+            brand_label.setdefault(key, group)
+        rows = [
+            {
+                "group": brand_label[key],
+                "total": total,
+                "priced": brand_priced.get(key, 0),
+                "is_mine": current_brand_supplier.get(key) == supplier.id,
+            }
+            for key, total in brand_totals.items()
+        ]
+        rows.sort(key=lambda r: r["group"].casefold())
+        supplier.brand_rows = rows
     context = {
         "supplier_form": supplier_form,
         "link_form": link_form,
