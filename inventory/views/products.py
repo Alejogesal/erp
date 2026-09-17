@@ -9,6 +9,7 @@ from django.db.models.deletion import ProtectedError
 from django.forms import formset_factory
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.text import slugify
 from django.views.decorators.http import require_http_methods
@@ -219,6 +220,23 @@ def product_prices(request):
             product.save(update_fields=["price_consumer", "price_barber", "price_distributor"])
             messages.success(request, "Precios actualizados.")
             return redirect("inventory_product_prices")
+        if action == "set_brand_excluded":
+            from ..models import ExcludedBrand
+
+            group = (request.POST.get("group") or "").strip()
+            want_excluded = request.POST.get("excluded") == "1"
+            redirect_qs = "?todos=1" if request.POST.get("todos") == "1" else ""
+            redirect_to = f"{reverse('inventory_product_prices')}{redirect_qs}"
+            if not group:
+                messages.error(request, "Elegí una marca.")
+                return redirect(redirect_to)
+            if want_excluded:
+                ExcludedBrand.objects.update_or_create(group=group)
+                messages.success(request, f"'{group}' ya no va a aparecer en tu lista de precios.")
+            else:
+                ExcludedBrand.objects.filter(group__iexact=group).delete()
+                messages.success(request, f"'{group}' vuelve a poder aparecer en tu lista de precios.")
+            return redirect(redirect_to)
         if action in {"create_kit", "update_kit"}:
             kit_id = request.POST.get("kit_id") if action == "update_kit" else None
             name = (request.POST.get("kit_name") or "").strip()
@@ -855,9 +873,10 @@ def _price_list_entries(products, *, include_excluded: bool = False) -> list[dic
     entra solo lo que ese proveedor lista (con precio) y el texto es el suyo. Un
     producto que solo tiene el otro proveedor queda afuera.
 
-    Devuelve dicts {"product", "brand", "name", "in_list"}. Con include_excluded se
-    devuelven también los que NO entran (marcados con in_list=False), para poder
-    mostrarlos en pantalla sin que ensucien la descarga.
+    Devuelve dicts {"product", "brand", "name", "in_list", "principal_supplier",
+    "excluded"}. Con include_excluded se devuelven también los que NO entran
+    (marcados con in_list=False), para poder mostrarlos en pantalla sin que
+    ensucien la descarga.
 
     Proveedor principal de cada marca:
       1) el ELEGIDO por el usuario (BrandSupplier), si la marca tiene uno; o
@@ -865,7 +884,7 @@ def _price_list_entries(products, *, include_excluded: bool = False) -> list[dic
          (el más barato, del cual sale el costo) como fallback.
     """
     from collections import Counter, defaultdict
-    from ..models import BrandSupplier, ExcludedBrand, SupplierProduct
+    from ..models import BrandSupplier, ExcludedBrand, Supplier, SupplierProduct
 
     products = list(products)
 
@@ -942,17 +961,31 @@ def _price_list_entries(products, *, include_excluded: bool = False) -> list[dic
             return link.supplier_name.strip()
         return p.name
 
+    supplier_name_by_id = dict(
+        Supplier.objects.filter(id__in={sid for sid in brand_principal.values() if sid}).values_list(
+            "id", "name"
+        )
+    )
+
     entries = []
     for p in products:
         in_list = _include(p)
         if not in_list and not include_excluded:
             continue
+        key = _gkey(p.group) if p.group else ""
+        principal_sid = brand_principal.get(key) if key else None
         entries.append(
             {
                 "product": p,
-                "brand": brand_label.get(_gkey(p.group), (p.group or "").strip()),
+                "brand": brand_label.get(key, (p.group or "").strip()),
                 "name": _name(p),
                 "in_list": in_list,
+                "excluded": key in excluded_groups if key else False,
+                "principal_supplier": supplier_name_by_id.get(principal_sid, "") if principal_sid else "",
+                # El kit no tiene costo "sin IVA" propio: es la suma del costo (con
+                # IVA) de sus componentes, así que ese desglose no aplica.
+                "cost_net": "" if p.is_kit else f"{(p.avg_cost or Decimal('0.00')):.2f}",
+                "cost_with_vat": f"{p.cost_with_vat():.2f}",
             }
         )
     # Marcas en orden alfabético (case-insensitive), luego producto. Sin marca al final.

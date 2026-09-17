@@ -189,6 +189,9 @@
                 <th>SKU</th>
                 <th>Producto</th>
                 <th>Marca</th>
+                <th>Proveedor principal</th>
+                <th>Costo neto</th>
+                <th>Costo c/IVA</th>
                 <th>Consumidor final</th>
                 <th>Peluquerías / Barberías</th>
                 <th>Distribuidores</th>
@@ -202,6 +205,9 @@
                 <td>{{ product.sku }}</td>
                 <td>{{ entry.name }}{% if not entry.in_list %} <span class="out-badge">fuera de lista</span>{% endif %}</td>
                 <td>{{ entry.brand|default:"-" }}</td>
+                <td>{{ entry.principal_supplier|default:"-" }}</td>
+                <td>{% if entry.cost_net %}{{ entry.cost_net|latam_number:2 }}{% else %}-{% endif %}</td>
+                <td>{{ entry.cost_with_vat|latam_number:2 }}</td>
                 <td>
                     <form id="price-form-{{ product.id }}" method="post" action="{% url 'inventory_product_prices' %}">
                         {% csrf_token %}
@@ -223,11 +229,26 @@
                         {% csrf_token %}
                         <button type="submit" class="pill sm" style="font-size:12px; padding:4px 8px;" onclick="return confirm('¿Eliminar este producto?');">Eliminar</button>
                     </form>
+                    {% if entry.brand %}
+                    <form method="post" action="{% url 'inventory_product_prices' %}" style="display:inline;">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="set_brand_excluded">
+                        <input type="hidden" name="group" value="{{ entry.brand }}">
+                        <input type="hidden" name="todos" value="{% if show_all %}1{% endif %}">
+                        {% if entry.excluded %}
+                        <input type="hidden" name="excluded" value="0">
+                        <button type="submit" class="pill sm" style="font-size:12px; padding:4px 8px;" title="Volver a incluir toda la marca '{{ entry.brand }}' en la lista">Incluir marca</button>
+                        {% else %}
+                        <input type="hidden" name="excluded" value="1">
+                        <button type="submit" class="pill sm" style="font-size:12px; padding:4px 8px;" onclick="return confirm('¿Excluir toda la marca «{{ entry.brand }}» de tu lista de precios?');" title="Excluir toda la marca '{{ entry.brand }}' de la lista">Excluir marca</button>
+                        {% endif %}
+                    </form>
+                    {% endif %}
                 </td>
             </tr>
             {% endwith %}
             {% empty %}
-            <tr><td colspan="7">Aún no hay productos en la lista.</td></tr>
+            <tr><td colspan="10">Aún no hay productos en la lista.</td></tr>
             {% endfor %}
         </tbody>
     </table>
