@@ -38,6 +38,7 @@ from .utils_xlsx import (
     _parse_decimal,
     _process_costs_xlsx,
     _read_costs_xlsx_rows,
+    _read_id_sku_rows,
     _sku_prefix,
 )
 
@@ -1047,28 +1048,18 @@ def product_sku_bulk_update(request):
     if request.method == "POST":
         upload = request.FILES.get("file")
         if not upload:
-            messages.error(request, "Subí un archivo CSV.")
+            messages.error(request, "Subí un archivo CSV o XLSX.")
             return redirect("inventory_product_sku_bulk_update")
 
-        import csv
-
-        try:
-            decoded = upload.read().decode("utf-8-sig").splitlines()
-            reader = csv.DictReader(decoded)
-        except Exception:
-            messages.error(request, "No se pudo leer el CSV. Verificá el formato.")
-            return redirect("inventory_product_sku_bulk_update")
-
-        normalized_fieldnames = [name.strip().lower() for name in (reader.fieldnames or [])]
-        if "id" not in normalized_fieldnames or "sku" not in normalized_fieldnames:
-            messages.error(request, "El CSV necesita las columnas 'id' y 'sku'. Descargá la plantilla de acá abajo.")
+        rows, error = _read_id_sku_rows(upload)
+        if error:
+            messages.error(request, error)
             return redirect("inventory_product_sku_bulk_update")
 
         updated = 0
         skipped_not_found = 0
         conflicts = []
-        for row in reader:
-            data = {k.strip().lower(): (v or "").strip() for k, v in row.items()}
+        for data in rows:
             raw_id = data.get("id")
             if not raw_id or not raw_id.isdigit():
                 continue

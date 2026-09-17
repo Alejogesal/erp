@@ -208,6 +208,71 @@ def _normalize_header(value: str) -> str:
     return without_accents.strip().lower()
 
 
+def _read_id_sku_rows(upload) -> tuple[list[dict[str, str]], str | None]:
+    """Lee un archivo de reingreso de SKU (CSV o XLSX) con columnas id/sku.
+
+    Devuelve filas normalizadas (claves en minúscula, valores en texto) o un
+    mensaje de error listo para mostrarle al usuario. Acepta CSV separado por
+    coma o punto y coma (Excel en español suele guardar CSV con ';'), y XLSX.
+    """
+    name = (getattr(upload, "name", "") or "").lower()
+
+    if name.endswith(".xlsx"):
+        try:
+            from openpyxl import load_workbook
+        except Exception:
+            return [], "Falta la dependencia openpyxl. Instalá openpyxl en el entorno."
+        try:
+            wb = load_workbook(upload, data_only=True)
+            ws = wb.active
+            rows_iter = ws.iter_rows(values_only=True)
+            header_row = next(rows_iter)
+        except StopIteration:
+            return [], "El archivo está vacío."
+        except Exception:
+            return [], "No se pudo leer el archivo XLSX. Verificá el formato."
+
+        headers = [str(h).strip().lower() if h is not None else "" for h in header_row]
+
+        def _cell_to_str(value) -> str:
+            if value is None:
+                return ""
+            if isinstance(value, float) and value.is_integer():
+                return str(int(value))
+            return str(value).strip()
+
+        rows = []
+        for row in rows_iter:
+            data = {}
+            for idx, header in enumerate(headers):
+                if not header:
+                    continue
+                data[header] = _cell_to_str(row[idx] if idx < len(row) else None)
+            rows.append(data)
+    else:
+        import csv
+
+        try:
+            decoded = upload.read().decode("utf-8-sig").splitlines()
+        except Exception:
+            return [], "No se pudo leer el archivo. Verificá el formato."
+        try:
+            delimiter = csv.Sniffer().sniff(decoded[0], delimiters=",;").delimiter if decoded else ","
+        except csv.Error:
+            delimiter = ","
+        try:
+            reader = csv.DictReader(decoded, delimiter=delimiter)
+            headers = [name.strip().lower() for name in (reader.fieldnames or [])]
+            rows = [{k.strip().lower(): (v or "").strip() for k, v in row.items()} for row in reader]
+        except Exception:
+            return [], "No se pudo leer el archivo. Verificá el formato."
+
+    if "id" not in headers or "sku" not in headers:
+        return [], "El archivo necesita las columnas 'id' y 'sku'. Descargá la plantilla de acá abajo."
+
+    return rows, None
+
+
 def _read_costs_xlsx_rows(upload) -> tuple[list[tuple[str, str, Decimal, str]], str | None]:
     try:
         from openpyxl import load_workbook

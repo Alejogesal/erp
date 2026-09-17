@@ -3,7 +3,8 @@
 {% block content %}
 <h1>Cambiar SKU masivamente</h1>
 <p class="subtitle">
-    Descargá el CSV actual, editá la columna SKU en Excel/Sheets y volvé a subirlo.
+    Descargá el CSV actual, editá la columna SKU en Excel/Sheets y volvé a subirlo
+    (podés subirlo como CSV o guardarlo como Excel .xlsx, lo que te resulte más fácil).
     El match es por <strong>id</strong>, así que no hace falta tocar esa columna.
 </p>
 <div class="card" style="margin-bottom:16px;">
@@ -11,11 +12,11 @@
     <a class="pill" href="{% url 'inventory_product_sku_export' %}">Descargar CSV con id, SKU y nombre</a>
 </div>
 <div class="card">
-    <div class="card-title">2. Subir el CSV editado</div>
+    <div class="card-title">2. Subir el archivo editado</div>
     <form method="post" enctype="multipart/form-data">
         {% csrf_token %}
-        <label for="csv-file">Archivo CSV</label>
-        <input id="csv-file" name="file" type="file" accept=".csv" required />
+        <label for="csv-file">Archivo CSV o Excel (.xlsx)</label>
+        <input id="csv-file" name="file" type="file" accept=".csv,.xlsx" required />
         <button type="submit">Aplicar cambios</button>
     </form>
     <p class="subtitle" style="margin-top:12px; font-size:12px;">
