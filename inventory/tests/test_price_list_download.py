@@ -10,7 +10,7 @@ from django.urls import reverse
 
 from openpyxl import load_workbook
 
-from inventory.models import Product, Supplier, SupplierProduct
+from inventory.models import BrandSupplier, Product, Supplier, SupplierProduct
 
 
 class PriceListDownloadTests(TestCase):
@@ -38,14 +38,16 @@ class PriceListDownloadTests(TestCase):
         return rows[0], rows[1:]  # header, data
 
     def test_only_principal_supplier_of_brand_and_alphabetical(self):
-        # Marca "Zeta": principal es Proveedor A (2 productos).
+        # Marca "Zeta": principal ELEGIDO es Proveedor A (2 productos).
         self._product("Zeta Uno", "Zeta", self.prov_a, "100")
         self._product("Zeta Dos", "Zeta", self.prov_a, "120")
         # Un producto de la misma marca cuyo principal es B (secundario/duplicado):
         # NO debe aparecer.
         self._product("Zeta Duplicado", "Zeta", self.prov_b, "999")
-        # Marca "Alfa": principal Proveedor B.
+        # Marca "Alfa": principal ELEGIDO Proveedor B.
         self._product("Alfa Uno", "Alfa", self.prov_b, "50")
+        BrandSupplier.objects.create(group="Zeta", supplier=self.prov_a)
+        BrandSupplier.objects.create(group="Alfa", supplier=self.prov_b)
 
         header, data = self._download_rows()
         self.assertEqual(header, ("Marca", "Producto", "Precio"))
@@ -61,6 +63,7 @@ class PriceListDownloadTests(TestCase):
     def test_product_without_brand_is_excluded(self):
         self._product("Sin Marca", "", self.prov_a, "100")
         self._product("Con Marca", "Beta", self.prov_a, "100")
+        BrandSupplier.objects.create(group="Beta", supplier=self.prov_a)
         _, data = self._download_rows()
         nombres = [r[1] for r in data]
         self.assertEqual(nombres, ["Con Marca"])

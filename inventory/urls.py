@@ -20,6 +20,7 @@ urlpatterns = [
     path("productos/sku-masivo/", views.product_sku_bulk_update, name="inventory_product_sku_bulk_update"),
     path("productos/sku-masivo/exportar/", views.product_sku_export, name="inventory_product_sku_export"),
     path("productos/precios/", views.product_prices, name="inventory_product_prices"),
+    path("productos/marcas-disponibles/", views.available_brands, name="inventory_available_brands"),
     path("productos/margenes/", views.product_margins, name="inventory_product_margins"),
     path("productos/costos/", views.product_costs, name="inventory_product_costs"),
     path("productos/info/", views.product_info, name="inventory_product_info"),

@@ -1,6 +1,7 @@
 """Inventory views package — re-exports all view functions used by urls.py."""
 from .dashboard import dashboard
 from .products import (
+    available_brands,
     create_product,
     edit_product,
     import_costs_xlsx,
@@ -53,6 +54,7 @@ from .iva_payments import iva_payments_view, iva_payment_edit
 from .agent import agent_view
 __all__ = [
     "dashboard",
+    "available_brands",
     "create_product",
     "edit_product",
     "import_costs_xlsx",

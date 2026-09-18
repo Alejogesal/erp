@@ -163,12 +163,13 @@
     <p class="hint" style="margin:0 0 10px;">
         {% if show_all %}
             Todos los productos. Los marcados <span class="out-badge">fuera de lista</span> no se descargan:
-            el proveedor principal de esa marca no los tiene.
+            la marca no tiene proveedor elegido, o el elegido no tiene ese producto.
             <a href="{% url 'inventory_product_prices' %}">Ver solo lo que se descarga</a>
         {% else %}
-            Vista previa exacta de lo que se descarga: cada marca sale como la escribe su proveedor principal.
+            Vista previa exacta de lo que se descarga: cada marca sale como la escribe el proveedor que elegiste para ella.
             <a href="{% url 'inventory_product_prices' %}?todos=1">Ver también los que quedan afuera</a>
         {% endif %}
+        · <a href="{% url 'inventory_available_brands' %}">Elegir qué marcas de qué proveedor entran a tu lista →</a>
     </p>
     <div class="price-filter">
         <span class="hint">Buscar</span>

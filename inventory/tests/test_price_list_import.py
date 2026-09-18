@@ -68,16 +68,31 @@ class PriceListImportNoFuzzyMatchTests(TestCase):
         self.assertTrue(SupplierProduct.objects.filter(supplier=self.glm, product=glm_product).exists())
         self.assertFalse(SupplierProduct.objects.filter(supplier=self.aris, product=glm_product).exists())
 
-    def test_exact_same_name_across_suppliers_still_merges_into_one_product(self):
-        # El match EXACTO (mismo nombre normalizado) sigue funcionando: es el
-        # caso legítimo de "el mismo producto, dos proveedores lo tienen".
+    def test_same_name_across_different_suppliers_never_merges(self):
+        # Capa 1: la lista de cada proveedor es su propio mundo. Ni siquiera un
+        # nombre EXACTAMENTE igual entre dos proveedores distintos los fusiona
+        # en el mismo Product — decidir si "son el mismo producto" es manual
+        # (Marcas disponibles), no algo que el import resuelva solo.
         self._import(self.aris, [["FIDELITE", "Fidelite Coloracion 8", 100]])
         self._import(self.glm, [["FIDELITE", "  fidelite   coloracion 8  ", 90]])
 
+        self.assertEqual(Product.objects.count(), 2)
+        aris_product = Product.objects.get(supplier_products__supplier=self.aris)
+        glm_product = Product.objects.get(supplier_products__supplier=self.glm)
+        self.assertNotEqual(aris_product.id, glm_product.id)
+        self.assertFalse(SupplierProduct.objects.filter(supplier=self.glm, product=aris_product).exists())
+        self.assertFalse(SupplierProduct.objects.filter(supplier=self.aris, product=glm_product).exists())
+
+    def test_reimporting_same_supplier_updates_price_without_duplicating(self):
+        # El match exacto SIGUE funcionando, pero acotado al propio proveedor:
+        # reimportar la lista de Aris con precio actualizado no duplica el
+        # producto, actualiza el vínculo existente.
+        self._import(self.aris, [["FIDELITE", "Fidelite Coloracion 8", 100]])
+        self._import(self.aris, [["FIDELITE", "  fidelite   coloracion 8  ", 110]])
+
         self.assertEqual(Product.objects.count(), 1)
-        product = Product.objects.get()
-        self.assertTrue(SupplierProduct.objects.filter(supplier=self.aris, product=product).exists())
-        self.assertTrue(SupplierProduct.objects.filter(supplier=self.glm, product=product).exists())
+        link = SupplierProduct.objects.get(supplier=self.aris)
+        self.assertEqual(link.last_cost, Decimal("110.00"))
 
     def test_only_products_of_pinned_supplier_reach_the_price_list(self):
         # Escenario completo reportado: Aris es principal de FIDELITE. Antes,

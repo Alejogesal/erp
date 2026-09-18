@@ -35,6 +35,7 @@ class PriceListPageTests(TestCase):
 
     def test_entry_shows_principal_supplier_and_cost_net_and_with_vat(self):
         self._product("Zeta Uno", "Zeta", self.prov_a, "100.00")
+        BrandSupplier.objects.create(group="Zeta", supplier=self.prov_a)
 
         resp = self.client.get(reverse("inventory_product_prices"))
         self.assertEqual(resp.status_code, 200)
@@ -68,6 +69,7 @@ class PriceListPageTests(TestCase):
 
     def test_unset_brand_excluded_restores_visibility(self):
         self._product("Zeta Uno", "Zeta", self.prov_a, "100.00")
+        BrandSupplier.objects.create(group="Zeta", supplier=self.prov_a)
         ExcludedBrand.objects.create(group="Zeta")
 
         resp = self.client.post(

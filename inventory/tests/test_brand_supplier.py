@@ -261,12 +261,12 @@ class BrandListNamingTests(TestCase):
 
         self.assertEqual(self._rows(), [])
 
-    def test_deduced_principal_also_ignores_stale_default_supplier(self):
-        # Mismo caso que el anterior, pero SIN elección explícita (BrandSupplier):
-        # el principal se deduce del default_supplier más frecuente de la marca.
-        # Antes, esta rama solo comparaba default_supplier_id == principal sin
-        # verificar que existiera un vínculo con precio real, así que un producto
-        # desincronizado (o sin vínculo real con ese proveedor) se colaba igual.
+    def test_brand_without_explicit_supplier_choice_shows_nothing(self):
+        # Ya no hay deducción automática (Capa 3): una marca sin BrandSupplier
+        # elegido a mano no aparece, ni siquiera para un producto cuyo
+        # default_supplier "coincide" con lo que habría sido el más frecuente.
+        # Antes esto se colaba por deducción; ahora tiene que ser una elección
+        # explícita (Marcas disponibles) para que la marca entre a la lista.
         otro = Product.objects.create(
             name="Fidelite con Aris real", group="FIDELITE", margin_consumer=Decimal("0.00"),
             default_supplier=self.aris,
@@ -279,9 +279,7 @@ class BrandListNamingTests(TestCase):
         )
         SupplierProduct.objects.create(supplier=self.glm, product=solo_glm, last_cost=Decimal("70"))
 
-        nombres = [r[1] for r in self._rows()]
-        self.assertIn("Fidelite con Aris real", nombres)
-        self.assertNotIn("Fidelite solo GLM", nombres)
+        self.assertEqual(self._rows(), [])
 
     def test_brand_matching_ignores_case_and_spaces(self):
         p = Product.objects.create(name="Interno", group=" Fidelite ", margin_consumer=Decimal("0.00"))

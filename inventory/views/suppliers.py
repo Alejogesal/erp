@@ -400,19 +400,18 @@ def suppliers(request):
             if parse_error:
                 messages.error(request, parse_error)
                 return redirect("inventory_suppliers")
-            # Match SOLO por nombre exacto (normalizado: sin acentos/mayúsculas/
-            # espacios de más). Antes había un segundo intento de "coincidencia
-            # por parecido" (mismos números + subconjunto de palabras o similitud
-            # de texto) para no duplicar productos que un proveedor nombra
-            # distinto. Se sacó a pedido: fusionaba productos de proveedores
-            # distintos que solo se parecían en el nombre, así que un producto
-            # que en realidad SOLO tenía este proveedor terminaba también
-            # vinculado (con precio) al que ya existía de otro proveedor. Cada
-            # lista se respeta tal cual: si el nombre no matchea exacto con algo
-            # ya cargado, se crea un producto nuevo en vez de adivinar.
-            existing_by_key = {}
-            for p in Product.objects.all():
-                existing_by_key.setdefault(_normalize_lookup_text(p.name), p)
+            # Capa 1: la lista de CADA proveedor es su propio mundo. El match es
+            # solo para poder reimportar una lista ya cargada (actualizar precio
+            # sin duplicar) — por eso mira ÚNICAMENTE los productos que YA están
+            # vinculados a ESTE proveedor, nunca los de otro. Si el nombre no
+            # está entre los propios de este proveedor, se crea un producto
+            # nuevo, aunque otro proveedor ya tenga uno con el mismo nombre: acá
+            # no se decide todavía si son "el mismo producto" — esa decisión es
+            # manual y pasa en Marcas disponibles (armado de la lista propia).
+            existing_by_key = {
+                _normalize_lookup_text(p.name): p
+                for p in Product.objects.filter(supplier_products__supplier=supplier)
+            }
             created_names = []
             new_links = updated_links = 0
             for group, name, net, row_vat in rows:

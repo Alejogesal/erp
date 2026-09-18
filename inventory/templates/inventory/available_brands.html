@@ -1,0 +1,110 @@
+{% extends "inventory/base.html" %}
+{% block title %}Marcas disponibles{% endblock %}
+{% block content %}
+<h1>Marcas disponibles</h1>
+<p class="subtitle">
+    <a href="{% url 'inventory_product_prices' %}">← Volver a Lista de precios</a>
+</p>
+
+<div class="card" style="max-width:900px;">
+    <div class="card-title">Armar tu lista de precios</div>
+    <p class="subtitle" style="margin-top:0;">
+        Cada marca sale de UN solo proveedor a la vez: el que elijas acá abajo. Por cada marca se muestran todos los
+        proveedores que la tienen, con cuántos productos y cuántos con precio cargado, para decidir con la cobertura
+        a la vista. Agregar una marca es siempre una acción a propósito: si no la agregás, no aparece en tu lista
+        (no se deduce ni se agrega sola).
+        Marcas en tu lista: <strong>{{ selected_count }}</strong> de <strong>{{ total_count }}</strong>.
+    </p>
+    <input type="search" id="brand-filter" placeholder="🔍 Filtrar marca…" style="width:100%; margin-bottom:12px; padding:8px;">
+    <div id="brand-blocks">
+        {% for block in brand_blocks %}
+        <details class="brand-block" data-name="{{ block.group|lower }}"
+                  style="border:1px solid var(--border,#2a313c); border-radius:8px; margin-bottom:8px; padding:2px 12px;{% if block.is_excluded %} opacity:0.55;{% endif %}">
+            <summary style="cursor:pointer; padding:8px 0; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <strong>{{ block.group }}</strong>
+                <span style="font-size:12px; color:var(--muted,#666);">
+                    {{ block.supplier_count }} proveedor{{ block.supplier_count|pluralize:"es" }}
+                </span>
+                {% if block.is_selected %}
+                <span class="pill sm" style="font-size:11px; background:rgba(34,197,94,0.15); color:#22c55e; border-color:rgba(34,197,94,0.3);">
+                    En tu lista · {{ block.chosen_supplier_name }}
+                </span>
+                {% else %}
+                <span class="pill sm" style="font-size:11px;">No está en tu lista</span>
+                {% endif %}
+                {% if block.is_excluded %}
+                <span class="pill sm" style="font-size:11px; background:rgba(239,68,68,0.12); color:#ef4444; border-color:rgba(239,68,68,0.3);">Excluida</span>
+                {% endif %}
+            </summary>
+            <div style="padding:4px 0 10px;">
+                <table style="width:100%; font-size:12px; border-collapse:collapse;">
+                    <thead>
+                        <tr style="text-align:left; border-bottom:1px solid var(--border,#2a313c);">
+                            <th style="padding:4px 6px;">Proveedor</th>
+                            <th style="padding:4px 6px; text-align:right;">Productos</th>
+                            <th style="padding:4px 6px; text-align:right;">Con precio</th>
+                            <th style="padding:4px 6px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for s in block.suppliers %}
+                        <tr style="border-bottom:1px solid rgba(255,255,255,0.05);{% if block.chosen_supplier_id == s.id %} background:rgba(34,197,94,0.08);{% endif %}">
+                            <td style="padding:6px;">{{ s.name }}</td>
+                            <td style="padding:6px; text-align:right;">{{ s.total }}</td>
+                            <td style="padding:6px; text-align:right;">{{ s.con_precio }}</td>
+                            <td style="padding:6px; text-align:right; white-space:nowrap;">
+                                {% if block.chosen_supplier_id == s.id %}
+                                <form method="post" style="display:inline;">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="remove_brand_supplier">
+                                    <input type="hidden" name="group" value="{{ block.group }}">
+                                    <button type="submit" class="pill sm" style="font-size:11px; padding:3px 8px;">Quitar de mi lista</button>
+                                </form>
+                                {% else %}
+                                <form method="post" style="display:inline;" onsubmit="return confirm('¿Usar a {{ s.name|escapejs }} como proveedor de «{{ block.group|escapejs }}» en tu lista?{% if block.is_selected %} Reemplaza a {{ block.chosen_supplier_name|escapejs }}.{% endif %}');">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="set_brand_supplier">
+                                    <input type="hidden" name="group" value="{{ block.group }}">
+                                    <input type="hidden" name="supplier" value="{{ s.id }}">
+                                    <button type="submit" class="pill sm" style="font-size:11px; padding:3px 8px;">Agregar a mi lista</button>
+                                </form>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <form method="post" style="margin-top:8px;">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="set_brand_excluded">
+                    <input type="hidden" name="group" value="{{ block.group }}">
+                    {% if block.is_excluded %}
+                    <input type="hidden" name="excluded" value="0">
+                    <button type="submit" class="pill sm" style="font-size:11px;">Dejar de excluir esta marca</button>
+                    {% else %}
+                    <input type="hidden" name="excluded" value="1">
+                    <button type="submit" class="pill sm" style="font-size:11px;" onclick="return confirm('¿Excluir «{{ block.group|escapejs }}» de tu lista aunque tenga proveedor elegido?');">Excluir esta marca</button>
+                    {% endif %}
+                </form>
+            </div>
+        </details>
+        {% empty %}
+        <p class="subtitle">No hay marcas cargadas todavía: subí primero la lista de precios de algún proveedor.</p>
+        {% endfor %}
+    </div>
+</div>
+
+<script>
+    (function () {
+        const filter = document.getElementById("brand-filter");
+        if (!filter) return;
+        const blocks = Array.from(document.querySelectorAll("#brand-blocks .brand-block"));
+        filter.addEventListener("input", function () {
+            const q = this.value.trim().toLowerCase();
+            blocks.forEach((block) => {
+                block.style.display = !q || block.dataset.name.includes(q) ? "" : "none";
+            });
+        });
+    })();
+</script>
+{% endblock %}

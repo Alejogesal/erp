@@ -4,7 +4,7 @@ from decimal import Decimal
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Case, Count, Q, When
 from django.db.models.deletion import ProtectedError
 from django.forms import formset_factory
 from django.http import HttpResponse, JsonResponse
@@ -18,6 +18,7 @@ from ..models import (
     KitComponent,
     Product,
     ProductVariant,
+    Supplier,
     SupplierProduct,
     Warehouse,
 )
@@ -869,21 +870,20 @@ def product_search(request):
 def _price_list_entries(products, *, include_excluded: bool = False) -> list[dict]:
     """Filas de la lista de precios propia, en el mismo orden que el Excel.
 
-    Cada marca se representa como la tiene el proveedor vinculado a esa marca:
-    entra solo lo que ese proveedor lista (con precio) y el texto es el suyo. Un
-    producto que solo tiene el otro proveedor queda afuera.
+    Capa 3 del armado de la lista: se compone ÚNICAMENTE de marcas con
+    proveedor elegido a mano (BrandSupplier) en Marcas disponibles. Ya no hay
+    deducción automática ("el proveedor más frecuente de la marca") — eso era
+    justamente lo que colaba productos de un proveedor bajo el nombre de otro.
+    Una marca sin elección explícita simplemente no aparece.
+
+    Entra solo lo que el proveedor elegido lista con precio; el texto es el
+    suyo. Un producto que solo tiene otro proveedor queda afuera.
 
     Devuelve dicts {"product", "brand", "name", "in_list", "principal_supplier",
     "excluded"}. Con include_excluded se devuelven también los que NO entran
     (marcados con in_list=False), para poder mostrarlos en pantalla sin que
     ensucien la descarga.
-
-    Proveedor principal de cada marca:
-      1) el ELEGIDO por el usuario (BrandSupplier), si la marca tiene uno; o
-      2) el default_supplier más frecuente entre los productos de esa marca
-         (el más barato, del cual sale el costo) como fallback.
     """
-    from collections import Counter, defaultdict
     from ..models import BrandSupplier, ExcludedBrand, Supplier, SupplierProduct
 
     products = list(products)
@@ -895,18 +895,8 @@ def _price_list_entries(products, *, include_excluded: bool = False) -> list[dic
 
     excluded_groups = {_gkey(g) for g in ExcludedBrand.objects.values_list("group", flat=True)}
 
-    brand_supplier_counts: dict[str, Counter] = defaultdict(Counter)
-    for p in products:
-        if p.group and p.default_supplier_id:
-            brand_supplier_counts[_gkey(p.group)][p.default_supplier_id] += 1
-    brand_principal = {
-        key: counts.most_common(1)[0][0]
-        for key, counts in brand_supplier_counts.items()
-    }
-    # La elección explícita del usuario manda sobre lo deducido.
     brand_rows = list(BrandSupplier.objects.all())
-    pinned = {_gkey(bs.group): bs.supplier_id for bs in brand_rows}
-    brand_principal.update(pinned)
+    brand_principal = {_gkey(bs.group): bs.supplier_id for bs in brand_rows}
 
     # Texto de la marca en la planilla: uno solo por marca, aunque los productos la
     # tengan escrita con distinto casing/espacios (si no, se parte en dos bloques).
@@ -937,18 +927,16 @@ def _price_list_entries(products, *, include_excluded: bool = False) -> list[dic
             return False
         key = _gkey(p.group)
         if key in excluded_groups:
-            # Marca excluida a mano: no entra aunque tenga proveedor principal
-            # (elegido o deducido). Independiente de esa elección.
+            # Marca excluida a mano: no entra aunque tenga proveedor elegido.
+            # Independiente de esa elección.
             return False
         principal = brand_principal.get(key)
         if principal is None:
+            # Sin proveedor elegido a mano para esta marca: no entra. Ya no hay
+            # deducción automática (Capa 3: solo lo que se eligió a propósito).
             return False
-        # Entra solo lo que el proveedor principal (elegido o deducido) tiene
-        # REALMENTE vinculado con precio cargado. Antes, sin elección explícita
-        # (deducido), solo se miraba default_supplier_id == principal sin
-        # chequear que existiera ese vínculo con precio: un producto cuyo
-        # default_supplier había quedado desincronizado (o nunca tuvo vínculo
-        # real con ese proveedor) se colaba en la lista igual.
+        # Entra solo lo que el proveedor elegido tiene REALMENTE vinculado con
+        # precio cargado.
         link = principal_link.get(p.id)
         return link is not None and link.cost_net > Decimal("0.00")
 
@@ -990,6 +978,109 @@ def _price_list_entries(products, *, include_excluded: bool = False) -> list[dic
     # Marcas en orden alfabético (case-insensitive), luego producto. Sin marca al final.
     entries.sort(key=lambda e: (e["brand"] == "", e["brand"].casefold(), e["name"].casefold()))
     return entries
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def available_brands(request):
+    """Capa 2: armar la lista propia eligiendo, marca por marca, de qué
+    proveedor sale (Capa 3 la consume vía BrandSupplier).
+
+    Cada marca aparece una sola vez con TODOS los proveedores que la tienen
+    (con cuántos productos y cuántos con precio), para decidir con la
+    cobertura a la vista. Agregarla a la lista propia es siempre una acción
+    explícita: nada se deduce ni se agrega solo.
+    """
+    from ..models import BrandSupplier, ExcludedBrand
+
+    if request.method == "POST":
+        action = request.POST.get("action")
+        group = (request.POST.get("group") or "").strip()
+        if not group:
+            messages.error(request, "Elegí una marca.")
+            return redirect("inventory_available_brands")
+
+        if action == "set_brand_supplier":
+            supplier = Supplier.objects.filter(id=request.POST.get("supplier")).first()
+            if not supplier:
+                messages.error(request, "Elegí un proveedor.")
+                return redirect("inventory_available_brands")
+            result = services.set_brand_principal_supplier(group, supplier)
+            msg = f"'{result['real_group']}' se agregó a tu lista, usando los precios de {supplier.name}."
+            if result["not_linked"]:
+                msg += (
+                    f" Ojo: {result['not_linked']} producto(s) de esa marca no están en la lista de "
+                    f"{supplier.name}, así que no van a aparecer."
+                )
+            messages.success(request, msg)
+        elif action == "remove_brand_supplier":
+            if services.remove_brand_principal_supplier(group):
+                messages.success(request, f"'{group}' se sacó de tu lista.")
+            else:
+                messages.warning(request, f"'{group}' no estaba en tu lista.")
+        elif action == "set_brand_excluded":
+            if request.POST.get("excluded") == "1":
+                ExcludedBrand.objects.update_or_create(group=group)
+                messages.success(request, f"'{group}' queda excluida de tu lista.")
+            else:
+                ExcludedBrand.objects.filter(group__iexact=group).delete()
+                messages.success(request, f"'{group}' vuelve a poder aparecer en tu lista.")
+        return redirect("inventory_available_brands")
+
+    def _gkey(group: str) -> str:
+        return (group or "").strip().casefold()
+
+    rows = (
+        SupplierProduct.objects.exclude(product__group="")
+        .values("supplier_id", "supplier__name", "product__group")
+        .annotate(
+            total=Count("id"),
+            con_precio=Count(Case(When(last_cost__gt=Decimal("0.00"), then=1))),
+        )
+    )
+    brand_label: dict[str, str] = {}
+    brand_suppliers: dict[str, list[dict]] = {}
+    for row in rows:
+        key = _gkey(row["product__group"])
+        brand_label.setdefault(key, row["product__group"].strip())
+        brand_suppliers.setdefault(key, []).append(
+            {
+                "id": row["supplier_id"],
+                "name": row["supplier__name"],
+                "total": row["total"],
+                "con_precio": row["con_precio"],
+            }
+        )
+
+    chosen = {_gkey(bs.group): bs for bs in BrandSupplier.objects.select_related("supplier")}
+    excluded_groups = {_gkey(g) for g in ExcludedBrand.objects.values_list("group", flat=True)}
+
+    brand_blocks = []
+    for key, suppliers in brand_suppliers.items():
+        suppliers.sort(key=lambda s: (-s["con_precio"], s["name"].casefold()))
+        bs = chosen.get(key)
+        brand_blocks.append(
+            {
+                "group": brand_label[key],
+                "suppliers": suppliers,
+                "supplier_count": len(suppliers),
+                "chosen_supplier_id": bs.supplier_id if bs else None,
+                "chosen_supplier_name": bs.supplier.name if bs else "",
+                "is_selected": bs is not None,
+                "is_excluded": key in excluded_groups,
+            }
+        )
+    brand_blocks.sort(key=lambda b: b["group"].casefold())
+
+    return render(
+        request,
+        "inventory/available_brands.html",
+        {
+            "brand_blocks": brand_blocks,
+            "selected_count": sum(1 for b in brand_blocks if b["is_selected"]),
+            "total_count": len(brand_blocks),
+        },
+    )
 
 
 @login_required
