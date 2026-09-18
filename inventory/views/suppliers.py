@@ -61,14 +61,6 @@ def _fmt_money(value) -> str:
     return s.replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-def _name_numbers(norm_name: str) -> tuple:
-    """Números presentes en el nombre (tamaños/gramajes/cantidades). Sirven de
-    guarda para el match difuso: dos nombres con números distintos NO son el
-    mismo producto (p. ej. X 250 ML vs X 500 ML)."""
-    import re as _re
-    return tuple(sorted(_re.findall(r"\d+", norm_name or "")))
-
-
 def _parse_price_list_xlsx(file_obj):
     """Parsea un xlsx de lista de precios.
 
@@ -408,15 +400,21 @@ def suppliers(request):
             if parse_error:
                 messages.error(request, parse_error)
                 return redirect("inventory_suppliers")
-            from difflib import SequenceMatcher
+            # Match SOLO por nombre exacto (normalizado: sin acentos/mayúsculas/
+            # espacios de más). Antes había un segundo intento de "coincidencia
+            # por parecido" (mismos números + subconjunto de palabras o similitud
+            # de texto) para no duplicar productos que un proveedor nombra
+            # distinto. Se sacó a pedido: fusionaba productos de proveedores
+            # distintos que solo se parecían en el nombre, así que un producto
+            # que en realidad SOLO tenía este proveedor terminaba también
+            # vinculado (con precio) al que ya existía de otro proveedor. Cada
+            # lista se respeta tal cual: si el nombre no matchea exacto con algo
+            # ya cargado, se crea un producto nuevo en vez de adivinar.
             existing_by_key = {}
-            existing_by_nums = {}
             for p in Product.objects.all():
-                nk = _normalize_lookup_text(p.name)
-                existing_by_key.setdefault(nk, p)
-                existing_by_nums.setdefault(_name_numbers(nk), []).append((nk, p))
+                existing_by_key.setdefault(_normalize_lookup_text(p.name), p)
             created_names = []
-            new_links = updated_links = matched_fuzzy = 0
+            new_links = updated_links = 0
             for group, name, net, row_vat in rows:
                 iva = row_vat if row_vat is not None else default_iva
                 cost_with_vat = (net * (Decimal("1.00") + iva / Decimal("100.00"))).quantize(
@@ -424,32 +422,6 @@ def suppliers(request):
                 )
                 key = _normalize_lookup_text(name)
                 product = existing_by_key.get(key)
-                if product is None:
-                    # Match por coincidencia, SOLO entre productos con los mismos
-                    # números (tamaños/gramajes), para no fusionar presentaciones
-                    # distintas (250 ml vs 500 ml).
-                    key_tokens = set(key.split())
-                    candidates = existing_by_nums.get(_name_numbers(key), [])
-                    best, best_r = None, None
-                    for cand_nk, cand_p in candidates:
-                        cand_tokens = set(cand_nk.split())
-                        # (a) Un nombre es el otro + palabras extra (p. ej. la marca
-                        # "THE HUNTER"): subconjunto de tokens → mismo producto.
-                        if key_tokens <= cand_tokens or cand_tokens <= key_tokens:
-                            extra = len(key_tokens ^ cand_tokens)
-                            if best_r is None or extra < best_r:
-                                best, best_r = cand_p, extra
-                    if best is None:
-                        # (b) Si no hubo subconjunto, similitud de texto alta (typos,
-                        # puntuación) con los mismos números.
-                        best_r = 0.86
-                        for cand_nk, cand_p in candidates:
-                            r = SequenceMatcher(None, key, cand_nk).ratio()
-                            if r >= best_r:
-                                best, best_r = cand_p, r
-                    if best is not None:
-                        product = best
-                        matched_fuzzy += 1
                 if product is None:
                     product = Product.objects.create(
                         name=name,
@@ -459,7 +431,6 @@ def suppliers(request):
                         default_supplier=supplier,
                     )
                     existing_by_key[key] = product
-                    existing_by_nums.setdefault(_name_numbers(key), []).append((key, product))
                     created_names.append(name)
                 _, was_created = SupplierProduct.objects.update_or_create(
                     supplier=supplier,
@@ -487,7 +458,6 @@ def suppliers(request):
                 (
                     f"Lista de precios de {supplier.name} importada: "
                     f"{len(created_names)} producto(s) nuevo(s), "
-                    f"{matched_fuzzy} por coincidencia, "
                     f"{new_links} vínculo(s) nuevo(s), {updated_links} actualizado(s)."
                 ),
             )
