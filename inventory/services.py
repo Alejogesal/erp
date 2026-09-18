@@ -5,7 +5,7 @@ from django.db.models import Sum
 
 from django.utils import timezone
 
-from .models import BrandSupplier, Product, ProductVariant, Stock, StockMovement, SupplierProduct, Warehouse
+from .models import BrandSupplier, Product, ProductVariant, Stock, StockMovement, Supplier, SupplierProduct, Warehouse
 
 
 class StockError(Exception):
@@ -122,6 +122,37 @@ def sync_principal_to_cheapest(product: Product) -> bool:
         product.save(update_fields=["default_supplier"])
     sync_product_cost_from_principal(product)
     return changed
+
+
+def set_brand_principal_supplier(group: str, supplier: Supplier) -> dict:
+    """Fija `supplier` como proveedor principal ELEGIDO de `group` (BrandSupplier) y
+    resincroniza el proveedor principal (y costo) de todos los productos de esa
+    marca. Compartido entre Proveedores y Lista de precios: mismo botón, dos
+    pantallas.
+
+    Devuelve {"real_group", "changed", "not_linked"} para armar el mensaje: cuántos
+    productos se reasignaron y cuántos NO están vinculados a `supplier` (quedaron en
+    el más barato porque ese proveedor no los tiene con precio).
+    """
+    # Se guarda la marca con su casing real (el de los productos) si existe.
+    real_group = (
+        Product.objects.filter(group__iexact=group).values_list("group", flat=True).first()
+    ) or group
+    BrandSupplier.objects.update_or_create(group=real_group, defaults={"supplier": supplier})
+    products = Product.objects.filter(group__iexact=group)
+    changed = sum(1 for p in products if sync_principal_to_cheapest(p))
+    not_linked = products.exclude(supplier_products__supplier=supplier).count()
+    return {"real_group": real_group, "changed": changed, "not_linked": not_linked}
+
+
+def remove_brand_principal_supplier(group: str) -> bool:
+    """Quita el proveedor principal ELEGIDO de `group`: sus productos vuelven a
+    resolverse al más barato. Devuelve True si había uno para quitar."""
+    deleted, _ = BrandSupplier.objects.filter(group__iexact=group).delete()
+    if deleted:
+        for p in Product.objects.filter(group__iexact=group):
+            sync_principal_to_cheapest(p)
+    return bool(deleted)
 
 
 @transaction.atomic

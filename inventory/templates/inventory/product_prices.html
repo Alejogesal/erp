@@ -205,7 +205,24 @@
                 <td>{{ product.sku }}</td>
                 <td>{{ entry.name }}{% if not entry.in_list %} <span class="out-badge">fuera de lista</span>{% endif %}</td>
                 <td>{{ entry.brand|default:"-" }}</td>
-                <td>{{ entry.principal_supplier|default:"-" }}</td>
+                <td>
+                    {% if entry.brand %}
+                    <form method="post" action="{% url 'inventory_product_prices' %}" style="display:flex; gap:2px; align-items:center;">
+                        {% csrf_token %}
+                        <input type="hidden" name="group" value="{{ entry.brand }}">
+                        <input type="hidden" name="todos" value="{% if show_all %}1{% endif %}">
+                        <input type="hidden" name="action" value="set_brand_supplier">
+                        <select name="supplier" class="price-input" style="max-width:150px;" onchange="this.form.querySelector('input[name=action]').value = this.value ? 'set_brand_supplier' : 'remove_brand_supplier'; this.form.submit();" title="Cambiar el proveedor principal de la marca '{{ entry.brand }}' (afecta a todos sus productos)">
+                            <option value="">— más barato</option>
+                            {% for opt in entry.brand_supplier_options %}
+                            <option value="{{ opt.id }}" {% if entry.principal_supplier_id == opt.id %}selected{% endif %}>{{ opt.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </form>
+                    {% else %}
+                    -
+                    {% endif %}
+                </td>
                 <td>{% if entry.cost_net %}{{ entry.cost_net|latam_number:2 }}{% else %}-{% endif %}</td>
                 <td>{{ entry.cost_with_vat|latam_number:2 }}</td>
                 <td>

@@ -21,7 +21,11 @@ from ..models import (
     SupplierPayment,
     SupplierProduct,
 )
-from ..services import sync_principal_to_cheapest
+from ..services import (
+    remove_brand_principal_supplier,
+    set_brand_principal_supplier,
+    sync_principal_to_cheapest,
+)
 from .common import _normalize_lookup_text
 from .forms import (
     BrandSupplierForm,
@@ -346,30 +350,14 @@ def suppliers(request):
                 if not group:
                     messages.error(request, "Elegí una marca / grupo.")
                     return redirect("inventory_suppliers")
-                # Se guarda la marca con su casing real (el de los productos) si existe.
-                real_group = (
-                    Product.objects.filter(group__iexact=group)
-                    .values_list("group", flat=True)
-                    .first()
-                ) or group
-                BrandSupplier.objects.update_or_create(
-                    group=real_group, defaults={"supplier": supplier}
-                )
-                # Reasigna el proveedor principal (y el costo) de los productos de la
-                # marca al elegido. Los que no estén vinculados a ese proveedor con
-                # precio quedan en el más barato (fallback dentro de sync).
-                products = Product.objects.filter(group__iexact=group)
-                changed = sum(1 for p in products if sync_principal_to_cheapest(p))
-                not_linked = products.exclude(
-                    supplier_products__supplier=supplier
-                ).count()
+                result = set_brand_principal_supplier(group, supplier)
                 msg = (
-                    f"Proveedor principal de la marca '{real_group}' asignado a "
-                    f"{supplier.name}. Productos reasignados: {changed}."
+                    f"Proveedor principal de la marca '{result['real_group']}' asignado a "
+                    f"{supplier.name}. Productos reasignados: {result['changed']}."
                 )
-                if not_linked:
+                if result["not_linked"]:
                     msg += (
-                        f" Ojo: {not_linked} producto(s) no están vinculados a {supplier.name} "
+                        f" Ojo: {result['not_linked']} producto(s) no están vinculados a {supplier.name} "
                         f"(quedaron en el proveedor más barato). Usá 'Vincular proveedor a marca' "
                         f"para traer sus precios."
                     )
@@ -377,11 +365,7 @@ def suppliers(request):
                 return redirect("inventory_suppliers")
         elif action == "remove_brand_supplier":
             group = (request.POST.get("group") or "").strip()
-            deleted, _ = BrandSupplier.objects.filter(group__iexact=group).delete()
-            if deleted:
-                # Vuelven a resolverse al más barato.
-                for p in Product.objects.filter(group__iexact=group):
-                    sync_principal_to_cheapest(p)
+            if remove_brand_principal_supplier(group):
                 messages.success(
                     request,
                     f"Se quitó el proveedor principal fijo de la marca '{group}'. "

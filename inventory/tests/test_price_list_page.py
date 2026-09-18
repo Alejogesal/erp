@@ -114,3 +114,81 @@ class PriceListPageTests(TestCase):
         kit_entry = entries[kit.id]
         self.assertEqual(kit_entry["cost_net"], "")
         self.assertEqual(kit_entry["cost_with_vat"], "121.00")
+
+
+class PriceListSupplierPickerTests(TestCase):
+    """El desplegable de proveedor principal por marca, ahora también disponible
+    directo en Lista de precios (antes solo estaba en Proveedores)."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(username="u5", password="x")
+        self.client.force_login(self.user)
+        self.aris = Supplier.objects.create(name="Aris Norma")
+        self.glm = Supplier.objects.create(name="GLM Distribuidora")
+
+    def test_entry_lists_available_suppliers_and_current_selection(self):
+        p = Product.objects.create(name="Fidelite X", group="Fidelite", margin_consumer=Decimal("0.00"))
+        SupplierProduct.objects.create(supplier=self.aris, product=p, last_cost=Decimal("100"))
+        SupplierProduct.objects.create(supplier=self.glm, product=p, last_cost=Decimal("90"))
+
+        resp = self.client.get(reverse("inventory_product_prices"), {"todos": "1"})
+        entry = next(e for e in resp.context["entries"] if e["product"].id == p.id)
+        option_names = {o["name"] for o in entry["brand_supplier_options"]}
+        self.assertEqual(option_names, {"Aris Norma", "GLM Distribuidora"})
+        # Sin BrandSupplier explícito, el deducido es el default_supplier ya
+        # resuelto (el más barato tras sync, GLM en este caso al crearse el link).
+
+    def test_set_brand_supplier_from_price_list_page_reassigns_brand(self):
+        # Reproduce el caso reportado: FIDELITE tenía a Aris como principal pero
+        # esos productos son en realidad de GLM. Se corrige eligiendo GLM desde
+        # el desplegable de Lista de precios (sin ir a Proveedores).
+        p1 = Product.objects.create(name="Fidelite Uno", group="Fidelite", margin_consumer=Decimal("0.00"))
+        p2 = Product.objects.create(name="Fidelite Dos", group="Fidelite", margin_consumer=Decimal("0.00"))
+        for p in (p1, p2):
+            SupplierProduct.objects.create(supplier=self.aris, product=p, last_cost=Decimal("100"))
+            SupplierProduct.objects.create(supplier=self.glm, product=p, last_cost=Decimal("90"))
+        BrandSupplier.objects.create(group="Fidelite", supplier=self.aris)
+
+        resp = self.client.post(
+            reverse("inventory_product_prices"),
+            {"action": "set_brand_supplier", "group": "Fidelite", "supplier": self.glm.id},
+        )
+        self.assertRedirects(resp, reverse("inventory_product_prices"))
+        self.assertTrue(BrandSupplier.objects.filter(group__iexact="Fidelite", supplier=self.glm).exists())
+        p1.refresh_from_db()
+        self.assertEqual(p1.default_supplier_id, self.glm.id)
+
+        resp = self.client.get(reverse("inventory_product_prices"))
+        entries = {e["product"].id: e for e in resp.context["entries"]}
+        self.assertEqual(entries[p1.id]["principal_supplier"], "GLM Distribuidora")
+        self.assertEqual(entries[p2.id]["principal_supplier"], "GLM Distribuidora")
+
+    def test_remove_brand_supplier_from_price_list_page_falls_back_to_cheapest(self):
+        p = Product.objects.create(name="Fidelite X", group="Fidelite", margin_consumer=Decimal("0.00"))
+        SupplierProduct.objects.create(supplier=self.aris, product=p, last_cost=Decimal("100"))
+        SupplierProduct.objects.create(supplier=self.glm, product=p, last_cost=Decimal("90"))
+        BrandSupplier.objects.create(group="Fidelite", supplier=self.aris)
+
+        resp = self.client.post(
+            reverse("inventory_product_prices"),
+            {"action": "remove_brand_supplier", "group": "Fidelite"},
+        )
+        self.assertRedirects(resp, reverse("inventory_product_prices"))
+        self.assertFalse(BrandSupplier.objects.filter(group__iexact="Fidelite").exists())
+        p.refresh_from_db()
+        # GLM es más barato (90 < 100): al quitar la elección explícita, vuelve
+        # a resolverse automáticamente al más barato.
+        self.assertEqual(p.default_supplier_id, self.glm.id)
+
+    def test_page_renders_supplier_dropdown_for_each_brand_row(self):
+        p = Product.objects.create(
+            name="Fidelite X", group="Fidelite", margin_consumer=Decimal("0.00"), default_supplier=self.aris
+        )
+        SupplierProduct.objects.create(supplier=self.aris, product=p, last_cost=Decimal("100"))
+        SupplierProduct.objects.create(supplier=self.glm, product=p, last_cost=Decimal("90"))
+
+        resp = self.client.get(reverse("inventory_product_prices"))
+        html = resp.content.decode()
+        self.assertContains(resp, "Aris Norma")
+        self.assertContains(resp, "GLM Distribuidora")
+        self.assertIn('name="supplier"', html)
