@@ -18,7 +18,6 @@ from ..models import (
     KitComponent,
     Product,
     ProductVariant,
-    Supplier,
     SupplierProduct,
     Warehouse,
 )
@@ -237,39 +236,6 @@ def product_prices(request):
             else:
                 ExcludedBrand.objects.filter(group__iexact=group).delete()
                 messages.success(request, f"'{group}' vuelve a poder aparecer en tu lista de precios.")
-            return redirect(redirect_to)
-        if action in {"set_brand_supplier", "remove_brand_supplier"}:
-            group = (request.POST.get("group") or "").strip()
-            redirect_qs = "?todos=1" if request.POST.get("todos") == "1" else ""
-            redirect_to = f"{reverse('inventory_product_prices')}{redirect_qs}"
-            if not group:
-                messages.error(request, "Elegí una marca.")
-                return redirect(redirect_to)
-            if action == "remove_brand_supplier":
-                if services.remove_brand_principal_supplier(group):
-                    messages.success(
-                        request,
-                        f"Se quitó el proveedor principal fijo de la marca '{group}'. "
-                        f"Sus productos vuelven a usar el proveedor más barato.",
-                    )
-                else:
-                    messages.warning(request, f"La marca '{group}' no tenía proveedor principal fijo.")
-                return redirect(redirect_to)
-            supplier = Supplier.objects.filter(id=request.POST.get("supplier")).first()
-            if not supplier:
-                messages.error(request, "Elegí un proveedor.")
-                return redirect(redirect_to)
-            result = services.set_brand_principal_supplier(group, supplier)
-            msg = (
-                f"Proveedor principal de la marca '{result['real_group']}' asignado a "
-                f"{supplier.name}. Productos reasignados: {result['changed']}."
-            )
-            if result["not_linked"]:
-                msg += (
-                    f" Ojo: {result['not_linked']} producto(s) no están vinculados a {supplier.name} "
-                    f"(quedaron en el proveedor más barato)."
-                )
-            messages.success(request, msg)
             return redirect(redirect_to)
         if action in {"create_kit", "update_kit"}:
             kit_id = request.POST.get("kit_id") if action == "update_kit" else None
@@ -1000,26 +966,6 @@ def _price_list_entries(products, *, include_excluded: bool = False) -> list[dic
         )
     )
 
-    # Proveedores vinculados a cada marca (con o sin precio), para el desplegable
-    # "cambiar proveedor principal" de la lista de precios: no tiene sentido
-    # ofrecer un proveedor que no tiene ni un producto de esa marca.
-    brand_supplier_options: dict[str, list[dict]] = defaultdict(list)
-    seen_options: set[tuple[str, int]] = set()
-    for row in (
-        SupplierProduct.objects.filter(product__in=products)
-        .exclude(product__group="")
-        .values("supplier_id", "supplier__name", "product__group")
-        .distinct()
-    ):
-        key = _gkey(row["product__group"])
-        option_key = (key, row["supplier_id"])
-        if option_key in seen_options:
-            continue
-        seen_options.add(option_key)
-        brand_supplier_options[key].append({"id": row["supplier_id"], "name": row["supplier__name"]})
-    for key, options in brand_supplier_options.items():
-        options.sort(key=lambda o: o["name"].casefold())
-
     entries = []
     for p in products:
         in_list = _include(p)
@@ -1035,8 +981,6 @@ def _price_list_entries(products, *, include_excluded: bool = False) -> list[dic
                 "in_list": in_list,
                 "excluded": key in excluded_groups if key else False,
                 "principal_supplier": supplier_name_by_id.get(principal_sid, "") if principal_sid else "",
-                "principal_supplier_id": principal_sid,
-                "brand_supplier_options": brand_supplier_options.get(key, []),
                 # El kit no tiene costo "sin IVA" propio: es la suma del costo (con
                 # IVA) de sus componentes, así que ese desglose no aplica.
                 "cost_net": "" if p.is_kit else f"{(p.avg_cost or Decimal('0.00')):.2f}",
