@@ -23,6 +23,14 @@ DEBITO_START_DATE = date(2026, 6, 1)
 IVA_FACTOR = Decimal("21") / Decimal("121")
 
 
+def _sort_key(value):
+    """Clave de orden que admite mezclar date (gastos, AFIP) y datetime (compras,
+    comisiones ML). Todo se pasa a datetime con zona horaria para poder compararlos."""
+    if isinstance(value, datetime):
+        return value if timezone.is_aware(value) else timezone.make_aware(value)
+    return timezone.make_aware(datetime.combine(value, time.min))
+
+
 def _calc_credito(purchase_qs, expenses_qs, ml_sales_qs):
     """Calcula crédito fiscal desde el ERP (compras + gastos + comisiones ML)."""
     rows = []
@@ -68,7 +76,7 @@ def _calc_credito(purchase_qs, expenses_qs, ml_sales_qs):
         })
         total += vat
 
-    rows.sort(key=lambda x: x["date"] if hasattr(x["date"], "date") else x["date"])
+    rows.sort(key=lambda x: _sort_key(x["date"]))
     subtotals = {
         "compras": sum(r["vat_amount"] for r in rows if r["source"] == "compra"),
         "gastos": sum(r["vat_amount"] for r in rows if r["source"] == "gasto"),
@@ -107,7 +115,7 @@ def _calc_credito_afip(afip_qs, expenses_qs):
         })
         total += expense.vat_amount
 
-    rows.sort(key=lambda x: x["date"] if hasattr(x["date"], "date") else datetime.combine(x["date"], time.min))
+    rows.sort(key=lambda x: _sort_key(x["date"]))
     subtotals = {
         "afip": sum(r["vat_amount"] for r in rows if r["source"] == "afip"),
         "gastos": sum(r["vat_amount"] for r in rows if r["source"] == "gasto"),
