@@ -382,6 +382,63 @@ def customer_history_view(request, customer_id):
     )
 
 
+def _restock_credit_note(sale, cn, cn_items, user):
+    """Repone al depósito COMUN las unidades devueltas de una nota de crédito.
+
+    Solo si la venta había descontado de COMUN (mostrador o ML no-Full). Las
+    ventas Full salen del depósito de MercadoLibre, que se recalcula en el sync.
+    No toca el costo promedio: una devolución no es una compra.
+    """
+    from ..models import KitComponent, ProductVariant, Stock, StockMovement, Warehouse
+    from .stock import _sync_common_with_variants
+
+    comun_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
+    if not comun_wh:
+        return 0
+    left_comun = sale.movements.filter(
+        movement_type=StockMovement.MovementType.EXIT, from_warehouse__type=Warehouse.WarehouseType.COMUN
+    ).exists()
+    if not left_comun:
+        return 0
+    variant_products = {}
+    restocked = 0
+    for row in cn_items:
+        product = row["product"]
+        qty = row["quantity"]
+        targets = (
+            [(kc.component, (qty * kc.quantity).quantize(Decimal("0.01"))) for kc in KitComponent.objects.select_related("component").filter(kit=product)]
+            if product.is_kit
+            else [(product, qty)]
+        )
+        variant = row.get("variant")
+        if variant and not product.is_kit:
+            locked = ProductVariant.objects.select_for_update().filter(id=variant.id, product=product).first()
+            if locked:
+                locked.quantity = (locked.quantity + qty).quantize(Decimal("0.01"))
+                locked.save(update_fields=["quantity"])
+                variant_products[product.id] = product
+        for target, target_qty in targets:
+            stock, _ = Stock.objects.select_for_update().get_or_create(
+                product=target, warehouse=comun_wh, defaults={"quantity": Decimal("0.00")}
+            )
+            stock.quantity = (stock.quantity + target_qty).quantize(Decimal("0.01"))
+            stock.save(update_fields=["quantity"])
+            StockMovement.objects.create(
+                product=target,
+                sale=sale,
+                movement_type=StockMovement.MovementType.ADJUSTMENT,
+                to_warehouse=comun_wh,
+                quantity=target_qty,
+                unit_cost=target.avg_cost,
+                user=user,
+                reference=f"Devolución NC #{cn.id}",
+            )
+            restocked += 1
+    for prod in variant_products.values():
+        _sync_common_with_variants(prod, comun_wh)
+    return restocked
+
+
 @login_required
 def create_credit_note(request, customer_id):
     customer = get_object_or_404(Customer, id=customer_id)
@@ -399,7 +456,7 @@ def create_credit_note(request, customer_id):
             sale_id = request.POST.get("sale_id")
             if sale_id:
                 selected_sale = get_object_or_404(Sale, id=sale_id, customer=customer)
-                sale_items_data = list(selected_sale.items.select_related("product").all())
+                sale_items_data = list(selected_sale.items.select_related("product", "variant").all())
                 step = "select_items"
             else:
                 messages.error(request, "Seleccioná una venta.")
@@ -407,7 +464,7 @@ def create_credit_note(request, customer_id):
         elif action == "create":
             sale_id = request.POST.get("sale_id")
             selected_sale = get_object_or_404(Sale, id=sale_id, customer=customer)
-            sale_items_data = list(selected_sale.items.select_related("product").all())
+            sale_items_data = list(selected_sale.items.select_related("product", "variant").all())
             date_str = request.POST.get("date") or today
             notes = (request.POST.get("notes") or "").strip()
 
@@ -425,6 +482,7 @@ def create_credit_note(request, customer_id):
                 line_total = (qty * item.final_unit_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                 cn_items.append({
                     "product": item.product,
+                    "variant": item.variant,
                     "quantity": qty,
                     "unit_price": item.final_unit_price,
                     "line_total": line_total,
@@ -461,7 +519,14 @@ def create_credit_note(request, customer_id):
                         paid_at=date_str,
                         notes=f"NC #{cn.id}" + (f" · {notes}" if notes else ""),
                     )
-                messages.success(request, f"Nota de crédito #{cn.id} emitida.")
+                    restocked = 0
+                    if request.POST.get("restock"):
+                        restocked = _restock_credit_note(selected_sale, cn, cn_items, request.user)
+                messages.success(
+                    request,
+                    f"Nota de crédito #{cn.id} emitida."
+                    + (" Stock repuesto." if restocked else " No se repuso stock."),
+                )
                 return redirect("inventory_customer_history", customer_id=customer.id)
 
     return render(

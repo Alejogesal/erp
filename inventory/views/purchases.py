@@ -367,16 +367,6 @@ def purchases_list(request):
                             discount_percent=discount_percent,
                             vat_percent=vat_percent,
                         )
-                        if warehouse.type == Warehouse.WarehouseType.COMUN and data.get("variant") is not None:
-                            variant = (
-                                ProductVariant.objects.select_for_update()
-                                .filter(id=data["variant"].id, product=data["product"])
-                                .first()
-                            )
-                            if variant:
-                                variant.quantity = (variant.quantity + qty).quantize(Decimal("0.01"))
-                                variant.save(update_fields=["quantity"])
-                                _sync_common_with_variants(data["product"], warehouse)
                         services.register_entry(
                             product=data["product"],
                             warehouse=warehouse,
@@ -388,6 +378,16 @@ def purchases_list(request):
                             reference=f"Compra #{purchase.id}",
                             purchase=purchase,
                         )
+                        if warehouse.type == Warehouse.WarehouseType.COMUN and data.get("variant") is not None:
+                            variant = (
+                                ProductVariant.objects.select_for_update()
+                                .filter(id=data["variant"].id, product=data["product"])
+                                .first()
+                            )
+                            if variant:
+                                variant.quantity = (variant.quantity + qty).quantize(Decimal("0.01"))
+                                variant.save(update_fields=["quantity"])
+                                _sync_common_with_variants(data["product"], warehouse)
 
                     purchase.total = subtotal.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                     purchase.save()
@@ -684,16 +684,6 @@ def purchases_list(request):
                             discount_percent=item_discount_percent,
                             vat_percent=vat_percent,
                         )
-                        if warehouse.type == Warehouse.WarehouseType.COMUN and data.get("variant") is not None:
-                            variant = (
-                                ProductVariant.objects.select_for_update()
-                                .filter(id=data["variant"].id, product=data["product"])
-                                .first()
-                            )
-                            if variant:
-                                variant.quantity = (variant.quantity + qty).quantize(Decimal("0.01"))
-                                variant.save(update_fields=["quantity"])
-                                _sync_common_with_variants(data["product"], warehouse)
                         services.register_entry(
                             product=data["product"],
                             warehouse=warehouse,
@@ -705,6 +695,16 @@ def purchases_list(request):
                             reference=f"Compra #{purchase.id}",
                             purchase=purchase,
                         )
+                        if warehouse.type == Warehouse.WarehouseType.COMUN and data.get("variant") is not None:
+                            variant = (
+                                ProductVariant.objects.select_for_update()
+                                .filter(id=data["variant"].id, product=data["product"])
+                                .first()
+                            )
+                            if variant:
+                                variant.quantity = (variant.quantity + qty).quantize(Decimal("0.01"))
+                                variant.save(update_fields=["quantity"])
+                                _sync_common_with_variants(data["product"], warehouse)
                     subtotal_with_shipping = (subtotal + shipping_cost).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                     discount_total = (subtotal_with_shipping * header_discount_percent / Decimal("100.00")).quantize(
                         Decimal("0.01"), rounding=ROUND_HALF_UP
@@ -1035,18 +1035,6 @@ def purchase_edit(request, purchase_id: int):
                             discount_percent=item_discount_percent,
                             vat_percent=vat,
                         )
-                        if (stock_changed or additive_update) and purchase.warehouse.type == Warehouse.WarehouseType.COMUN and item.get("variant") is not None:
-                            variant = (
-                                ProductVariant.objects.select_for_update()
-                                .filter(id=item["variant"].id, product=product)
-                                .first()
-                            )
-                            if variant:
-                                apply_qty = qty if stock_changed else delta_qty
-                                if apply_qty > 0:
-                                    variant.quantity = (variant.quantity + apply_qty).quantize(Decimal("0.01"))
-                                    variant.save(update_fields=["quantity"])
-                                    _sync_common_with_variants(product, purchase.warehouse)
                         if stock_changed or (additive_update and delta_qty > 0):
                             services.register_entry(
                                 product=product,
@@ -1059,6 +1047,18 @@ def purchase_edit(request, purchase_id: int):
                                 supplier=None if is_bonus else purchase.supplier,
                                 purchase=purchase,
                             )
+                        if (stock_changed or additive_update) and purchase.warehouse.type == Warehouse.WarehouseType.COMUN and item.get("variant") is not None:
+                            variant = (
+                                ProductVariant.objects.select_for_update()
+                                .filter(id=item["variant"].id, product=product)
+                                .first()
+                            )
+                            if variant:
+                                apply_qty = qty if stock_changed else delta_qty
+                                if apply_qty > 0:
+                                    variant.quantity = (variant.quantity + apply_qty).quantize(Decimal("0.01"))
+                                    variant.save(update_fields=["quantity"])
+                                    _sync_common_with_variants(product, purchase.warehouse)
                     subtotal_with_shipping = (subtotal + shipping_cost).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                     discount_total = (subtotal_with_shipping * header_discount_percent / Decimal("100.00")).quantize(
                         Decimal("0.01"), rounding=ROUND_HALF_UP
@@ -1142,6 +1142,25 @@ def purchase_delete(request, purchase_id: int):
                     stock.quantity = new_qty if new_qty > 0 else Decimal("0.00")
                     stock.save(update_fields=["quantity"])
                 movement.delete()
+            # En productos con variedades el COMUN es la suma de las variedades:
+            # hay que bajarlas también, si no el próximo recálculo revive las
+            # unidades de la compra borrada.
+            if purchase.warehouse.type == Warehouse.WarehouseType.COMUN:
+                touched = {}
+                for item in purchase.items.select_related("product"):
+                    if not item.variant_id:
+                        continue
+                    variant = (
+                        ProductVariant.objects.select_for_update()
+                        .filter(id=item.variant_id, product=item.product)
+                        .first()
+                    )
+                    if variant:
+                        variant.quantity = (variant.quantity - item.quantity).quantize(Decimal("0.01"))
+                        variant.save(update_fields=["quantity"])
+                        touched[item.product_id] = item.product
+                for prod in touched.values():
+                    _sync_common_with_variants(prod, purchase.warehouse)
             purchase.delete()
         messages.success(request, "Compra eliminada y stock ajustado.")
     except Exception as exc:

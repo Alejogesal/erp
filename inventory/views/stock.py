@@ -91,6 +91,13 @@ def stock_list(request):
             if not product:
                 messages.error(request, "Producto no encontrado.")
                 return redirect(_stock_url())
+            if ProductVariant.objects.filter(product=product).exists():
+                messages.error(
+                    request,
+                    "Este producto tiene variedades: el stock total es la suma de ellas. "
+                    "Corregí la cantidad de cada variedad desde la ficha del producto.",
+                )
+                return redirect(_stock_url())
             desired = parse_decimal(desired_raw)
             stock = Stock.objects.filter(product=product, warehouse=comun_wh).first()
             current = stock.quantity if stock else Decimal("0.00")
@@ -487,6 +494,14 @@ def stock_set_comun_ajax(request):
     product = Product.objects.filter(pk=product_id).first()
     if not product:
         return JsonResponse({"ok": False, "error": "Producto no encontrado."}, status=404)
+    if ProductVariant.objects.filter(product=product).exists():
+        return JsonResponse(
+            {
+                "ok": False,
+                "error": "Este producto tiene variedades: corregí cada variedad desde la ficha del producto.",
+            },
+            status=400,
+        )
 
     stock = Stock.objects.filter(product=product, warehouse=comun_wh).first()
     current = stock.quantity if stock else Decimal("0.00")

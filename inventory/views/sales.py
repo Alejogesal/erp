@@ -84,6 +84,45 @@ def _resolve_sale_item_cost(item) -> Decimal:
     return Decimal("0.00")
 
 
+def _restore_sale_stock(sale) -> None:
+    """Devuelve al stock lo que descontó la venta y borra sus movimientos.
+
+    Mismo criterio que sale_delete: variedades primero, movimientos de COMUN
+    después, y el recálculo de COMUN desde las variedades va último.
+    """
+    comun_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
+    movements = list(sale.movements.select_for_update())
+    left_comun = sale.warehouse.type == Warehouse.WarehouseType.COMUN or any(
+        _movement_restores_stock(m) for m in movements
+    )
+    variant_products = {}
+    if left_comun:
+        for item in sale.items.select_related("variant", "product"):
+            if item.variant_id and not item.product.is_kit:
+                variant = (
+                    ProductVariant.objects.select_for_update()
+                    .filter(id=item.variant_id, product=item.product)
+                    .first()
+                )
+                if variant:
+                    variant.quantity = (variant.quantity + item.quantity).quantize(Decimal("0.01"))
+                    variant.save(update_fields=["quantity"])
+                    variant_products[item.product_id] = item.product
+    for movement in movements:
+        if _movement_restores_stock(movement):
+            stock, _ = Stock.objects.select_for_update().get_or_create(
+                product=movement.product,
+                warehouse=movement.from_warehouse,
+                defaults={"quantity": Decimal("0.00")},
+            )
+            stock.quantity = (stock.quantity + movement.quantity).quantize(Decimal("0.01"))
+            stock.save(update_fields=["quantity"])
+        movement.delete()
+    if comun_wh:
+        for prod in variant_products.values():
+            _sync_common_with_variants(prod, comun_wh)
+
+
 @login_required
 def register_sale(request):
     return sales_list(request)
@@ -320,9 +359,12 @@ def sale_edit(request, sale_id: int):
                     else:
                         stock_wh = warehouse
                     previous_items = list(sale.items.select_related("variant", "product"))
-                    if sale.warehouse.type == Warehouse.WarehouseType.COMUN:
+                    prev_left_comun = sale.warehouse.type == Warehouse.WarehouseType.COMUN or any(
+                        _movement_restores_stock(m) for m in sale.movements.all()
+                    )
+                    if prev_left_comun:
                         for prev_item in previous_items:
-                            if prev_item.variant_id:
+                            if prev_item.variant_id and not prev_item.product.is_kit:
                                 variant = (
                                     ProductVariant.objects.select_for_update()
                                     .filter(id=prev_item.variant_id, product=prev_item.product)
@@ -331,8 +373,10 @@ def sale_edit(request, sale_id: int):
                                 if variant:
                                     variant.quantity = (variant.quantity + prev_item.quantity).quantize(Decimal("0.01"))
                                     variant.save(update_fields=["quantity"])
-                                    if comun_wh:
-                                        _sync_common_with_variants(prev_item.product, comun_wh)
+                                    # El recálculo desde variedades va al final (ver
+                                    # abajo): hacerlo acá y además reponer el
+                                    # movimiento de salida reponía dos veces.
+                                    variant_products.add(prev_item.product)
                     for movement in sale.movements.select_for_update():
                         if _movement_restores_stock(movement):
                             stock, _ = Stock.objects.select_for_update().get_or_create(
@@ -403,7 +447,7 @@ def sale_edit(request, sale_id: int):
                         discount_amount = (qty * (base_price - final_price)).quantize(Decimal("0.01"))
                         base_subtotal += (qty * base_price).quantize(Decimal("0.01"))
                         variant = data.get("variant")
-                        if warehouse.type == Warehouse.WarehouseType.COMUN and variant and not data["product"].is_kit:
+                        if stock_wh is not None and stock_wh.type == Warehouse.WarehouseType.COMUN and variant and not data["product"].is_kit:
                             variant = (
                                 ProductVariant.objects.select_for_update()
                                 .filter(id=variant.id, product=data["product"])
@@ -1020,9 +1064,11 @@ def sales_list(request):
                 return redirect("inventory_sales_list")
 
         deleted_ids = list(sales_qs.values_list("id", flat=True))
-        StockMovement.objects.filter(sale_id__in=deleted_ids).delete()
-        deleted = len(deleted_ids)
-        Sale.objects.filter(id__in=deleted_ids).delete()
+        with transaction.atomic():
+            for sale in Sale.objects.filter(id__in=deleted_ids).select_related("warehouse"):
+                _restore_sale_stock(sale)
+            deleted = len(deleted_ids)
+            Sale.objects.filter(id__in=deleted_ids).delete()
         messages.success(request, f"Ventas eliminadas: {deleted}.")
         return redirect("inventory_sales_list")
     if action == "bulk_delete_selected":
