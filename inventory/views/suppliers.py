@@ -567,6 +567,52 @@ def suppliers(request):
                 msg += f" {skipped} se conservaron por tener ventas/compras asociadas."
             messages.success(request, msg)
             return redirect("inventory_suppliers")
+        elif action == "bulk_supplier_links":
+            # Acción masiva sobre los productos tildados en la lista de un proveedor.
+            # mode=unlink: los quita de la lista (el producto no se borra).
+            # mode=delete: borra los productos (se saltean los que tienen ventas/compras).
+            supplier = Supplier.objects.filter(id=request.POST.get("supplier_id")).first()
+            if not supplier:
+                messages.error(request, "Proveedor no encontrado.")
+                return redirect("inventory_suppliers")
+            link_ids = [v for v in request.POST.getlist("link_ids") if str(v).isdigit()]
+            links = list(
+                SupplierProduct.objects.filter(supplier=supplier, id__in=link_ids).select_related("product")
+            )
+            if not links:
+                messages.warning(request, "No seleccionaste ningún producto.")
+                return redirect("inventory_suppliers")
+            mode = request.POST.get("mode")
+            product_ids = {link.product_id for link in links}
+            if mode == "unlink":
+                removed, _ = SupplierProduct.objects.filter(id__in=[link.id for link in links]).delete()
+                for product in Product.objects.filter(id__in=product_ids):
+                    if not sync_principal_to_cheapest(product) and not SupplierProduct.objects.filter(product=product).exists():
+                        product.default_supplier = None
+                        product.save(update_fields=["default_supplier"])
+                messages.success(
+                    request,
+                    f"Se quitaron {removed} producto(s) de la lista de {supplier.name}. Los productos no se borraron.",
+                )
+            elif mode == "delete":
+                deleted = skipped = 0
+                for product in Product.objects.filter(id__in=product_ids):
+                    try:
+                        with transaction.atomic():
+                            product.delete()
+                        deleted += 1
+                    except ProtectedError:
+                        skipped += 1
+                msg = f"Se eliminaron {deleted} producto(s)."
+                if skipped:
+                    msg += (
+                        f" {skipped} se conservaron por tener ventas/compras asociadas"
+                        " (podés quitarlos de la lista en vez de eliminarlos)."
+                    )
+                messages.success(request, msg)
+            else:
+                messages.error(request, "Acción inválida.")
+            return redirect("inventory_suppliers")
         elif action == "create_product_for_supplier":
             name = (request.POST.get("new_product_name") or "").strip()
             group = (request.POST.get("new_product_group") or "").strip()

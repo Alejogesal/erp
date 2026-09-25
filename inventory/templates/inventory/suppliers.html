@@ -273,6 +273,9 @@
     .pl-remove { font-size:11px; padding:4px 8px; background:transparent; border:1px solid var(--border,#2a313c); color:var(--muted); border-radius:7px; }
     .pl-remove:hover { color:#ef4444; border-color:rgba(239,68,68,0.4); }
     .pl-sku { color:var(--muted); font-size:11px; }
+    .pl-bulk-bar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:10px; font-size:12px; }
+    .pl-bulk-bar .pl-bulk-count { color:var(--muted); }
+    .pl-bulk-bar button:disabled { opacity:.45; cursor:not-allowed; }
     .pl-edit-btn { background:transparent; border:none; color:var(--muted); cursor:pointer; font-size:12px; padding:0 2px; }
     .pl-edit-btn:hover { color:var(--accent, #2d7ff9); }
     .pl-edit-form input[type="text"] { padding:5px 8px; border-radius:7px; border:1px solid var(--border, #2a313c);
@@ -350,9 +353,19 @@
             <input type="search" class="pl-search" placeholder="🔍 Buscar por nombre, SKU o marca…" oninput="filterSupplierProducts(this)">
             <span class="pl-search-count" style="font-size:12px; color:var(--muted); margin-bottom:12px;"></span>
         </div>
+        <form method="post" id="bulk-form-{{ supplier.id }}" class="pl-bulk-bar" data-bulk-form
+              data-supplier-name="{{ supplier.name }}" onsubmit="return confirmBulkAction(this, event);">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="bulk_supplier_links">
+            <input type="hidden" name="supplier_id" value="{{ supplier.id }}">
+            <span class="pl-bulk-count">0 seleccionados</span>
+            <button type="submit" name="mode" value="unlink" class="pl-remove" disabled>Quitar seleccionados de la lista</button>
+            <button type="submit" name="mode" value="delete" class="pl-remove" style="color:#ef4444; border-color:rgba(239,68,68,0.4);" disabled>Eliminar seleccionados</button>
+        </form>
         <table class="supplier-products-table" data-supplier-items>
             <thead>
                 <tr>
+                    <th style="width:28px;"><input type="checkbox" data-bulk-all title="Seleccionar todos los visibles" onchange="toggleAllBulk(this)"></th>
                     <th>Producto</th>
                     <th class="num">Costo sin IVA</th>
                     <th class="num">Costo con IVA</th>
@@ -364,6 +377,7 @@
             <tbody>
                 {% for sp in supplier.supplier_products.all %}
                 <tr data-search="{{ sp.product.name }} {{ sp.supplier_name }} {{ sp.product.sku|default:'' }} {{ sp.product.group }}">
+                    <td><input type="checkbox" name="link_ids" value="{{ sp.id }}" form="bulk-form-{{ supplier.id }}" data-bulk-item onchange="updateBulkBar(this)"></td>
                     <td>
                         <div data-view>
                             <span class="pl-name">{{ sp.product.name }}</span>
@@ -505,11 +519,54 @@
             if (row.dataset.norm === undefined) row.dataset.norm = " " + _normSearch(row.dataset.search) + " ";
             const hay = words.every((w) => row.dataset.norm.includes(w));
             row.style.display = hay ? "" : "none";
+            if (!hay) {
+                const cb = row.querySelector("[data-bulk-item]");
+                if (cb) cb.checked = false;
+            }
             total += 1;
             if (hay) shown += 1;
         });
         const count = details.querySelector(".pl-search-count");
         if (count) count.textContent = words.length ? `${shown} de ${total}` : "";
+        updateBulkBar(table);
+    }
+    // Selección masiva de productos de la lista de un proveedor.
+    function toggleAllBulk(master) {
+        const table = master.closest("[data-supplier-items]");
+        table.querySelectorAll("tbody tr").forEach((row) => {
+            if (row.style.display === "none") return;
+            const cb = row.querySelector("[data-bulk-item]");
+            if (cb) cb.checked = master.checked;
+        });
+        updateBulkBar(master);
+    }
+    function updateBulkBar(el) {
+        const details = el.closest("details");
+        if (!details) return;
+        const table = details.querySelector("[data-supplier-items]");
+        const form = details.querySelector("[data-bulk-form]");
+        if (!table || !form) return;
+        const visible = [...table.querySelectorAll("tbody tr")].filter((r) => r.style.display !== "none");
+        const checked = visible.filter((r) => r.querySelector("[data-bulk-item]:checked")).length;
+        form.querySelector(".pl-bulk-count").textContent =
+            `${checked} seleccionado${checked === 1 ? "" : "s"}`;
+        form.querySelectorAll("button[name=mode]").forEach((b) => { b.disabled = checked === 0; });
+        const master = table.querySelector("[data-bulk-all]");
+        if (master) {
+            master.checked = visible.length > 0 && checked === visible.length;
+            master.indeterminate = checked > 0 && checked < visible.length;
+        }
+    }
+    function confirmBulkAction(form, event) {
+        const n = document.querySelectorAll(`[data-bulk-item][form="${form.id}"]:checked`).length;
+        if (!n) return false;
+        const name = form.dataset.supplierName;
+        const mode = event.submitter ? event.submitter.value : "";
+        if (mode === "delete") {
+            return confirm(`¿ELIMINAR ${n} producto(s) por completo (de todos los proveedores)? `
+                + "Los que tengan ventas o compras se conservan. Esta acción no se puede deshacer.");
+        }
+        return confirm(`¿Quitar ${n} producto(s) de la lista de ${name}? Los productos NO se borran.`);
     }
     function _postLink(input, onData) {
         const form = input.closest("form");
