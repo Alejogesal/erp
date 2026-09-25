@@ -346,8 +346,11 @@
             </table>
         </div>
         {% endif %}
-        <input type="search" class="pl-search" placeholder="🔍 Buscar producto por nombre o SKU…" oninput="filterSupplierProducts(this)">
-        <table class="supplier-products-table">
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <input type="search" class="pl-search" placeholder="🔍 Buscar por nombre, SKU o marca…" oninput="filterSupplierProducts(this)">
+            <span class="pl-search-count" style="font-size:12px; color:var(--muted); margin-bottom:12px;"></span>
+        </div>
+        <table class="supplier-products-table" data-supplier-items>
             <thead>
                 <tr>
                     <th>Producto</th>
@@ -360,7 +363,7 @@
             </thead>
             <tbody>
                 {% for sp in supplier.supplier_products.all %}
-                <tr data-search="{{ sp.product.name|lower|escape }} {{ sp.product.sku|default:''|lower|escape }}">
+                <tr data-search="{{ sp.product.name }} {{ sp.supplier_name }} {{ sp.product.sku|default:'' }} {{ sp.product.group }}">
                     <td>
                         <div data-view>
                             <span class="pl-name">{{ sp.product.name }}</span>
@@ -484,15 +487,29 @@
 </div>
 
 <script>
+    // Normaliza como el backend: sin tildes, minúsculas, solo letras y números.
+    function _normSearch(text) {
+        return (text || "")
+            .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+            .toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    }
     function filterSupplierProducts(input) {
-        const term = (input.value || "").trim().toLowerCase();
+        // Busca por coincidencias: cada palabra escrita tiene que aparecer, en
+        // cualquier orden (nombre, texto del proveedor, SKU o marca).
+        const words = _normSearch(input.value).split(" ").filter(Boolean);
         const details = input.closest("details");
-        const table = details ? details.querySelector(".supplier-products-table") : null;
+        const table = details ? details.querySelector("[data-supplier-items]") : null;
         if (!table) return;
+        let shown = 0, total = 0;
         table.querySelectorAll("tbody tr").forEach((row) => {
-            const hay = (row.dataset.search || "").includes(term);
+            if (row.dataset.norm === undefined) row.dataset.norm = " " + _normSearch(row.dataset.search) + " ";
+            const hay = words.every((w) => row.dataset.norm.includes(w));
             row.style.display = hay ? "" : "none";
+            total += 1;
+            if (hay) shown += 1;
         });
+        const count = details.querySelector(".pl-search-count");
+        if (count) count.textContent = words.length ? `${shown} de ${total}` : "";
     }
     function _postLink(input, onData) {
         const form = input.closest("form");
