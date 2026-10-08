@@ -1085,7 +1085,7 @@ def available_brands(request):
 
 @login_required
 def product_prices_download(request, audience: str):
-    headers = ["Marca", "Producto", "Precio"]
+    headers = ["Marca", "SKU", "Producto", "Precio"]
     price_attr_map = {
         "consumer": "consumer_price",
         "barber": "barber_price",
@@ -1110,10 +1110,10 @@ def product_prices_download(request, audience: str):
     products = list(products)
 
     rows = [
-        [e["brand"], e["name"], getattr(e["product"], attr)]
+        [e["brand"], e["product"].sku or "", e["name"], getattr(e["product"], attr)]
         for e in _price_list_entries(products)
     ]
-    xlsx_bytes = _build_xlsx(headers, rows, blue_cols={1}, number_cols={3})
+    xlsx_bytes = _build_xlsx(headers, rows, blue_cols={1}, number_cols={4})
     audience_label_map = {
         "consumer": "consumidor",
         "barber": "peluqueria",

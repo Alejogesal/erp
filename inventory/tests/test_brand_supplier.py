@@ -130,7 +130,7 @@ class BrandSupplierDownloadTests(TestCase):
         resp = self.client.get(url)
         self.assertEqual(resp.status_code, 200)
         ws = load_workbook(BytesIO(resp.content)).active
-        nombres = [r[1] for r in ws.iter_rows(min_row=2, values_only=True)]
+        nombres = [r[2] for r in ws.iter_rows(min_row=2, values_only=True)]
         # Solo el producto cuyo principal es B (el elegido para la marca) aparece.
         self.assertIn("Dos", nombres)
         self.assertNotIn("Uno", nombres)
@@ -221,7 +221,7 @@ class BrandListNamingTests(TestCase):
         BrandSupplier.objects.create(group="FIDELITE", supplier=self.aris)
         services.sync_principal_to_cheapest(p)
 
-        nombres = [r[1] for r in self._rows()]
+        nombres = [r[2] for r in self._rows()]
         self.assertEqual(nombres, ["BALSAMO CAVIAR 900ML FIDELITE"])
 
     def test_falls_back_to_product_name_when_principal_list_not_imported(self):
@@ -231,7 +231,7 @@ class BrandListNamingTests(TestCase):
         BrandSupplier.objects.create(group="FIDELITE", supplier=self.aris)
         services.sync_principal_to_cheapest(p)
 
-        self.assertEqual([r[1] for r in self._rows()], ["Fidelite shampoo x300"])
+        self.assertEqual([r[2] for r in self._rows()], ["Fidelite shampoo x300"])
 
     def test_product_only_the_other_supplier_has_is_ignored(self):
         solo_glm = Product.objects.create(name="Fidelite crema GLM", group="FIDELITE", margin_consumer=Decimal("0.00"))
@@ -247,7 +247,7 @@ class BrandListNamingTests(TestCase):
         for p in (solo_glm, ambos):
             services.sync_principal_to_cheapest(p)
 
-        self.assertEqual([r[1] for r in self._rows()], ["MASCARA FIDELITE"])
+        self.assertEqual([r[2] for r in self._rows()], ["MASCARA FIDELITE"])
 
     def test_ignores_other_supplier_even_if_default_supplier_is_stale(self):
         # default_supplier desincronizado (apunta al principal de la marca aunque el
@@ -290,7 +290,7 @@ class BrandListNamingTests(TestCase):
         BrandSupplier.objects.create(group="FIDELITE", supplier=self.aris)
 
         rows = self._rows()
-        self.assertEqual([r[1] for r in rows], ["COMO LO ESCRIBE ARIS"])
+        self.assertEqual([r[2] for r in rows], ["COMO LO ESCRIBE ARIS"])
         # La marca sale con un texto único (el de BrandSupplier), sin los espacios
         # del group del producto.
         self.assertEqual([r[0] for r in rows], ["FIDELITE"])
@@ -333,7 +333,7 @@ class PriceListPreviewTests(TestCase):
 
         resp = self.client.get(reverse("inventory_product_prices_download", args=["consumer"]))
         ws = load_workbook(BytesIO(resp.content)).active
-        excel = [(r[0], r[1]) for r in ws.iter_rows(min_row=2, values_only=True)]
+        excel = [(r[0], r[2]) for r in ws.iter_rows(min_row=2, values_only=True)]
         self.assertEqual([(e["brand"], e["name"]) for e in entries], excel)
 
     def test_todos_shows_excluded_products_flagged(self):

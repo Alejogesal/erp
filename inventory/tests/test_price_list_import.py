@@ -114,6 +114,6 @@ class PriceListImportNoFuzzyMatchTests(TestCase):
         from openpyxl import load_workbook
 
         ws = load_workbook(BytesIO(resp.content)).active
-        nombres = [r[1] for r in ws.iter_rows(min_row=2, values_only=True)]
+        nombres = [r[2] for r in ws.iter_rows(min_row=2, values_only=True)]
         self.assertIn("Fidelite Coloracion 8 Rubio Oscuro", nombres)
         self.assertNotIn("Fidelite Coloracion 8 Rubio", nombres)

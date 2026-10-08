@@ -50,9 +50,9 @@ class PriceListDownloadTests(TestCase):
         BrandSupplier.objects.create(group="Alfa", supplier=self.prov_b)
 
         header, data = self._download_rows()
-        self.assertEqual(header, ("Marca", "Producto", "Precio"))
+        self.assertEqual(header, ("Marca", "SKU", "Producto", "Precio"))
         marcas = [r[0] for r in data]
-        nombres = [r[1] for r in data]
+        nombres = [r[2] for r in data]
         # Orden alfabético por marca: Alfa antes que Zeta.
         self.assertEqual(marcas, ["Alfa", "Zeta", "Zeta"])
         # El duplicado (proveedor B en marca cuyo principal es A) quedó afuera.
@@ -65,12 +65,23 @@ class PriceListDownloadTests(TestCase):
         self._product("Con Marca", "Beta", self.prov_a, "100")
         BrandSupplier.objects.create(group="Beta", supplier=self.prov_a)
         _, data = self._download_rows()
-        nombres = [r[1] for r in data]
+        nombres = [r[2] for r in data]
         self.assertEqual(nombres, ["Con Marca"])
 
     def test_kits_are_always_included(self):
         self._product("Base", "Gamma", self.prov_a, "100")
         Product.objects.create(name="Kit Especial", group="Gamma", is_kit=True, margin_consumer=Decimal("0.00"))
         _, data = self._download_rows()
-        nombres = [r[1] for r in data]
+        nombres = [r[2] for r in data]
         self.assertIn("Kit Especial", nombres)
+
+    def test_sku_column_is_included(self):
+        con_sku = self._product("Con SKU", "Delta", self.prov_a, "100")
+        con_sku.sku = "DEL-001"
+        con_sku.save()
+        self._product("Sin SKU", "Delta", self.prov_a, "100")
+        BrandSupplier.objects.create(group="Delta", supplier=self.prov_a)
+        _, data = self._download_rows()
+        skus = {r[2]: r[1] for r in data}
+        self.assertEqual(skus["Con SKU"], "DEL-001")
+        self.assertIn(skus["Sin SKU"], ("", None))
