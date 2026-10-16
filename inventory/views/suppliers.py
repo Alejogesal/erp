@@ -7,9 +7,10 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import IntegrityError, transaction
 from django.db.models import Case, Count, Prefetch, ProtectedError, Sum, When
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.utils.text import slugify
 from django.views.decorators.http import require_http_methods
 
 from ..models import (
@@ -34,7 +35,7 @@ from .forms import (
     SupplierProductForm,
     SupplierUnlinkGroupForm,
 )
-from .utils_xlsx import _sku_prefix
+from .utils_xlsx import _build_xlsx, _sku_prefix
 
 from decimal import ROUND_HALF_UP, InvalidOperation
 
@@ -849,7 +850,48 @@ def suppliers(request):
     context["period_total"] = period_total
     context["debtors"] = debtors
     context["total_debt"] = total_debt
+    if request.GET.get("export") == "xlsx":
+        return _supplier_balances_xlsx(
+            supplier_rows, purchases_totals, payments_totals, adjustments_totals, bool(start_d or end_d)
+        )
     return render(request, "inventory/suppliers.html", context)
+
+
+_XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _xlsx_response(xlsx_bytes: bytes, filename: str) -> HttpResponse:
+    response = HttpResponse(xlsx_bytes, content_type=_XLSX_CONTENT_TYPE)
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
+def _supplier_balances_xlsx(supplier_rows, purchases_totals, payments_totals, adjustments_totals, has_period):
+    """Resumen de cuenta corriente de todos los proveedores, uno por fila.
+
+    Compras/pagos/ajustes/saldo son siempre acumulados (igual que el Saldo CC de
+    la pantalla); el filtro de fechas solo agrega la columna del período.
+    """
+    headers = ["Proveedor", "Teléfono", "Compras", "Pagos", "Ajustes/Devoluciones", "Saldo CC"]
+    if has_period:
+        headers.append("Comprado (período)")
+    rows = []
+    for row in supplier_rows:
+        supplier = row["supplier"]
+        line = [
+            supplier.name,
+            supplier.phone or "",
+            purchases_totals.get(supplier.id, Decimal("0.00")),
+            payments_totals.get(supplier.id, Decimal("0.00")),
+            adjustments_totals.get(supplier.id, Decimal("0.00")),
+            row["balance"],
+        ]
+        if has_period:
+            line.append(row["purchases_period"])
+        rows.append(line)
+    number_cols = set(range(3, len(headers) + 1))
+    xlsx_bytes = _build_xlsx(headers, rows, blue_cols={1}, number_cols=number_cols)
+    return _xlsx_response(xlsx_bytes, f"cuenta_corriente_proveedores_{timezone.localdate():%Y-%m-%d}.xlsx")
 
 
 @login_required
@@ -1209,6 +1251,9 @@ def supplier_history_view(request, supplier_id):
     )
     has_filter = bool(start_d or end_d)
 
+    if request.GET.get("export") == "xlsx":
+        return _supplier_ledger_xlsx(supplier, ledger_entries, opening_balance, start_d, end_d)
+
     return render(
         request,
         "inventory/supplier_history.html",
@@ -1228,3 +1273,34 @@ def supplier_history_view(request, supplier_id):
             "has_filter": has_filter,
         },
     )
+
+
+def _supplier_ledger_xlsx(supplier, ledger_entries, opening_balance, start_d, end_d):
+    """Cuenta corriente de un proveedor: los mismos movimientos que la pantalla,
+    con el saldo arrastrado como primera fila si hay fecha de inicio."""
+    headers = ["Fecha", "Movimiento", "Detalle", "Debe", "Haber", "Saldo"]
+    rows = []
+    if start_d:
+        rows.append([f"{start_d:%d/%m/%Y}", "Saldo anterior", "", "", "", opening_balance])
+    for entry in ledger_entries:
+        shown = entry["date_display"]
+        if isinstance(shown, datetime) and timezone.is_aware(shown):
+            # Las compras guardan datetime en UTC: la fecha va en hora local, como en pantalla.
+            shown = timezone.localtime(shown)
+        rows.append(
+            [
+                f"{shown:%d/%m/%Y}",
+                entry["label"],
+                entry["detail"],
+                entry["debit"],
+                entry["credit"],
+                entry["balance"],
+            ]
+        )
+    xlsx_bytes = _build_xlsx(headers, rows, number_cols={4, 5, 6})
+    period = ""
+    if start_d or end_d:
+        period = f"_{start_d:%Y-%m-%d}" if start_d else "_inicio"
+        period += f"_a_{end_d:%Y-%m-%d}" if end_d else "_a_hoy"
+    filename = f"cuenta_corriente_{slugify(supplier.name) or supplier.id}{period}.xlsx"
+    return _xlsx_response(xlsx_bytes, filename)

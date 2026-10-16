@@ -21,6 +21,7 @@
             {% if has_filter %}
             <a class="pill" href="{% url 'inventory_supplier_history' supplier.id %}" style="font-size:12px; padding:6px 10px;">Limpiar</a>
             {% endif %}
+            <a class="pill" href="?export=xlsx{% if period_start %}&start_date={{ period_start|urlencode }}{% endif %}{% if period_end %}&end_date={{ period_end|urlencode }}{% endif %}" style="font-size:12px; padding:6px 10px;">Descargar Excel</a>
         </form>
         <div style="display:flex; flex-direction:column; gap:8px; font-size:14px;">
             <div><strong>Total compras{% if has_filter %} (plazo){% endif %}:</strong> ${{ total_purchases|latam_number:2 }}</div>
