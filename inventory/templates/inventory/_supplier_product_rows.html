@@ -1,0 +1,68 @@
+{% comment %}
+Filas de la lista de precios de UN proveedor. Las pide por AJAX la pantalla de
+Proveedores al abrir el panel del proveedor (y al buscar): antes venían todas
+las de todos los proveedores en la página y pesaba decenas de MB.
+{% endcomment %}
+{% for sp in links %}
+<tr>
+    <td><input type="checkbox" name="link_ids" value="{{ sp.id }}" form="bulk-form-{{ supplier.id }}" data-bulk-item onchange="updateBulkBar(this)"></td>
+    <td>
+        <div data-view>
+            <span class="pl-name">{{ sp.product.name }}</span>
+            <button type="button" class="pl-edit-btn" onclick="toggleEditProduct(this)" title="Editar nombre/SKU/marca">✎</button>
+            <br><span class="pl-sku">{{ sp.product.sku|default:"s/SKU" }}{% if sp.product.group %} · {{ sp.product.group }}{% endif %}</span>
+        </div>
+        <form class="pl-edit-form" data-edit-form style="display:none;" onsubmit="return saveProductInline(this);">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="edit_product_inline">
+            <input type="hidden" name="product_id" value="{{ sp.product.id }}">
+            <input type="text" name="name" value="{{ sp.product.name }}" placeholder="Nombre" style="width:100%; margin-bottom:4px;">
+            <input type="text" name="sku" value="{{ sp.product.sku|default:'' }}" placeholder="SKU" style="width:80px;">
+            <input type="text" name="group" value="{{ sp.product.group|default:'' }}" placeholder="Marca" list="group-options-suppliers" style="width:100px;">
+            <div style="margin-top:4px;">
+                <button type="submit" style="font-size:11px;">Guardar</button>
+                <button type="button" style="font-size:11px;" onclick="cancelEditProduct(this)">Cancelar</button>
+            </div>
+        </form>
+    </td>
+    <td class="num">
+        <form method="post" class="cost-form" style="display:flex; gap:4px; align-items:center; justify-content:flex-end;">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="set_link_cost">
+            <input type="hidden" name="link_id" value="{{ sp.id }}">
+            <input type="number" step="0.01" name="cost_net" value="{{ sp.cost_net|stringformat:'.2f' }}" style="width:100px;" onchange="saveLinkCost(this)">
+            <span class="vat-saved" style="font-size:11px; color:var(--positive); opacity:0; transition:opacity .2s;">✓</span>
+        </form>
+    </td>
+    <td class="num cost-with-vat-cell">${{ sp.last_cost|latam_number:2 }}</td>
+    <td class="num">
+        <form method="post" class="vat-form" style="display:flex; gap:4px; align-items:center; justify-content:flex-end;">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="set_link_vat">
+            <input type="hidden" name="link_id" value="{{ sp.id }}">
+            <input type="number" step="0.01" name="vat_percent" value="{{ sp.vat_percent|stringformat:'.2f' }}" style="width:62px;" onchange="saveLinkVat(this)">
+            <span class="vat-saved" style="font-size:11px; color:var(--positive); opacity:0; transition:opacity .2s;">✓</span>
+        </form>
+    </td>
+    <td style="text-align:center;">{% if sp.product.default_supplier_id == supplier.id %}<span class="pl-star" title="Proveedor principal">★</span>{% else %}<span class="pl-nostar">—</span>{% endif %}</td>
+    <td style="text-align:right; white-space:nowrap;">
+        <form method="post" onsubmit="return confirm('¿Quitar este producto de la lista del proveedor?');" style="display:inline;">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="remove_link">
+            <input type="hidden" name="link_id" value="{{ sp.id }}">
+            <button type="submit" class="pl-remove">Quitar</button>
+        </form>
+        <form method="post" onsubmit="return confirm('¿ELIMINAR el producto {{ sp.product.name|escapejs }} por completo (de todos los proveedores)? Esta acción no se puede deshacer.');" style="display:inline;">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="delete_product">
+            <input type="hidden" name="product_id" value="{{ sp.product.id }}">
+            <button type="submit" class="pl-remove" style="color:#ef4444; border-color:rgba(239,68,68,0.4);">Eliminar</button>
+        </form>
+    </td>
+</tr>
+{% empty %}
+<tr><td colspan="7" style="color:var(--muted);">{% if q %}Ningún producto coincide con «{{ q }}».{% else %}Sin productos en la lista.{% endif %}</td></tr>
+{% endfor %}
+{% if truncated %}
+<tr><td colspan="7" style="color:var(--muted); font-size:12px;">Mostrando {{ shown }} de {{ total }} productos. Buscá por nombre, SKU o marca para ver los demás.</td></tr>
+{% endif %}

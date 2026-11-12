@@ -457,7 +457,8 @@ def product_costs(request):
         }
         for product in products
     ]
-    formset = ProductCostFormSet(initial=initial)
+    supplier_names = dict(Supplier.objects.order_by("name").values_list("id", "name"))
+    formset = ProductCostFormSet(initial=initial, form_kwargs={"supplier_names": supplier_names})
     if request.method == "POST":
         action = request.POST.get("action", "update_costs")
         if action == "create_product":
@@ -728,7 +729,7 @@ def product_costs(request):
             messages.success(request, "Costo actualizado.")
             return redirect("inventory_product_costs")
         else:
-            formset = ProductCostFormSet(request.POST)
+            formset = ProductCostFormSet(request.POST, form_kwargs={"supplier_names": supplier_names})
             if formset.is_valid():
                 has_errors = False
                 for form in formset:
@@ -745,7 +746,11 @@ def product_costs(request):
                     return render(
                         request,
                         "inventory/cost_list.html",
-                        {"formset": formset, "product_form": product_form},
+                        {
+                            "formset": formset,
+                            "product_form": product_form,
+                            "supplier_options": [{"id": pk, "name": name} for pk, name in supplier_names.items()],
+                        },
                     )
 
                 sku_conflicts = []
@@ -812,6 +817,7 @@ def product_costs(request):
             "product_form": product_form,
             "bulk_form": bulk_form,
             "group_options": group_options,
+            "supplier_options": [{"id": pk, "name": name} for pk, name in supplier_names.items()],
             "products": products,
         },
     )

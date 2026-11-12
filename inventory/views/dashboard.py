@@ -21,6 +21,9 @@ from ..models import (
 )
 
 
+RANKING_LIMIT = 100
+
+
 @login_required
 def dashboard(request):
     start_date = request.GET.get("start_date") or ""
@@ -53,11 +56,7 @@ def dashboard(request):
     purchase_qs = Purchase.objects.all()
     # Las ventas canceladas quedan en el historial pero NO cuentan en ventas ni ganancias.
     sale_item_qs = SaleItem.objects.filter(sale__is_cancelled=False)
-    sales_qs = (
-        Sale.objects.filter(is_cancelled=False)
-        .select_related("warehouse")
-        .prefetch_related("items__product", "items__variant")
-    )
+    sales_qs = Sale.objects.filter(is_cancelled=False)
     tax_qs = TaxExpense.objects.all()
     if start_dt:
         purchase_qs = purchase_qs.filter(created_at__gte=start_dt)
@@ -84,91 +83,117 @@ def dashboard(request):
     sale_total = sale_item_qs.aggregate(total=Sum("line_total")).get("total") or Decimal("0.00")
     tax_total = tax_qs.aggregate(total=Sum("amount")).get("total") or Decimal("0.00")
 
-    # Caché por request del costo con IVA por producto: sales_qs se recorre tres
-    # veces y el mismo producto se repite entre ventas.
+    # Sin filtro de fechas el inicio suma TODA la historia de ventas: se leen
+    # como dicts (values) y no como instancias — armar decenas de miles de
+    # objetos del ORM con sus prefetch era lo que hacía lenta esta pantalla.
+    sale_rows = sales_qs.values(
+        "id", "total", "ml_commission_total", "ml_tax_total",
+        "warehouse__type", "customer_id", "customer__name",
+    )
+    item_rows = sale_item_qs.values(
+        "sale_id", "product_id", "variant_id", "quantity", "line_total", "cost_unit",
+        "product__sku", "product__name", "product__is_kit", "product__avg_cost", "product__vat_percent",
+        "variant__name",
+    )
+    items_by_sale: dict = {}
+    for item in item_rows:
+        items_by_sale.setdefault(item["sale_id"], []).append(item)
+
+    # Caché por request del costo con IVA por producto (el mismo producto se
+    # repite entre ventas). Solo se usa para líneas viejas sin costo grabado.
     _fallback_cost_cache: dict = {}
 
-    def _product_fallback_cost(product) -> Decimal:
-        if product.id not in _fallback_cost_cache:
+    def _product_fallback_cost(item) -> Decimal:
+        product_id = item["product_id"]
+        if product_id not in _fallback_cost_cache:
+            if item["product__is_kit"]:
+                # El costo de un kit sale de sus componentes: hace falta el objeto.
+                product = Product.objects.get(pk=product_id)
+            else:
+                product = Product(
+                    pk=product_id, avg_cost=item["product__avg_cost"], vat_percent=item["product__vat_percent"]
+                )
             cost_vat = product.cost_with_vat()
-            _fallback_cost_cache[product.id] = cost_vat if cost_vat and cost_vat > 0 else Decimal("0.00")
-        return _fallback_cost_cache[product.id]
+            _fallback_cost_cache[product_id] = cost_vat if cost_vat and cost_vat > 0 else Decimal("0.00")
+        return _fallback_cost_cache[product_id]
 
     def _resolve_cost(item) -> Decimal:
         # Costo grabado en la venta; si no hay (líneas viejas), el costo con IVA
         # del producto. No se usa last_purchase_cost (evita doble IVA).
-        if item.cost_unit and item.cost_unit > 0:
-            return item.cost_unit
-        return _product_fallback_cost(item.product)
+        if item["cost_unit"] and item["cost_unit"] > 0:
+            return item["cost_unit"]
+        return _product_fallback_cost(item)
 
-    # Un solo recorrido de sales_qs (antes eran 3 loops separados sobre el mismo
-    # queryset, recalculando lo mismo tres veces): margen, ranking por producto
-    # y ranking por cliente se acumulan juntos.
+    # Un solo recorrido de las ventas: margen, ranking por producto y ranking
+    # por cliente se acumulan juntos.
     margin_ml = Decimal("0.00")
     margin_comun = Decimal("0.00")
     ranking_map: dict = {}
     customer_ranking_map: dict = {}
 
-    for sale in sales_qs:
-        is_ml = sale.warehouse.type == Warehouse.WarehouseType.MERCADOLIBRE
-        items = list(sale.items.all())
+    for sale in sale_rows:
+        is_ml = sale["warehouse__type"] == Warehouse.WarehouseType.MERCADOLIBRE
+        items = items_by_sale.get(sale["id"], [])
         cost_total = Decimal("0.00")
         for item in items:
-            cost_total += item.quantity * _resolve_cost(item)
+            cost_total += item["quantity"] * _resolve_cost(item)
 
+        sale_total_amount = sale["total"] or Decimal("0.00")
         if is_ml:
-            revenue_total = (sale.total or Decimal("0.00")) - (sale.ml_commission_total or Decimal("0.00")) - (
-                sale.ml_tax_total or Decimal("0.00")
+            revenue_total = sale_total_amount - (sale["ml_commission_total"] or Decimal("0.00")) - (
+                sale["ml_tax_total"] or Decimal("0.00")
             )
             margin_ml += revenue_total - cost_total
         else:
-            revenue_total = sale.total or Decimal("0.00")
+            revenue_total = sale_total_amount
             margin_comun += revenue_total - cost_total
 
-        items_total = sum((item.line_total or Decimal("0.00")) for item in items)
+        items_total = sum((item["line_total"] or Decimal("0.00")) for item in items)
         if items and items_total > 0:
             for item in items:
-                line_total = item.line_total or Decimal("0.00")
+                line_total = item["line_total"] or Decimal("0.00")
                 revenue_share = (revenue_total * line_total / items_total) if items_total else Decimal("0.00")
                 unit_cost = _resolve_cost(item)
-                item_cost_total = item.quantity * unit_cost
+                item_cost_total = item["quantity"] * unit_cost
                 profit = (revenue_share - item_cost_total).quantize(Decimal("0.01"))
-                key = (item.product_id, item.variant_id)
+                key = (item["product_id"], item["variant_id"])
                 if key not in ranking_map:
                     ranking_map[key] = {
-                        "product_id": item.product_id,
-                        "sku": item.product.sku,
-                        "name": item.product.name,
-                        "variant": item.variant.name if item.variant else None,
+                        "product_id": item["product_id"],
+                        "sku": item["product__sku"],
+                        "name": item["product__name"],
+                        "variant": item["variant__name"] if item["variant_id"] else None,
                         "quantity": Decimal("0.00"),
                         "profit": Decimal("0.00"),
                         "zero_cost": unit_cost <= Decimal("0.00"),
                     }
-                ranking_map[key]["quantity"] += item.quantity
+                ranking_map[key]["quantity"] += item["quantity"]
                 ranking_map[key]["profit"] += profit
                 if unit_cost > Decimal("0.00"):
                     ranking_map[key]["zero_cost"] = False
 
-        customer_key = sale.customer_id
+        customer_key = sale["customer_id"]
         if customer_key not in customer_ranking_map:
             customer_ranking_map[customer_key] = {
                 "customer_id": customer_key,
-                "name": sale.customer.name if sale.customer else "Consumidor final",
+                "name": sale["customer__name"] if customer_key else "Consumidor final",
                 "profit": Decimal("0.00"),
                 "total": Decimal("0.00"),
                 "sale_count": 0,
             }
         customer_ranking_map[customer_key]["profit"] += revenue_total - cost_total
-        customer_ranking_map[customer_key]["total"] += sale.total or Decimal("0.00")
+        customer_ranking_map[customer_key]["total"] += sale_total_amount
         customer_ranking_map[customer_key]["sale_count"] += 1
 
     net_margin = (margin_ml + margin_comun) - tax_total
-    ranking = sorted(ranking_map.values(), key=lambda item: item["profit"], reverse=True)
+    # Solo el tope de cada ranking: listar todos los productos vendidos en la
+    # historia hacía pesar el inicio sin aportar nada a lo que se mira ahí.
+    ranking = sorted(ranking_map.values(), key=lambda item: item["profit"], reverse=True)[:RANKING_LIMIT]
     customer_ranking = sorted(
         (r for r in customer_ranking_map.values() if r["customer_id"] is not None),
         key=lambda x: x["profit"],
         reverse=True,
-    )
+    )[:RANKING_LIMIT]
 
     # Low stock alerts: products with min_stock set and COMUN stock below threshold
     comun_wh = Warehouse.objects.filter(type=Warehouse.WarehouseType.COMUN).first()
@@ -227,6 +252,7 @@ def dashboard(request):
         "margin_comun": margin_comun,
         "ranking": ranking,
         "customer_ranking": customer_ranking,
+        "ranking_limit": RANKING_LIMIT,
         "start_date": start_date,
         "end_date": end_date,
         "companies": companies,

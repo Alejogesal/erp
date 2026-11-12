@@ -328,6 +328,12 @@ def taxes_view(request):
     # ── Posición IVA filtrada (para el detalle) ───────────────────────────────
     iva_start = (request.GET.get("iva_start") or "").strip()
     iva_end = (request.GET.get("iva_end") or "").strip()
+    if not iva_start and not iva_end:
+        # Sin fechas el detalle listaba cada línea de venta y compra de toda la
+        # historia (varios MB de tabla). La posición de IVA se mira por mes.
+        today = timezone.localdate()
+        iva_start = today.replace(day=1).isoformat()
+        iva_end = today.isoformat()
     start_dt = end_dt = None
     start_d = end_d = None
     if iva_start:

@@ -668,17 +668,9 @@
                                     type="text"
                                     class="ml-product-typeahead"
                                     placeholder="Buscar por SKU o nombre..."
-                                    list="ml-products-{{ item.id }}"
+                                    list="ml-products"
                                     value="{% if item.product %}{% if item.product.sku %}{{ item.product.sku }} — {% endif %}{{ item.product.name }}{% if item.product.group %} ({{ item.product.group }}){% endif %}{% endif %}"
                                 >
-                                <datalist id="ml-products-{{ item.id }}">
-                                    {% for product in products %}
-                                    <option
-                                        value="{% if product.sku %}{{ product.sku }} — {% endif %}{{ product.name }}{% if product.group %} ({{ product.group }}){% endif %}"
-                                        data-id="{{ product.id }}"
-                                    ></option>
-                                    {% endfor %}
-                                </datalist>
                             </div>
                             <input type="hidden" name="product_id" class="ml-product-id" value="{% if item.product %}{{ item.product.id }}{% endif %}">
                             {% comment %}
@@ -807,6 +799,18 @@
         salesFilter?.addEventListener("change", applyFilters);
     })();
 </script>
+{% comment %}
+Un solo listado de productos para todas las publicaciones de la página: antes
+se repetía dentro de cada fila y la página pesaba decenas de MB.
+{% endcomment %}
+<datalist id="ml-products">
+    {% for product in products %}
+    <option
+        value="{% if product.sku %}{{ product.sku }} — {% endif %}{{ product.name }}{% if product.group %} ({{ product.group }}){% endif %}"
+        data-id="{{ product.id }}"
+    ></option>
+    {% endfor %}
+</datalist>
 {{ all_variants|json_script:"ml-variants-data" }}
 <script>
     (function() {
@@ -816,14 +820,14 @@
         } catch (err) {
             variantsByProduct = {};
         }
+        const datalist = document.getElementById("ml-products");
+        const options = datalist ? Array.from(datalist.options) : [];
+        const idByLabel = new Map(options.map((opt) => [opt.value, opt.dataset.id]));
         document.querySelectorAll(".ml-product-typeahead").forEach((input) => {
             const field = input.closest(".ml-match-field");
             const hidden = field ? field.querySelector(".ml-product-id") : null;
             const variantField = field ? field.querySelector(".ml-variant-field") : null;
             const variantSelect = variantField ? variantField.querySelector(".ml-variant-select") : null;
-            const listId = input.getAttribute("list");
-            const datalist = listId ? document.getElementById(listId) : null;
-            const options = datalist ? Array.from(datalist.options) : [];
             if (!hidden || !datalist) {
                 return;
             }
@@ -852,8 +856,7 @@
             };
             const syncHidden = () => {
                 const value = input.value.trim();
-                const match = options.find((opt) => opt.value === value);
-                hidden.value = match ? match.dataset.id : "";
+                hidden.value = idByLabel.get(value) || "";
                 syncVariants();
             };
             input.addEventListener("input", syncHidden);

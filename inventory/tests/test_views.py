@@ -30,7 +30,11 @@ class DashboardViewTests(TestCase):
 
     def test_dashboard_totals_and_ranking(self):
         services.register_entry(self.product, self.comun, Decimal("4"), Decimal("10.00"), self.user)
-        sale = Sale.objects.create(warehouse=self.comun, total=Decimal("60.00"))
+        # El costo del producto lo carga una persona (una entrada de stock no lo
+        # toca), así que acá se fija a mano.
+        self.product.avg_cost = Decimal("10.00")
+        self.product.save()
+        sale = Sale.objects.create(warehouse=self.comun, total=Decimal("60.00"), user=self.user)
         SaleItem.objects.create(
             sale=sale,
             product=self.product,
@@ -54,6 +58,42 @@ class DashboardViewTests(TestCase):
         self.assertEqual(ranking[0]["sku"], "SKU-V")
         self.assertEqual(ranking[0]["quantity"], Decimal("3.00"))
         self.assertEqual(ranking[0]["profit"], Decimal("30.00"))
+
+    def test_ranking_uses_product_cost_when_sale_line_has_none(self):
+        """Líneas viejas sin costo grabado: se usa el costo con IVA del producto."""
+        self.product.avg_cost = Decimal("10.00")
+        self.product.vat_percent = Decimal("21.00")
+        self.product.save()
+        customer = Customer.objects.create(name="Cliente Ranking")
+        sale = Sale.objects.create(
+            warehouse=self.comun, total=Decimal("60.00"), user=self.user, customer=customer
+        )
+        SaleItem.objects.create(
+            sale=sale,
+            product=self.product,
+            quantity=Decimal("3.00"),
+            unit_price=Decimal("20.00"),
+            cost_unit=Decimal("0.00"),
+            discount_percent=Decimal("0.00"),
+            final_unit_price=Decimal("20.00"),
+            line_total=Decimal("60.00"),
+            vat_percent=Decimal("0.00"),
+        )
+
+        response = self.client.get(reverse("inventory_dashboard"))
+        self.assertEqual(response.status_code, 200)
+
+        ranking = response.context["ranking"]
+        self.assertEqual(len(ranking), 1)
+        # 60 - 3 × 12,10 (costo 10 + 21 % de IVA)
+        self.assertEqual(ranking[0]["profit"], Decimal("23.70"))
+        self.assertFalse(ranking[0]["zero_cost"])
+
+        customer_ranking = response.context["customer_ranking"]
+        self.assertEqual(len(customer_ranking), 1)
+        self.assertEqual(customer_ranking[0]["name"], "Cliente Ranking")
+        self.assertEqual(customer_ranking[0]["profit"], Decimal("23.70"))
+        self.assertEqual(customer_ranking[0]["sale_count"], 1)
 
     def test_create_product_from_dashboard(self):
         response = self.client.post(

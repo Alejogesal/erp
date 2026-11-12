@@ -13,6 +13,12 @@ from ..models import AFIPInvoice, PurchaseItem, SaleItem
 def iva_position(request):
     start_date = (request.GET.get("start_date") or "").strip()
     end_date = (request.GET.get("end_date") or "").strip()
+    if not start_date and not end_date:
+        # Sin fechas se listaba cada línea de venta y compra de toda la historia
+        # (varios MB de tabla). La posición de IVA se mira por mes.
+        today = timezone.localdate()
+        start_date = today.replace(day=1).isoformat()
+        end_date = today.isoformat()
     start_dt = None
     end_dt = None
 

@@ -1,14 +1,15 @@
 """Supplier views."""
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import datetime, time
 from decimal import Decimal
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import IntegrityError, transaction
-from django.db.models import Case, Count, Prefetch, ProtectedError, Sum, When
+from django.db.models import Case, Count, ProtectedError, Q, Sum, When
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.template.loader import render_to_string
 from django.utils import timezone
 from django.utils.text import slugify
 from django.views.decorators.http import require_http_methods
@@ -258,12 +259,9 @@ def suppliers(request):
     link_form = SupplierProductForm()
     unlink_group_form = SupplierUnlinkGroupForm()
     brand_supplier_form = BrandSupplierForm()
-    # Prefetch con JOIN en vez de "supplier_products__product": el anidado hace una
-    # segunda consulta con un IN gigante (un id por vínculo), que revienta cuando el
-    # catálogo crece. Con select_related el producto viene en la misma query.
-    suppliers_qs = Supplier.objects.prefetch_related(
-        Prefetch("supplier_products", queryset=SupplierProduct.objects.select_related("product"))
-    )
+    # Sin prefetch de los productos: la lista de cada proveedor se pide por AJAX
+    # al abrir su panel (supplier_products_rows). Acá solo hace falta cuántos son.
+    suppliers_qs = Supplier.objects.annotate(product_count=Count("supplier_products"))
 
     if request.method == "POST":
         action = request.POST.get("action")
@@ -739,30 +737,34 @@ def suppliers(request):
         BrandSupplier.objects.select_related("supplier").order_by("group")
     )
     # Marcas que cubre cada proveedor (para el desplegable "traer esta marca a mi
-    # lista" de cada uno). Usa el prefetch de supplier_products ya cargado: no
-    # dispara consultas nuevas.
+    # lista" de cada uno), agregadas en una sola consulta: cuántos productos
+    # tiene de cada marca y cuántos con precio (last_cost > 0 ⇔ cost_net > 0).
     current_brand_supplier = {bs.group.casefold(): bs.supplier_id for bs in brand_suppliers}
+    link_rows = (
+        SupplierProduct.objects.values("supplier_id", "product__group")
+        .annotate(total=Count("id"), priced=Count("id", filter=Q(last_cost__gt=0)))
+    )
+    brand_totals: dict[int, Counter] = defaultdict(Counter)
+    brand_priced: dict[int, Counter] = defaultdict(Counter)
+    brand_label: dict[int, dict[str, str]] = defaultdict(dict)
+    for row in link_rows:
+        group = (row["product__group"] or "").strip()
+        if not group:
+            continue
+        key = group.casefold()
+        sid = row["supplier_id"]
+        brand_totals[sid][key] += row["total"]
+        brand_priced[sid][key] += row["priced"]
+        brand_label[sid].setdefault(key, group)
     for supplier in suppliers_qs:
-        brand_totals: Counter = Counter()
-        brand_priced: Counter = Counter()
-        brand_label: dict[str, str] = {}
-        for sp in supplier.supplier_products.all():
-            group = (sp.product.group or "").strip()
-            if not group:
-                continue
-            key = group.casefold()
-            brand_totals[key] += 1
-            if sp.cost_net and sp.cost_net > Decimal("0.00"):
-                brand_priced[key] += 1
-            brand_label.setdefault(key, group)
         rows = [
             {
-                "group": brand_label[key],
+                "group": brand_label[supplier.id][key],
                 "total": total,
-                "priced": brand_priced.get(key, 0),
+                "priced": brand_priced[supplier.id].get(key, 0),
                 "is_mine": current_brand_supplier.get(key) == supplier.id,
             }
-            for key, total in brand_totals.items()
+            for key, total in brand_totals[supplier.id].items()
         ]
         rows.sort(key=lambda r: r["group"].casefold())
         supplier.brand_rows = rows
@@ -825,8 +827,7 @@ def suppliers(request):
     total_debt = Decimal("0.00")
     period_total = Decimal("0.00")
     # suppliers_qs ya está ordenado por nombre (Meta.ordering) y ya se evaluó
-    # arriba con su prefetch: reusarlo evita re-ejecutar la consulta y el
-    # prefetch de supplier_products__product una segunda vez.
+    # arriba: reusarlo evita re-ejecutar la consulta.
     for supplier in suppliers_qs:
         purchases_total = purchases_totals.get(supplier.id, Decimal("0.00"))
         payments_total = payments_totals.get(supplier.id, Decimal("0.00"))
@@ -892,6 +893,41 @@ def _supplier_balances_xlsx(supplier_rows, purchases_totals, payments_totals, ad
     number_cols = set(range(3, len(headers) + 1))
     xlsx_bytes = _build_xlsx(headers, rows, blue_cols={1}, number_cols=number_cols)
     return _xlsx_response(xlsx_bytes, f"cuenta_corriente_proveedores_{timezone.localdate():%Y-%m-%d}.xlsx")
+
+
+SUPPLIER_ROWS_LIMIT = 300
+
+
+@login_required
+@require_http_methods(["GET"])
+def supplier_products_rows(request, supplier_id):
+    """Filas de la lista de precios de un proveedor, para el panel de Proveedores.
+
+    Busca igual que el buscador anterior (del lado del cliente): cada palabra
+    tiene que aparecer, en cualquier orden, en nombre, texto del proveedor, SKU
+    o marca, sin distinguir tildes ni mayúsculas. Sin búsqueda se devuelven las
+    primeras SUPPLIER_ROWS_LIMIT: un proveedor puede listar miles.
+    """
+    supplier = get_object_or_404(Supplier, id=supplier_id)
+    q = (request.GET.get("q") or "").strip()
+    words = _normalize_lookup_text(q).split()
+    links = list(SupplierProduct.objects.filter(supplier=supplier).select_related("product"))
+    total = len(links)
+    if words:
+        def _matches(sp) -> bool:
+            hay = f" {_normalize_lookup_text(f'{sp.product.name} {sp.supplier_name} {sp.product.sku or ''} {sp.product.group}')} "
+            return all(w in hay for w in words)
+
+        links = [sp for sp in links if _matches(sp)]
+    truncated = not words and len(links) > SUPPLIER_ROWS_LIMIT
+    if truncated:
+        links = links[:SUPPLIER_ROWS_LIMIT]
+    html = render_to_string(
+        "inventory/_supplier_product_rows.html",
+        {"supplier": supplier, "links": links, "q": q, "total": total, "shown": len(links), "truncated": truncated},
+        request=request,
+    )
+    return JsonResponse({"ok": True, "html": html, "total": total, "shown": len(links)})
 
 
 @login_required

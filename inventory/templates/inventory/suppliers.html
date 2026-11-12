@@ -285,9 +285,9 @@
     <div class="card-title">Listas de precios por proveedor</div>
     <p class="subtitle" style="margin-top:0;">Cada proveedor con su precio (sin IVA), su IVA por producto, y ★ el proveedor principal (de ahí sale el costo para el margen). Editá el costo o el IVA y se guarda solo; el producto lo refleja automáticamente.</p>
     {% for supplier in suppliers %}
-    <details>
-        <summary>{{ supplier.name }} <span style="font-weight:400; color:var(--muted); font-size:12px;">· {{ supplier.supplier_products.all|length }} producto{{ supplier.supplier_products.all|length|pluralize }}</span></summary>
-        {% if supplier.supplier_products.all %}
+    <details data-products-url="{% url 'inventory_supplier_products_rows' supplier.id %}" ontoggle="if (this.open) loadSupplierProducts(this)">
+        <summary>{{ supplier.name }} <span style="font-weight:400; color:var(--muted); font-size:12px;">· {{ supplier.product_count }} producto{{ supplier.product_count|pluralize }}</span></summary>
+        {% if supplier.product_count %}
         <div class="details-body">
         <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
             <form method="post" style="display:inline;" onsubmit="return confirm('¿Vaciar la lista de precios de {{ supplier.name|escapejs }}? Se quitan todos los vínculos de productos, pero los productos NO se borran.');">
@@ -362,7 +362,7 @@
             <button type="submit" name="mode" value="unlink" class="pl-remove" disabled>Quitar seleccionados de la lista</button>
             <button type="submit" name="mode" value="delete" class="pl-remove" style="color:#ef4444; border-color:rgba(239,68,68,0.4);" disabled>Eliminar seleccionados</button>
         </form>
-        <table class="supplier-products-table" data-supplier-items>
+        <table class="supplier-products-table" data-supplier-items data-loaded="0">
             <thead>
                 <tr>
                     <th style="width:28px;"><input type="checkbox" data-bulk-all title="Seleccionar todos los visibles" onchange="toggleAllBulk(this)"></th>
@@ -375,64 +375,7 @@
                 </tr>
             </thead>
             <tbody>
-                {% for sp in supplier.supplier_products.all %}
-                <tr data-search="{{ sp.product.name }} {{ sp.supplier_name }} {{ sp.product.sku|default:'' }} {{ sp.product.group }}">
-                    <td><input type="checkbox" name="link_ids" value="{{ sp.id }}" form="bulk-form-{{ supplier.id }}" data-bulk-item onchange="updateBulkBar(this)"></td>
-                    <td>
-                        <div data-view>
-                            <span class="pl-name">{{ sp.product.name }}</span>
-                            <button type="button" class="pl-edit-btn" onclick="toggleEditProduct(this)" title="Editar nombre/SKU/marca">✎</button>
-                            <br><span class="pl-sku">{{ sp.product.sku|default:"s/SKU" }}{% if sp.product.group %} · {{ sp.product.group }}{% endif %}</span>
-                        </div>
-                        <form class="pl-edit-form" data-edit-form style="display:none;" onsubmit="return saveProductInline(this);">
-                            {% csrf_token %}
-                            <input type="hidden" name="action" value="edit_product_inline">
-                            <input type="hidden" name="product_id" value="{{ sp.product.id }}">
-                            <input type="text" name="name" value="{{ sp.product.name }}" placeholder="Nombre" style="width:100%; margin-bottom:4px;">
-                            <input type="text" name="sku" value="{{ sp.product.sku|default:'' }}" placeholder="SKU" style="width:80px;">
-                            <input type="text" name="group" value="{{ sp.product.group|default:'' }}" placeholder="Marca" list="group-options-suppliers" style="width:100px;">
-                            <div style="margin-top:4px;">
-                                <button type="submit" style="font-size:11px;">Guardar</button>
-                                <button type="button" style="font-size:11px;" onclick="cancelEditProduct(this)">Cancelar</button>
-                            </div>
-                        </form>
-                    </td>
-                    <td class="num">
-                        <form method="post" class="cost-form" style="display:flex; gap:4px; align-items:center; justify-content:flex-end;">
-                            {% csrf_token %}
-                            <input type="hidden" name="action" value="set_link_cost">
-                            <input type="hidden" name="link_id" value="{{ sp.id }}">
-                            <input type="number" step="0.01" name="cost_net" value="{{ sp.cost_net|stringformat:'.2f' }}" style="width:100px;" onchange="saveLinkCost(this)">
-                            <span class="vat-saved" style="font-size:11px; color:var(--positive); opacity:0; transition:opacity .2s;">✓</span>
-                        </form>
-                    </td>
-                    <td class="num cost-with-vat-cell">${{ sp.last_cost|latam_number:2 }}</td>
-                    <td class="num">
-                        <form method="post" class="vat-form" style="display:flex; gap:4px; align-items:center; justify-content:flex-end;">
-                            {% csrf_token %}
-                            <input type="hidden" name="action" value="set_link_vat">
-                            <input type="hidden" name="link_id" value="{{ sp.id }}">
-                            <input type="number" step="0.01" name="vat_percent" value="{{ sp.vat_percent|stringformat:'.2f' }}" style="width:62px;" onchange="saveLinkVat(this)">
-                            <span class="vat-saved" style="font-size:11px; color:var(--positive); opacity:0; transition:opacity .2s;">✓</span>
-                        </form>
-                    </td>
-                    <td style="text-align:center;">{% if sp.product.default_supplier_id == supplier.id %}<span class="pl-star" title="Proveedor principal">★</span>{% else %}<span class="pl-nostar">—</span>{% endif %}</td>
-                    <td style="text-align:right; white-space:nowrap;">
-                        <form method="post" onsubmit="return confirm('¿Quitar este producto de la lista del proveedor?');" style="display:inline;">
-                            {% csrf_token %}
-                            <input type="hidden" name="action" value="remove_link">
-                            <input type="hidden" name="link_id" value="{{ sp.id }}">
-                            <button type="submit" class="pl-remove">Quitar</button>
-                        </form>
-                        <form method="post" onsubmit="return confirm('¿ELIMINAR el producto {{ sp.product.name|escapejs }} por completo (de todos los proveedores)? Esta acción no se puede deshacer.');" style="display:inline;">
-                            {% csrf_token %}
-                            <input type="hidden" name="action" value="delete_product">
-                            <input type="hidden" name="product_id" value="{{ sp.product.id }}">
-                            <button type="submit" class="pl-remove" style="color:#ef4444; border-color:rgba(239,68,68,0.4);">Eliminar</button>
-                        </form>
-                    </td>
-                </tr>
-                {% endfor %}
+                {# Se cargan por AJAX al abrir el panel (ver loadSupplierProducts). #}
             </tbody>
         </table>
         </div>
@@ -485,6 +428,7 @@
                 <td>${{ row.balance|latam_number:2 }}</td>
                 <td>
                     <a class="pill" href="{% url 'inventory_supplier_history' supplier.id %}" style="font-size:11px; padding:3px 6px; margin-right:4px;">Cuenta corriente</a>
+                    <a class="pill" href="{% url 'inventory_supplier_history' supplier.id %}?export=xlsx" style="font-size:11px; padding:3px 6px; margin-right:4px;">Descargar CC</a>
                     <form method="post" onsubmit="return confirm('¿Eliminar proveedor?');">
                         {% csrf_token %}
                         <input type="hidden" name="action" value="delete_supplier">
@@ -502,34 +446,39 @@
 </div>
 
 <script>
-    // Normaliza como el backend: sin tildes, minúsculas, solo letras y números.
-    function _normSearch(text) {
-        return (text || "")
-            .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-            .toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    // La lista de cada proveedor se pide al servidor al abrir el panel (y al
+    // buscar): la página no trae las filas de todos los proveedores.
+    const _searchTimers = new WeakMap();
+    function loadSupplierProducts(details, q) {
+        const table = details.querySelector("[data-supplier-items]");
+        const tbody = table ? table.querySelector("tbody") : null;
+        if (!tbody) return;
+        q = q === undefined ? ((details.querySelector(".pl-search") || {}).value || "") : q;
+        if (q === "" && table.dataset.loaded === "1" && table.dataset.q === "") return;
+        const url = details.dataset.productsUrl + "?q=" + encodeURIComponent(q);
+        tbody.innerHTML = '<tr><td colspan="7" style="color:var(--muted);">Cargando…</td></tr>';
+        fetch(url, { headers: { "X-Requested-With": "XMLHttpRequest" }, credentials: "same-origin" })
+            .then((r) => r.json())
+            .then((d) => {
+                if (!d || typeof d.html !== "string") return;
+                tbody.innerHTML = d.html;
+                table.dataset.loaded = "1";
+                table.dataset.q = q;
+                const count = details.querySelector(".pl-search-count");
+                if (count) count.textContent = q ? `${d.shown} de ${d.total}` : "";
+                const master = table.querySelector("[data-bulk-all]");
+                if (master) { master.checked = false; master.indeterminate = false; }
+                updateBulkBar(table);
+            })
+            .catch(() => {
+                tbody.innerHTML = '<tr><td colspan="7" style="color:var(--negative,#c0392b);">No se pudo cargar la lista.</td></tr>';
+            });
     }
     function filterSupplierProducts(input) {
-        // Busca por coincidencias: cada palabra escrita tiene que aparecer, en
-        // cualquier orden (nombre, texto del proveedor, SKU o marca).
-        const words = _normSearch(input.value).split(" ").filter(Boolean);
         const details = input.closest("details");
-        const table = details ? details.querySelector("[data-supplier-items]") : null;
-        if (!table) return;
-        let shown = 0, total = 0;
-        table.querySelectorAll("tbody tr").forEach((row) => {
-            if (row.dataset.norm === undefined) row.dataset.norm = " " + _normSearch(row.dataset.search) + " ";
-            const hay = words.every((w) => row.dataset.norm.includes(w));
-            row.style.display = hay ? "" : "none";
-            if (!hay) {
-                const cb = row.querySelector("[data-bulk-item]");
-                if (cb) cb.checked = false;
-            }
-            total += 1;
-            if (hay) shown += 1;
-        });
-        const count = details.querySelector(".pl-search-count");
-        if (count) count.textContent = words.length ? `${shown} de ${total}` : "";
-        updateBulkBar(table);
+        if (!details) return;
+        clearTimeout(_searchTimers.get(details));
+        _searchTimers.set(details, setTimeout(() => loadSupplierProducts(details, input.value), 250));
     }
     // Selección masiva de productos de la lista de un proveedor.
     function toggleAllBulk(master) {

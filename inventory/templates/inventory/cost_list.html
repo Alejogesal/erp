@@ -236,16 +236,23 @@
             </tr>
         </thead>
         <tbody>
+            {% comment %}
+            Filas escritas a mano en vez de {{ form.campo }}: con miles de
+            productos, cada widget de Django renderizado por su template sumaba
+            segundos. Los name= siguen el prefijo del formset, así el POST se
+            lee igual que antes.
+            {% endcomment %}
             {% for form in formset %}
+            {% with p=form.prefix %}
             <tr>
                     <td>
-                        {{ form.product_id }}
-                        {{ form.sku }}
-                        {{ form.sku.errors }}
+                        <input type="hidden" name="{{ p }}-product_id" value="{{ form.product_id.value }}" id="id_{{ p }}-product_id">
+                        <input type="text" name="{{ p }}-sku" value="{{ form.sku.value|default_if_none:'' }}" id="id_{{ p }}-sku">
+                        {% if form.sku.errors %}{{ form.sku.errors }}{% endif %}
                     </td>
                     <td>
-                        {{ form.name }}
-                        {{ form.name.errors }}
+                        <input type="text" name="{{ p }}-name" value="{{ form.name.value|default_if_none:'' }}" id="id_{{ p }}-name">
+                        {% if form.name.errors %}{{ form.name.errors }}{% endif %}
                         <div style="margin-top:6px; font-size:12px;">
                             <a href="{% url 'inventory_product_variants' form.product_id.value %}" style="color: var(--muted);">
                                 Variedades
@@ -253,12 +260,17 @@
                         </div>
                     </td>
                     <td>
-                        {{ form.group }}
-                        {{ form.group.errors }}
+                        <input type="text" name="{{ p }}-group" value="{{ form.group.value|default_if_none:'' }}" id="id_{{ p }}-group">
+                        {% if form.group.errors %}{{ form.group.errors }}{% endif %}
                     </td>
-                    <td>{{ form.supplier }}</td>
-                    <td>{{ form.vat_percent }}</td>
-                    <td>{{ form.avg_cost }}</td>
+                    <td>
+                        <select name="{{ p }}-supplier" id="id_{{ p }}-supplier" data-lazy-suppliers="1">
+                            <option value="">—</option>
+                            {% if form.supplier_value %}<option value="{{ form.supplier_value }}" selected>{{ form.supplier_label }}</option>{% endif %}
+                        </select>
+                    </td>
+                    <td><input type="number" name="{{ p }}-vat_percent" value="{{ form.vat_percent.value|default_if_none:'' }}" step="0.01" min="0.00" max="100.00" readonly tabindex="-1" title="El IVA se edita en Proveedores" id="id_{{ p }}-vat_percent"></td>
+                    <td><input type="number" name="{{ p }}-avg_cost" value="{{ form.avg_cost.value|default_if_none:'' }}" step="0.01" min="0.00" readonly tabindex="-1" title="El costo se edita en Proveedores" id="id_{{ p }}-avg_cost"></td>
                     <td>
                         <input type="text" class="cost-with-vat" readonly>
                     </td>
@@ -266,6 +278,7 @@
                         <button type="button" class="danger small" data-product-id="{{ form.product_id.value }}">Eliminar</button>
                     </td>
                 </tr>
+                {% endwith %}
                 {% empty %}
                 <tr><td colspan="8">Aún no hay productos cargados.</td></tr>
                 {% endfor %}
@@ -282,6 +295,7 @@
     <input type="hidden" name="action" value="delete_product">
     <input type="hidden" name="product_id" id="delete-product-id">
 </form>
+{{ supplier_options|json_script:"supplier-options" }}
 <script>
     (function() {
         const key = "productos_scroll";
@@ -300,6 +314,36 @@
                     history.replaceState(null, "", "#productos");
                 }
             });
+        });
+
+        // El select de proveedor de cada fila viene solo con el actual (ver
+        // ProductCostRowForm): las demás opciones se agregan recién al enfocarlo.
+        let supplierOptions = [];
+        try {
+            supplierOptions = JSON.parse(document.getElementById("supplier-options").textContent) || [];
+        } catch (err) {
+            supplierOptions = [];
+        }
+        const fillSupplierSelect = (select) => {
+            if (select.dataset.filled || !supplierOptions.length) return;
+            select.dataset.filled = "1";
+            const current = select.value;
+            select.innerHTML = "";
+            const blank = document.createElement("option");
+            blank.value = "";
+            blank.textContent = "—";
+            select.appendChild(blank);
+            supplierOptions.forEach((s) => {
+                const opt = document.createElement("option");
+                opt.value = String(s.id);
+                opt.textContent = s.name;
+                select.appendChild(opt);
+            });
+            select.value = current;
+        };
+        document.querySelectorAll("select[data-lazy-suppliers]").forEach((select) => {
+            select.addEventListener("focus", () => fillSupplierSelect(select), { once: true });
+            select.addEventListener("mousedown", () => fillSupplierSelect(select), { once: true });
         });
 
         const filterInput = document.getElementById("product-filter");

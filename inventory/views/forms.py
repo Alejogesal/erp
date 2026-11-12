@@ -357,6 +357,7 @@ class ProductCostRowForm(_CommaDecimalFormMixin, forms.Form):
     supplier = forms.ModelChoiceField(queryset=Supplier.objects.all(), required=False, label="Proveedor")
     # Costo e IVA salen del proveedor principal (se editan en Proveedores): acá
     # solo se muestran (solo lectura).
+
     avg_cost = forms.DecimalField(
         min_value=Decimal("0.00"), decimal_places=2, label="Costo", required=False,
         widget=forms.NumberInput(attrs={"readonly": True, "tabindex": "-1",
@@ -374,6 +375,23 @@ class ProductCostRowForm(_CommaDecimalFormMixin, forms.Form):
     margin_consumer = forms.DecimalField(required=False, decimal_places=2, label="Margen % consumidor final")
     margin_barber = forms.DecimalField(required=False, decimal_places=2, label="Margen % peluquerías/barberías")
     margin_distributor = forms.DecimalField(required=False, decimal_places=2, label="Margen % distribuidores")
+
+    def __init__(self, *args, supplier_names=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        # La pantalla dibuja las filas a mano (ver cost_list.html): con miles de
+        # productos, renderizar cada campo como widget de Django era lo que la
+        # hacía tardar. Acá solo se resuelve qué proveedor mostrar; el resto de
+        # las opciones del select las agrega el JS al enfocarlo. La validación
+        # sigue siendo contra la tabla (queryset), no contra las opciones.
+        value = self["supplier"].value()
+        self.supplier_value = "" if value in (None, "") else str(value)
+        try:
+            self.supplier_label = (supplier_names or {}).get(int(self.supplier_value), "")
+        except ValueError:
+            self.supplier_label = ""
+        self.fields["supplier"].choices = [("", "—")] + (
+            [(self.supplier_value, self.supplier_label)] if self.supplier_value else []
+        )
 
 
 class ProductBulkUpdateForm(_CommaDecimalFormMixin, forms.Form):

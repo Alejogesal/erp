@@ -56,4 +56,6 @@ class SupplierBulkActionsTests(TestCase):
     def test_page_renders_bulk_controls(self):
         html = self.client.get(reverse("inventory_suppliers")).content.decode()
         self.assertIn(f'id="bulk-form-{self.a.id}"', html)
-        self.assertIn(f'name="link_ids" value="{self.l1.id}" form="bulk-form-{self.a.id}"', html)
+        # Las filas llegan por AJAX al abrir el panel, apuntando al form de arriba.
+        rows = self.client.get(reverse("inventory_supplier_products_rows", args=[self.a.id])).json()["html"]
+        self.assertIn(f'name="link_ids" value="{self.l1.id}" form="bulk-form-{self.a.id}"', rows)

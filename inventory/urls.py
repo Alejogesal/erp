@@ -37,6 +37,7 @@ urlpatterns = [
     path("proveedores/marcas/", views.brand_suppliers_page, name="inventory_brand_suppliers"),
     path("proveedores/marca-info/", views.brand_supplier_info, name="inventory_brand_supplier_info"),
     path("proveedores/<int:supplier_id>/historial/", views.supplier_history_view, name="inventory_supplier_history"),
+    path("proveedores/<int:supplier_id>/productos/", views.supplier_products_rows, name="inventory_supplier_products_rows"),
     path("compras/registrar/", views.register_purchase, name="inventory_register_purchase"),
     path("compras/", views.purchases_list, name="inventory_purchases_list"),
     path("compras/<int:purchase_id>/editar/", views.purchase_edit, name="inventory_purchase_edit"),

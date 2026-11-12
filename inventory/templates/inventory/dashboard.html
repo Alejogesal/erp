@@ -148,7 +148,7 @@
 
     <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px; align-items:start;">
         <div class="card table-card">
-            <div class="card-title">Ranking por ganancia</div>
+            <div class="card-title">Ranking por ganancia <span style="font-weight:400; color:var(--muted); font-size:12px;">· top {{ ranking_limit }}</span></div>
             {% if ranking %}
             <table>
                 <thead>
@@ -180,7 +180,7 @@
             {% endif %}
         </div>
         <div class="card table-card">
-            <div class="card-title">Clientes más rentables (Depósito Común)</div>
+            <div class="card-title">Clientes más rentables (Depósito Común) <span style="font-weight:400; color:var(--muted); font-size:12px;">· top {{ ranking_limit }}</span></div>
             {% if customer_ranking %}
             <table>
                 <thead>

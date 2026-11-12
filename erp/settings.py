@@ -55,6 +55,9 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    # Varias pantallas (stock, márgenes, listas) generan HTML de varios MB:
+    # comprimido viaja ~10 veces más chico.
+    'django.middleware.gzip.GZipMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
