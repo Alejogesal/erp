@@ -206,6 +206,10 @@
                 <label for="id_price_file">Archivo .xlsx o .pdf (columnas: grupo opcional, nombre/descripción, precio neto e IVA opcional)</label>
                 <input id="id_price_file" type="file" name="price_file" accept=".xlsx,.pdf" required>
             </p>
+            <p class="subtitle" style="margin-top:0;">La lista nueva <strong>reemplaza</strong> a la anterior de ese proveedor: los productos que ya no vengan en el archivo se quitan de su lista (y se eliminan si no tienen otro proveedor, stock ni ventas/compras) y los nuevos se agregan.</p>
+            <p>
+                <label><input type="checkbox" name="price_keep_missing" value="1"> Es una lista parcial (por ejemplo una sola marca): no quitar los productos que no vengan en el archivo</label>
+            </p>
             <button type="submit">Importar lista</button>
         </form>
     </div>

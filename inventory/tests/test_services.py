@@ -67,6 +67,23 @@ class InventoryServiceTests(TestCase):
         stock_qty = self.product.stocks.get(warehouse=self.comun).quantity
         self.assertEqual(stock_qty, Decimal("3.00"))
 
+    def test_adjustment_never_touches_product_cost(self):
+        # Producto sobrevendido (stock negativo): un ajuste positivo que deja el
+        # stock total en cero o negativo pisaba el costo con $0.
+        self.product.avg_cost = Decimal("10.00")
+        self.product.save(update_fields=["avg_cost"])
+        services.register_adjustment(
+            self.product, self.comun, quantity=Decimal("-5"), user=self.user, allow_negative=True
+        )
+        services.register_adjustment(
+            self.product, self.mercado_libre, quantity=Decimal("2"), user=self.user, allow_negative=True
+        )
+        services.register_adjustment(
+            self.product, self.comun, quantity=Decimal("5"), user=self.user, allow_negative=True
+        )
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.avg_cost, Decimal("10.00"))
+
     def test_suggested_price_uses_margin(self):
         # El costo es manual: se carga directo en el producto, no vía compra.
         self.product.avg_cost = Decimal("10.00")

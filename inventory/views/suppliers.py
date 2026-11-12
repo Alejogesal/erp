@@ -252,6 +252,52 @@ def _parse_price_list_pdf(pdf_bytes):
     return rows, None
 
 
+def _product_is_in_use(product) -> bool:
+    """Si el producto tiene historia o existencia propia (ventas, compras, stock,
+    variedades, publicaciones de ML, kits) más allá de figurar en una lista."""
+    return (
+        product.sale_items.exists()
+        or product.purchase_items.exists()
+        or product.credit_note_items.exists()
+        or product.movements.exists()
+        or product.stocks.exclude(quantity=0).exists()
+        or product.variants.exists()
+        or product.ml_items.exists()
+        or product.used_in_kits.exists()
+        or product.kit_components.exists()
+    )
+
+
+def _drop_discontinued_links(links) -> tuple[int, int]:
+    """Quita de la lista de un proveedor los productos que dejó de traer.
+
+    El producto se elimina solo si no le queda otro proveedor ni está en uso; si
+    no, queda y su proveedor principal (y costo) pasa a salir de los que le quedan.
+    Devuelve (vínculos quitados, productos eliminados).
+    """
+    removed = deleted = 0
+    for link in links:
+        product = link.product
+        link.delete()
+        removed += 1
+        if SupplierProduct.objects.filter(product=product).exists():
+            sync_principal_to_cheapest(product)
+            continue
+        if not _product_is_in_use(product):
+            try:
+                with transaction.atomic():
+                    product.delete()
+                deleted += 1
+                continue
+            except ProtectedError:
+                pass
+        # Sin proveedor: conserva el último costo, pero ya no tiene principal.
+        if product.default_supplier_id is not None:
+            product.default_supplier = None
+            product.save(update_fields=["default_supplier"])
+    return removed, deleted
+
+
 @login_required
 @require_http_methods(["GET", "POST"])
 def suppliers(request):
@@ -407,10 +453,23 @@ def suppliers(request):
             # nuevo, aunque otro proveedor ya tenga uno con el mismo nombre: acá
             # no se decide todavía si son "el mismo producto" — esa decisión es
             # manual y pasa en Marcas disponibles (armado de la lista propia).
-            existing_by_key = {
-                _normalize_lookup_text(p.name): p
-                for p in Product.objects.filter(supplier_products__supplier=supplier)
-            }
+            # Se busca primero por el nombre tal cual lo escribió el proveedor
+            # en la lista anterior (supplier_name) y después por el del producto,
+            # para que renombrar un producto acá no lo haga pasar por "nuevo".
+            existing_by_key = {}
+            previous_links = list(
+                SupplierProduct.objects.filter(supplier=supplier).select_related("product")
+            )
+            for link in previous_links:
+                if link.supplier_name:
+                    existing_by_key.setdefault(_normalize_lookup_text(link.supplier_name), link.product)
+            for link in previous_links:
+                existing_by_key.setdefault(_normalize_lookup_text(link.product.name), link.product)
+            # La lista nueva REEMPLAZA a la anterior: lo que el proveedor ya no
+            # trae se da por discontinuado y sale de su lista. Solo se conserva
+            # si se avisa que el archivo es parcial (una marca sola, por ejemplo).
+            keep_missing = request.POST.get("price_keep_missing") == "1"
+            listed_product_ids = set()
             created_names = []
             new_links = updated_links = 0
             for group, name, net, row_vat in rows:
@@ -448,17 +507,33 @@ def suppliers(request):
                     new_links += 1
                 else:
                     updated_links += 1
+                listed_product_ids.add(product.id)
                 # El proveedor principal se reevalúa: si este es el más barato
                 # entre los vinculados, el costo del producto sale de acá.
                 sync_principal_to_cheapest(product)
-            messages.success(
-                request,
-                (
-                    f"Lista de precios de {supplier.name} importada: "
-                    f"{len(created_names)} producto(s) nuevo(s), "
-                    f"{new_links} vínculo(s) nuevo(s), {updated_links} actualizado(s)."
-                ),
+            removed_links = deleted_products = 0
+            if not keep_missing:
+                removed_links, deleted_products = _drop_discontinued_links(
+                    [link for link in previous_links if link.product_id not in listed_product_ids]
+                )
+            msg = (
+                f"Lista de precios de {supplier.name} importada: "
+                f"{len(created_names)} producto(s) nuevo(s), "
+                f"{new_links} vínculo(s) nuevo(s), {updated_links} actualizado(s)."
             )
+            if removed_links:
+                kept = removed_links - deleted_products
+                msg += (
+                    f" {removed_links} producto(s) que ya no vienen en la lista se quitaron de "
+                    f"{supplier.name}: {deleted_products} eliminado(s)"
+                )
+                if kept:
+                    msg += (
+                        f" y {kept} conservado(s) como producto por tener otro proveedor, "
+                        f"stock o ventas/compras"
+                    )
+                msg += "."
+            messages.success(request, msg)
             if created_names:
                 # Se muestran tras el redirect para revisar posibles duplicados.
                 request.session["price_import_created"] = created_names[:500]

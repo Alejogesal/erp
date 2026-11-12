@@ -117,3 +117,54 @@ class PriceListImportNoFuzzyMatchTests(TestCase):
         nombres = [r[2] for r in ws.iter_rows(min_row=2, values_only=True)]
         self.assertIn("Fidelite Coloracion 8 Rubio Oscuro", nombres)
         self.assertNotIn("Fidelite Coloracion 8 Rubio", nombres)
+
+
+class PriceListImportReplacesPreviousListTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(username="u", password="x")
+        self.client.force_login(self.user)
+        self.aris = Supplier.objects.create(name="Aris Norma")
+        self.st = Supplier.objects.create(name="ST Distribuidora")
+
+    def _import(self, supplier, rows, **extra):
+        return self.client.post(
+            reverse("inventory_suppliers"),
+            {
+                "action": "import_price_list",
+                "price_supplier_id": supplier.id,
+                "price_file": _xlsx_upload(rows),
+                "price_vat": "0",
+                **extra,
+            },
+        )
+
+    def test_new_list_drops_discontinued_and_adds_new(self):
+        self._import(self.aris, [["IGORA", "Igora Royal", 100], ["IGORA", "Igora Vibrance", 80]])
+        self._import(self.aris, [["IGORA", "Igora Royal", 120], ["IGORA", "Igora Zero", 90]])
+
+        names = set(
+            SupplierProduct.objects.filter(supplier=self.aris).values_list("product__name", flat=True)
+        )
+        self.assertEqual(names, {"Igora Royal", "Igora Zero"})
+        # El discontinuado no tenía otro proveedor ni movimientos: se elimina.
+        self.assertFalse(Product.objects.filter(name="Igora Vibrance").exists())
+        self.assertEqual(Product.objects.get(name="Igora Royal").avg_cost, Decimal("120.00"))
+
+    def test_discontinued_product_with_other_supplier_is_kept(self):
+        self._import(self.aris, [["IGORA", "Igora Royal", 100]])
+        product = Product.objects.get(name="Igora Royal")
+        SupplierProduct.objects.create(supplier=self.st, product=product, last_cost=Decimal("150.00"))
+
+        self._import(self.aris, [["IGORA", "Igora Zero", 90]])
+
+        product.refresh_from_db()
+        self.assertFalse(SupplierProduct.objects.filter(supplier=self.aris, product=product).exists())
+        # Pasa a salir del proveedor que le queda, con su costo.
+        self.assertEqual(product.default_supplier, self.st)
+        self.assertEqual(product.avg_cost, Decimal("150.00"))
+
+    def test_partial_list_keeps_missing_products(self):
+        self._import(self.aris, [["IGORA", "Igora Royal", 100], ["IGORA", "Igora Vibrance", 80]])
+        self._import(self.aris, [["IGORA", "Igora Royal", 120]], price_keep_missing="1")
+
+        self.assertEqual(SupplierProduct.objects.filter(supplier=self.aris).count(), 2)

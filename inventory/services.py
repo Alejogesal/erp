@@ -32,26 +32,6 @@ def _get_stock_for_update(product: Product, warehouse: Warehouse) -> Stock:
     return stock
 
 
-def _total_stock_quantity(product: Product) -> Decimal:
-    total = (
-        Stock.objects.select_for_update()
-        .filter(product=product)
-        .aggregate(total=Sum("quantity"))
-        .get("total")
-    )
-    return total if total is not None else Decimal("0.00")
-
-
-def _weighted_average(current_avg: Decimal, current_qty: Decimal, unit_cost: Decimal, quantity: Decimal) -> Decimal:
-    if quantity <= 0:
-        return current_avg or Decimal("0.00")
-    total_cost = (current_avg or Decimal("0.00")) * current_qty + unit_cost * quantity
-    new_total_qty = current_qty + quantity
-    if new_total_qty <= 0:
-        return Decimal("0.00")
-    return (total_cost / new_total_qty).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-
 def sync_product_cost_from_principal(product: Product) -> None:
     """Deja el costo del producto (avg_cost sin IVA + vat_percent) igual al de su
     proveedor principal. El costo se carga/edita siempre en Proveedores; acá se
@@ -307,12 +287,13 @@ def register_adjustment(
         raise InvalidMovementError("Adjustment quantity cannot be zero")
 
     if qty > 0:
+        # Un ajuste solo mueve stock: el costo del producto (avg_cost) no se
+        # toca. Antes se recalculaba como promedio ponderado contra el stock
+        # total, y cuando ese total quedaba en cero o negativo (producto
+        # sobrevendido) el costo se pisaba con $0 en cada ajuste — incluidos
+        # los automáticos del sync de MercadoLibre.
         cost = _to_decimal(unit_cost if unit_cost is not None else product.avg_cost)
         stock = _get_stock_for_update(product, warehouse)
-        current_total = _total_stock_quantity(product)
-        new_avg = _weighted_average(product.avg_cost, current_total, cost, qty)
-        product.avg_cost = new_avg
-        product.save(update_fields=["avg_cost"])
         stock.quantity = (stock.quantity + qty).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         stock.save(update_fields=["quantity"])
         movement_kwargs = {"to_warehouse": warehouse, "unit_cost": cost}
