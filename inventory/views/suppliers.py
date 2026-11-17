@@ -63,21 +63,118 @@ def _fmt_money(value) -> str:
     return s.replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def _decode_text(data: bytes) -> str:
+    for enc in ("utf-8-sig", "cp1252", "latin-1"):
+        try:
+            return data.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("latin-1", errors="replace")
+
+
+def _html_table_rows(text: str) -> list[tuple]:
+    """Filas de las tablas de un HTML (muchos sistemas exportan "Excel" así)."""
+    from html.parser import HTMLParser
+
+    class _TableParser(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.rows, self._row, self._cell = [], None, None
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "tr":
+                self._row = []
+            elif tag in ("td", "th") and self._row is not None:
+                self._cell = []
+            elif tag == "br" and self._cell is not None:
+                self._cell.append(" ")
+
+        def handle_data(self, data):
+            if self._cell is not None:
+                self._cell.append(data)
+
+        def _close_cell(self):
+            if self._cell is not None and self._row is not None:
+                self._row.append(" ".join("".join(self._cell).split()) or None)
+            self._cell = None
+
+        def handle_endtag(self, tag):
+            if tag in ("td", "th"):
+                self._close_cell()
+            elif tag == "tr" and self._row is not None:
+                self._close_cell()
+                if any(c for c in self._row):
+                    self.rows.append(tuple(self._row))
+                self._row = None
+
+    parser = _TableParser()
+    parser.feed(text)
+    parser.close()
+    return parser.rows
+
+
+def _csv_rows(text: str) -> list[tuple]:
+    import csv
+
+    lines = text.splitlines()
+    sample = "\n".join(lines[:20])
+    try:
+        delimiter = csv.Sniffer().sniff(sample, delimiters=";,\t|").delimiter
+    except csv.Error:
+        delimiter = ";" if sample.count(";") > sample.count(",") else ","
+    return [
+        tuple(c.strip() or None for c in row)
+        for row in csv.reader(lines, delimiter=delimiter)
+        if any(c.strip() for c in row)
+    ]
+
+
+def _read_spreadsheet_rows(file_obj) -> list[tuple]:
+    """Lee las filas de una planilla detectando el formato REAL por el contenido.
+
+    Los proveedores mandan .xlsx, .xls viejos (o .xls renombrados a .xlsx),
+    HTML o CSV con extensión de Excel; la extensión no es confiable.
+    """
+    data = file_obj.read()
+    if not data:
+        return []
+    if data[:4] == b"PK\x03\x04":  # xlsx (zip)
+        import io
+
+        import openpyxl
+
+        wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True, read_only=True)
+        return list(wb.active.iter_rows(values_only=True))
+    if data[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":  # xls (Excel 97-2003)
+        import xlrd
+
+        book = xlrd.open_workbook(file_contents=data)
+        sheet = book.sheet_by_index(0)
+        return [tuple(sheet.row_values(i)) for i in range(sheet.nrows)]
+    text = _decode_text(data)
+    head = text.lstrip()[:2000].lower()
+    if head.startswith("<") and ("<table" in text.lower()):
+        return _html_table_rows(text)
+    if head.startswith("<?xml") or head.startswith("<"):
+        raise ValueError(
+            "el archivo es XML/HTML sin tablas reconocibles. Abrilo en Excel y "
+            "guardalo como .xlsx."
+        )
+    return _csv_rows(text)
+
+
 def _parse_price_list_xlsx(file_obj):
-    """Parsea un xlsx de lista de precios.
+    """Parsea una planilla de lista de precios (.xlsx, .xls, HTML o CSV).
 
     Columnas: (grupo opcional) + nombre/descripción + precio (neto) + IVA % opcional.
     Devuelve (rows, error) donde rows = [(grupo, nombre, precio_neto, iva_or_None)].
     Detecta encabezados por palabras clave; si no, asume col0=nombre, col1=precio.
     """
     try:
-        import openpyxl
-        wb = openpyxl.load_workbook(file_obj, data_only=True)
-        ws = wb.active
+        all_rows = _read_spreadsheet_rows(file_obj)
     except Exception as exc:
         return [], f"No se pudo leer el archivo: {exc}"
 
-    all_rows = list(ws.iter_rows(values_only=True))
     if not all_rows:
         return [], "El archivo está vacío."
 
@@ -436,7 +533,7 @@ def suppliers(request):
                 messages.error(request, "Elegí un proveedor para la lista de precios.")
                 return redirect("inventory_suppliers")
             if not upload:
-                messages.error(request, "Subí un archivo .xlsx o .pdf con la lista de precios.")
+                messages.error(request, "Subí un archivo .xlsx, .xls, .csv o .pdf con la lista de precios.")
                 return redirect("inventory_suppliers")
             if (upload.name or "").lower().endswith(".pdf"):
                 rows, parse_error = _parse_price_list_pdf(upload.read())
